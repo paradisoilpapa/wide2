@@ -106,6 +106,22 @@ if st.button("期待値計算"):
         st.subheader("▼ 計算結果（期待値表）")
         st.dataframe(df_result)
 
+        # --- シンボル別：対応車番と平均期待値 ---
+        st.subheader("▼ シンボル別：対応車番と平均期待値")
+        symbol_ev_summary = []
+        for sym in symbol_scores.keys():
+            car_num_str = symbols_input[sym].strip()
+            if car_num_str and car_num_str.isdigit():
+                car_num = int(car_num_str)
+                avg_ev = ev_by_number.get(car_num, 0.0)
+                symbol_ev_summary.append((sym, car_num, avg_ev))
+
+        if symbol_ev_summary:
+            df_symbol_ev = pd.DataFrame(symbol_ev_summary, columns=["記号", "車番", "平均期待値"])
+            st.dataframe(df_symbol_ev)
+        else:
+            st.markdown("- 該当なし")
+
         # --- ワイド候補出力 ---
         st.subheader("▼ ワイド候補（期待値補完）")
         wide_pairs = []
@@ -116,6 +132,8 @@ if st.button("期待値計算"):
             wide_candidate_sorted = sorted(wide_candidate, key=lambda x: abs(1.0 - x[1]))
             wide_base = wide_candidate_sorted[0][0]
             for num, ev2 in over1:
+                if num == wide_base:
+                    continue
                 avg = (ev_by_number[wide_base] + ev2) / 2
                 if avg >= 1.0:
                     wide_pairs.append((wide_base, num, round(avg, 3)))
