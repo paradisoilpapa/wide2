@@ -4,7 +4,7 @@ from itertools import combinations
 
 st.set_page_config(page_title="7車版期待値計算", layout="wide")
 
-st.title("⭐ 7車版期待値計算アプリ（オッズ個別入力・消えない版）⭐")
+st.title("⭐ 2車複＆ワイド7車版期待値計算アプリ⭐")
 
 # --- シンボルスコア定義 ---
 symbol_scores = {
@@ -105,6 +105,10 @@ if st.button("期待値計算"):
         df_result = pd.DataFrame(final_results, columns=["車番", "記号", "勝率", "オッズ", "期待値", "評価"])
         st.subheader("▼ 計算結果（期待値表）")
         st.dataframe(df_result)
+
+        st.subheader("▼ 各印別 平均期待値")
+        for sym in anchor_symbols:
+            st.markdown(f"- {sym}：{round(anchor_avg_ev[sym], 3)}")
 
         # --- ワイド候補出力 ---
         st.subheader("▼ ワイド候補（期待値補完）")
