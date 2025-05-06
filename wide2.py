@@ -70,6 +70,8 @@ if st.button("期待値計算"):
 
         results = []
         ev_map_by_number = {}
+        symbol_ev_map = {sym: [] for sym in symbol_scores}
+        symbol_combos = {sym: [] for sym in symbol_scores}
 
         for (a, b), pair in odds_target:
             odds = odds_inputs.get(pair)
@@ -86,6 +88,11 @@ if st.button("期待値計算"):
                 anchor_ev_totals[b] += ev
                 anchor_ev_counts[b] += 1
             results.append((pair, f"{a}{b}", round(win_rate,5), odds, round(ev,5), ""))
+            for sym in [a, b]:
+                if sym != "無":
+                    symbol_ev_map[sym].append((ev, number_map.get(sym, '?')))
+                    if ev >= 1.0:
+                        symbol_combos[sym].append((pair, f"{a}{b}", ev, False))
 
             for num in [int(number_map.get(a, 0)), int(number_map.get(b, 0))]:
                 if num not in ev_map_by_number:
@@ -103,8 +110,17 @@ if st.button("期待値計算"):
             final_results.append((pair, marks, win_rate, odds, ev, "※" if is_anchor else "□ ケン"))
 
         df_result = pd.DataFrame(final_results, columns=["車番", "記号", "勝率", "オッズ", "期待値", "評価"])
-        st.subheader("▼ 計算結果（期待値表）")
+        st.subheader("▼ 計算結果（2車複期待値表）")
         st.dataframe(df_result)
+
+        st.subheader("▼ シンボル別：期待値1.0以上の買い目")
+        for sym, combos in symbol_combos.items():
+            if combos:
+                anchor_mark = "※" if sym == anchor_symbol else ""
+                st.markdown(f"**■ {sym}{anchor_mark}**")
+                for pair, marks, ev, _ in sorted(combos, key=lambda x: -x[2]):
+                    star = "※" if anchor_symbol in marks and ev >= 1.0 else ""
+                    st.markdown(f"- {pair}（{marks}）: 期待値={ev:.2f}{star}")
 
         # --- シンボル別：対応車番と平均期待値 ---
         st.subheader("▼ シンボル別：対応車番と平均期待値")
@@ -148,4 +164,3 @@ if st.button("期待値計算"):
         for sym, score in symbol_scores.items():
             min_odds = round(25 / score, 2)
             st.markdown(f"- 無×{sym}：{min_odds}倍以上")
-
