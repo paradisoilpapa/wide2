@@ -121,6 +121,15 @@ if st.button("期待値計算"):
         df_summary = pd.DataFrame(symbol_summary, columns=["シンボル", "対応車番", "該当件数", "平均期待値", "評価"])
         st.dataframe(df_summary)
 
+        st.subheader("▼ シンボル別：期待値1.0以上の買い目")
+        for sym, combos in symbol_combos.items():
+            if combos:
+                anchor_mark = "※" if sym == anchor_symbol else ""
+                st.markdown(f"**■ {sym}{anchor_mark}**")
+                for pair, marks, ev, _ in sorted(combos, key=lambda x: -x[2]):
+                    star = "※" if anchor_symbol in marks and ev >= 1.0 else ""
+                    st.markdown(f"- {pair}（{marks}）: 期待値={ev:.2f}{star}")
+
         st.subheader("▼ ワイド候補：期待値補完（記号表示）")
         ev_by_number = {num: round(sum(vals)/len(vals), 3) for num, vals in ev_map_by_number.items()}
         wide_candidate = [(k, v) for k, v in ev_by_number.items() if 0.7 <= v < 1.3]
@@ -150,3 +159,4 @@ if st.button("期待値計算"):
         for sym, score in symbol_scores.items():
             min_odds = round(25 / score, 2)
             st.markdown(f"- 無×{sym}：{min_odds}倍以上")
+
