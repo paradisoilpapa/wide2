@@ -93,7 +93,6 @@ if st.button("期待値計算"):
                     symbol_ev_map[sym].append((ev, number_map.get(sym, '?')))
                     if ev >= 1.0:
                         symbol_combos[sym].append((pair, f"{a}{b}", ev, False))
-
             for num in [int(number_map.get(a, 0)), int(number_map.get(b, 0))]:
                 if num not in ev_map_by_number:
                     ev_map_by_number[num] = []
@@ -122,41 +121,28 @@ if st.button("期待値計算"):
                     star = "※" if anchor_symbol in marks and ev >= 1.0 else ""
                     st.markdown(f"- {pair}（{marks}）: 期待値={ev:.2f}{star}")
 
-        # --- シンボル別：対応車番と平均期待値 ---
-        st.subheader("▼ シンボル別：対応車番と平均期待値")
-        symbol_ev_summary = []
-        for sym in symbol_scores.keys():
-            car_num_str = symbols_input[sym].strip()
-            if car_num_str and car_num_str.isdigit():
-                car_num = int(car_num_str)
-                avg_ev = ev_by_number.get(car_num, 0.0)
-                symbol_ev_summary.append((sym, car_num, avg_ev))
-
-        if symbol_ev_summary:
-            df_symbol_ev = pd.DataFrame(symbol_ev_summary, columns=["記号", "車番", "平均期待値"])
-            st.dataframe(df_symbol_ev)
-        else:
-            st.markdown("- 該当なし")
-
-        # --- ワイド候補出力 ---
-        st.subheader("▼ ワイド候補（期待値補完）")
-        wide_pairs = []
+        st.subheader("▼ ワイド候補：期待値補完（記号表示）")
         wide_candidate = [(k, v) for k, v in ev_by_number.items() if 0.7 <= v < 1.3]
         over1 = [(k, v) for k, v in ev_by_number.items() if v >= 1.0]
+        wide_symbol_map = {v: k for k, v in number_map.items()}
 
         if wide_candidate and over1:
             wide_candidate_sorted = sorted(wide_candidate, key=lambda x: abs(1.0 - x[1]))
             wide_base = wide_candidate_sorted[0][0]
+            wide_results = []
             for num, ev2 in over1:
                 if num == wide_base:
                     continue
                 avg = (ev_by_number[wide_base] + ev2) / 2
                 if avg >= 1.0:
-                    wide_pairs.append((wide_base, num, round(avg, 3)))
-
-        if wide_pairs:
-            df_wide = pd.DataFrame(wide_pairs, columns=["ワイド軸", "相手軸", "平均期待値"])
-            st.dataframe(df_wide)
+                    s1 = wide_symbol_map.get(str(wide_base), "")
+                    s2 = wide_symbol_map.get(str(num), "")
+                    wide_results.append((f"{wide_base}-{num}", f"{s1}{s2}", round(avg,3), "★"))
+            if wide_results:
+                df_wide = pd.DataFrame(wide_results, columns=["車番", "記号", "平均期待値", "評価"])
+                st.dataframe(df_wide)
+            else:
+                st.markdown("- 該当なし")
         else:
             st.markdown("- 該当なし")
 
