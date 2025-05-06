@@ -148,3 +148,4 @@ if st.button("期待値計算"):
         for sym, score in symbol_scores.items():
             min_odds = round(25 / score, 2)
             st.markdown(f"- 無×{sym}：{min_odds}倍以上")
+
