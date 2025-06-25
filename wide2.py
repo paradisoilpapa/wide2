@@ -1,83 +1,74 @@
 import streamlit as st
+import itertools
 import pandas as pd
-from itertools import combinations
 
-st.set_page_config(page_title="三連複・二車複評価ツール", layout="wide")
-st.title("🎯 買い目評価アプリ（7車立て対応）")
+st.title("三連複・二車複 買い目評価ツール（7車立て対応）")
 
-st.markdown("---")
+# --- 入力 ---
+anchor = st.text_input("◎（本命）", placeholder="例：5")
+himos = st.text_input("ヒモ（最大4車）", placeholder="例：1 2 3 4")
 
-# --- 入力欄 ---
-st.markdown("### ◎ 本命とヒモを入力")
-anchor = st.text_input("◎（本命、例：5）", max_chars=1)
-sub = st.text_input("ヒモ（例：1234）", max_chars=7)
+if anchor and himos:
+    try:
+        anchor = anchor.strip()
+        himo_list = himos.strip().split()
 
-# --- ランク入力 ---
-st.markdown("### 🎯 ランク入力（対応する買い目順に S/A/B など）")
-rank_input = st.text_input("ランク入力（例：SABABB）")
+        if anchor in himo_list:
+            himo_list.remove(anchor)  # 重複回避
 
-# --- オッズ入力 ---
-st.markdown("### 💰 オッズ入力（対応する買い目順に半角スペース区切り）")
-odds_input = st.text_input("オッズ入力（例：12.5 5.3 7.8 22.1 3.2 6.6）")
+        # --- 三連複 買い目の生成 ---
+        sanren_pats = list(itertools.combinations(himo_list, 2))
+        sanren_kaime = [sorted([anchor, p1, p2]) for p1, p2 in sanren_pats]
+        sanren_kaime = ["".join(k) for k in sanren_kaime]
 
-# --- データ整形 ---
-def sanitize(text):
-    return [s for s in text.replace(" ", "").strip() if s.isdigit()]
+        # --- 二車複 買い目の生成 ---
+        nisha_kaime = ["".join(sorted([anchor, h])) for h in himo_list]
 
-def make_trios(anchor, subs):
-    return list(combinations(sorted([int(anchor)] + subs), 3))
+        # --- 表示 ---
+        st.markdown("### ✅ 三連複：買い目とオッズ入力")
+        sanren_odds_inputs = []
+        for k in sanren_kaime:
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.markdown(f"**{k}**")
+            with col2:
+                odd = st.number_input(f"三連複オッズ: {k}", key=f"sanren_{k}", min_value=1.0, step=0.1)
+                sanren_odds_inputs.append((k, odd))
 
-# --- 買い目構成 ---
-buy_list = []
-sub_digits = sanitize(sub)
-if anchor and sub_digits and len(sub_digits) >= 2:
-    subs = list(set(sub_digits))
-    if anchor in subs:
-        subs.remove(anchor)
-    base_combis = make_trios(anchor, subs)
-    buy_list = ["-".join(map(str, sorted(x))) for x in base_combis if str(anchor) in map(str, x)]
+        valid_odds = [1/o for _, o in sanren_odds_inputs if o > 0]
+        if valid_odds:
+            inv_sum = sum(valid_odds)
+            synth_odds = round(1 / inv_sum, 2)
+            st.markdown(f"### 📊 三連複 合成オッズ：**{synth_odds}倍**")
 
-# --- 表の作成 ---
-odds = odds_input.strip().split()
-ranks = list(rank_input.strip().upper())
+            if synth_odds >= 3.0:
+                st.success("三連複：購入基準クリア（合成3倍以上）")
+            else:
+                st.warning("三連複：購入見送り（合成オッズ3倍未満）")
 
-data = []
-for i, b in enumerate(buy_list):
-    odd = float(odds[i]) if i < len(odds) else None
-    rank = ranks[i] if i < len(ranks) else ""
-    data.append({"買い目": b, "オッズ": odd, "ランク": rank})
+        st.markdown("---")
+        st.markdown("### ✅ 二車複：買い目とオッズ入力")
+        nisha_odds_inputs = []
+        for k in nisha_kaime:
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.markdown(f"**{k}**")
+            with col2:
+                odd = st.number_input(f"二車複オッズ: {k}", key=f"nisha_{k}", min_value=1.0, step=0.1)
+                nisha_odds_inputs.append((k, odd))
 
-df = pd.DataFrame(data)
+        valid_odds2 = [1/o for _, o in nisha_odds_inputs if o > 0]
+        if valid_odds2:
+            inv_sum2 = sum(valid_odds2)
+            synth_odds2 = round(1 / inv_sum2, 2)
+            st.markdown(f"### 📊 二車複 合成オッズ：**{synth_odds2}倍**")
 
-# --- トリガミ削除処理 ---
-gami_removed = df[df["オッズ"] >= 3.0].copy()
-total_odd = 1 / (1 / gami_removed["オッズ"]).sum() if not gami_removed.empty else 0
+            if synth_odds2 >= 1.5:
+                st.success("二車複：購入基準クリア（合成1.5倍以上）")
+            else:
+                st.warning("二車複：購入見送り（合成オッズ1.5倍未満）")
 
-# --- 表示 ---
-st.markdown("### 📝 買い目とオッズ一覧")
-st.dataframe(df, use_container_width=True)
-
-st.markdown("### 🔍 トリガミ削除後の評価")
-if gami_removed.empty:
-    st.error("3.0未満の買い目しか存在しないため、見送り対象です。")
-elif len(gami_removed) < 4:
-    st.warning("削除後、構成が3点以下のため見送り対象です。")
+    except Exception as e:
+        st.error(f"エラーが発生しました: {e}")
 else:
-    st.success(f"削除後の合成オッズ：{total_odd:.2f} 倍")
-
-# --- Bランクで低オッズの削除候補表示 ---
-st.markdown("### ⚠️ Bランク削除候補（オッズ5.0未満）")
-b_candidates = df[(df["ランク"] == "B") & (df["オッズ"] < 5.0)]
-if not b_candidates.empty:
-    st.dataframe(b_candidates, use_container_width=True)
-else:
-    st.info("削除候補なし（Bランクかつ5倍未満は存在しません）")
-
-# --- Sランク厚張り対象 ---
-st.markdown("### 💸 Sランク厚張り対象")
-s_targets = df[df["ランク"] == "S"]
-if not s_targets.empty:
-    min_row = s_targets.sort_values("オッズ").iloc[0]
-    st.write(f"対象：{min_row['買い目']}（{min_row['オッズ']}倍）")
-else:
-    st.info("Sランクが存在しません")
+    st.info("◎とヒモを入力してください。例：◎=5, ヒモ=1 2 3 4")
