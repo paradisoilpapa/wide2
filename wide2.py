@@ -16,6 +16,11 @@ if anchor and himos:
         if anchor in himo_list:
             himo_list.remove(anchor)  # 重複回避
 
+        # --- 入力確認の表示 ---
+        st.markdown(f"### 🎯 入力内容")
+        st.markdown(f"◎ 本命：**{anchor}**")
+        st.markdown(f"ヒモ候補：**{' '.join(himo_list)}**")
+
         # --- 三連複 買い目の生成 ---
         sanren_pats = list(itertools.combinations(himo_list, 2))
         sanren_kaime = ["".join(sorted([anchor, p1, p2])) for p1, p2 in sanren_pats]
