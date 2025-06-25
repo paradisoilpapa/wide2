@@ -36,26 +36,26 @@ if anchor and himos:
                 odd = st.number_input("三連複オッズ", key=f"sanren_{k}", min_value=0.0, step=0.1)
             sanren_data.append((k, odd))
 
+        # --- 有効オッズと3倍未満の即ケンチェック ---
         valid_sanren_data = [(k, o) for k, o in sanren_data if o > 0]
-
         low_odds = [(k, o) for k, o in valid_sanren_data if o < 3.0]
         if low_odds:
             st.error("🚫 見送り：3倍未満の買い目が含まれているため購入不可")
         else:
-            inv_sum = sum([1/o for _, o in valid_sanren_data])
-            synth_odds = round(1 / inv_sum, 2)
+            inv_sum = sum([1 / o for _, o in valid_sanren_data])
+            synth_odds = round(1 / inv_sum, 2) if inv_sum != 0 else 0.0
             st.markdown(f"### 📊 三連複 合成オッズ：**{synth_odds}倍**")
 
             if synth_odds >= 3.0:
                 st.success("✅ 購入可：6点構成で合成オッズ3倍以上クリア")
-                st.markdown("💰 推奨：三連複各100円＋Sランクに追加張り")
             else:
+                # --- 削減処理：30倍以上の高オッズから削除 ---
                 sorted_candidates = sorted(valid_sanren_data, key=lambda x: (-1 if x[1] >= 30.0 else 0, x[1]))
                 reduced = sorted_candidates.copy()
                 removed = []
                 while len(reduced) >= 4:
-                    inv_sum_new = sum([1/o for _, o in reduced])
-                    synth_new = round(1 / inv_sum_new, 2)
+                    inv_sum_new = sum([1 / o for _, o in reduced])
+                    synth_new = round(1 / inv_sum_new, 2) if inv_sum_new != 0 else 0.0
                     if synth_new >= 3.0:
                         st.warning(f"💡 削減後 合成オッズ：{synth_new}倍 → {len(reduced)}点で購入可")
                         st.markdown(f"除外買い目：{', '.join([k for k, _ in removed])}")
@@ -64,6 +64,7 @@ if anchor and himos:
                 else:
                     st.error("🚫 見送り：削減しても4点未満 or 合成3倍未満")
 
+        # --- 二車複 買い目の生成 ---
         st.markdown("---")
         st.markdown("### ✅ 二車複：買い目とオッズ入力")
         nisha_kaime = ["".join(sorted([anchor, h])) for h in himo_list]
@@ -80,17 +81,13 @@ if anchor and himos:
         if len(valid_nisha_data) > 4:
             valid_nisha_data = sorted(valid_nisha_data, key=lambda x: -x[1])[:4]
 
-        valid_odds2 = [1/o for _, o in valid_nisha_data]
+        valid_odds2 = [1 / o for _, o in valid_nisha_data]
         if valid_odds2:
             inv_sum2 = sum(valid_odds2)
-            synth_odds2 = round(1 / inv_sum2, 2)
+            synth_odds2 = round(1 / inv_sum2, 2) if inv_sum2 != 0 else 0.0
             st.markdown(f"### 📊 二車複 合成オッズ：**{synth_odds2}倍**")
             if synth_odds2 >= 1.5:
                 st.success("✅ 二車複：購入基準クリア（合成1.5倍以上、最大4点）")
-                if len(valid_nisha_data) <= 2:
-                    st.markdown("💰 推奨：1〜2点 → 各200〜400円張り")
-                else:
-                    st.markdown("💰 推奨：各100円（計400円以内）")
             else:
                 st.error("🚫 二車複：合成オッズ1.5倍未満 → 見送り")
         else:
@@ -100,4 +97,3 @@ if anchor and himos:
         st.error(f"エラーが発生しました: {e}")
 else:
     st.info("◎とヒモを入力してください。例：◎=5, ヒモ=1 2 3 4")
-
