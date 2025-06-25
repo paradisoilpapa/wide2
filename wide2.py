@@ -106,7 +106,7 @@ if anchor_input and himos_input:
             st.markdown(f"### 📊 二車複 合成オッズ：**{synth_odds2}倍**")
 
             if synth_odds2 >= 1.5:
-                st.success("✅ 二車複：購入基準クリア（合成1.5倍以上、最大4点）")
+                st.success("✅ 二車複：1.4倍以下切り捨てで購入基準クリア（合成1.5倍以上、最大4点）")
             else:
                 st.error("🚫 二車複：合成オッズ1.5倍未満 → 見送り")
 
