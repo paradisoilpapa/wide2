@@ -18,51 +18,41 @@ if anchor and himos:
 
         # --- 三連複 買い目の生成 ---
         sanren_pats = list(itertools.combinations(himo_list, 2))
-        sanren_kaime = [sorted([anchor, p1, p2]) for p1, p2 in sanren_pats]
-        sanren_kaime = ["".join(k) for k in sanren_kaime]
+        sanren_kaime = ["".join(sorted([anchor, p1, p2])) for p1, p2 in sanren_pats]
 
         # --- 二車複 買い目の生成 ---
         nisha_kaime = ["".join(sorted([anchor, h])) for h in himo_list]
 
-        # --- 表示 ---
+        # --- 三連複 表示 ---
         st.markdown("### ✅ 三連複：買い目とオッズ入力")
-        sanren_odds_inputs = []
+        sanren_data = []
         for k in sanren_kaime:
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.markdown(f"**{k}**")
-            with col2:
-                odd = st.number_input(f"三連複オッズ: {k}", key=f"sanren_{k}", min_value=1.0, step=0.1)
-                sanren_odds_inputs.append((k, odd))
+            odd = st.number_input(f"三連複オッズ: {k}", key=f"sanren_{k}", min_value=1.0, step=0.1)
+            sanren_data.append((k, odd))
 
-        valid_odds = [1/o for _, o in sanren_odds_inputs if o > 0]
+        valid_odds = [1/o for _, o in sanren_data if o > 0]
         if valid_odds:
             inv_sum = sum(valid_odds)
             synth_odds = round(1 / inv_sum, 2)
             st.markdown(f"### 📊 三連複 合成オッズ：**{synth_odds}倍**")
-
             if synth_odds >= 3.0:
                 st.success("三連複：購入基準クリア（合成3倍以上）")
             else:
                 st.warning("三連複：購入見送り（合成オッズ3倍未満）")
 
+        # --- 二車複 表示 ---
         st.markdown("---")
         st.markdown("### ✅ 二車複：買い目とオッズ入力")
-        nisha_odds_inputs = []
+        nisha_data = []
         for k in nisha_kaime:
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                st.markdown(f"**{k}**")
-            with col2:
-                odd = st.number_input(f"二車複オッズ: {k}", key=f"nisha_{k}", min_value=1.0, step=0.1)
-                nisha_odds_inputs.append((k, odd))
+            odd = st.number_input(f"二車複オッズ: {k}", key=f"nisha_{k}", min_value=1.0, step=0.1)
+            nisha_data.append((k, odd))
 
-        valid_odds2 = [1/o for _, o in nisha_odds_inputs if o > 0]
+        valid_odds2 = [1/o for _, o in nisha_data if o > 0]
         if valid_odds2:
             inv_sum2 = sum(valid_odds2)
             synth_odds2 = round(1 / inv_sum2, 2)
             st.markdown(f"### 📊 二車複 合成オッズ：**{synth_odds2}倍**")
-
             if synth_odds2 >= 1.5:
                 st.success("二車複：購入基準クリア（合成1.5倍以上）")
             else:
