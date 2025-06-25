@@ -1,93 +1,89 @@
 import streamlit as st
+import re
+from itertools import combinations
 
-st.set_page_config(page_title="三連複・二車複判断アプリ", layout="centered")
+st.set_page_config(page_title="三連複・二車複判定アプリ", layout="centered")
+st.title("🎯 三連複・二車複 判定アプリ（7車立て専用）")
 
-st.title("🎯 三連複・二車複 購入判断アプリ（7車立て専用）")
+# --- 入力欄 ---
+st.subheader("◎本命とヒモを入力")
+anchor = st.text_input("◎（本命1車）", "5")
+himo = st.text_input("ヒモ（例：1234 または 1 2 3 4）", "1 2 3 4")
 
-st.subheader("① 三連複 買い目入力")
+odds_input = st.text_area("三連複オッズ入力（6点）", "5.2\n4.0\n6.1\n7.8\n3.3\n9.6")
+odds_lines = [float(line) for line in odds_input.strip().replace(" ", "\n").split("\n") if line.strip()]
 
-triplet_combos = []
-triplet_odds = []
-triplet_confidences = []
+rank_input = st.text_input("ランク入力（例：SABBBB）", "SABBBB")
 
-for i in range(6):
-    col1, col2, col3 = st.columns([3, 2, 2])
-    with col1:
-        combo = st.text_input(f"買い目{i+1}（例：1-2-3）", key=f"tri_combo_{i}")
-    with col2:
-        odds = st.number_input("オッズ", min_value=0.0, value=10.0, step=0.1, key=f"tri_odds_{i}")
-    with col3:
-        conf = st.selectbox("自信度", ["-", "S", "A", "B"], key=f"tri_conf_{i}")
-    if combo and odds > 0 and conf != "-":
-        triplet_combos.append(combo)
-        triplet_odds.append(odds)
-        triplet_confidences.append(conf)
+# --- 二車複欄（任意） ---
+st.subheader("二車複オプション（任意）")
+ni_odds_input = st.text_area("2車複オッズ（最大4点）", "2.1\n1.6\n1.9\n2.3")
+ni_odds = [float(line) for line in ni_odds_input.strip().replace(" ", "\n").split("\n") if line.strip()]
 
-st.subheader("② 二車複（補助） 買い目入力")
+# --- 正規化＆買い目作成 ---
+def normalize_nums(txt):
+    return re.findall(r"\d", txt)
 
-pair_combos = []
-pair_odds = []
+anchor = anchor.strip()
+himos = normalize_nums(himo)
 
-for i in range(4):
-    col1, col2 = st.columns([3, 2])
-    with col1:
-        combo = st.text_input(f"買い目{i+1}（例：1-2）", key=f"pair_combo_{i}")
-    with col2:
-        odds = st.number_input("オッズ", min_value=0.0, value=3.0, step=0.1, key=f"pair_odds_{i}")
-    if combo and odds > 0:
-        pair_combos.append(combo)
-        pair_odds.append(odds)
+sanrenpuku = [tuple(sorted([int(anchor), int(a), int(b)])) for a, b in combinations(himos, 2)]
+
+if len(sanrenpuku) != len(odds_lines):
+    st.error(f"⚠️ 買い目数 {len(sanrenpuku)} に対してオッズ数 {len(odds_lines)} が一致しません")
+    st.stop()
 
 # --- 判定ロジック ---
-def evaluate_combos(odds_list, confidences, combos):
-    if any(o < 3.0 for o in odds_list):
-        return "❌ 3連複に3倍未満のオッズが含まれています → ケン（見送り）", [], []
+def combined_odds(odds_list):
+    return round(1 / sum([1/o for o in odds_list]), 2)
 
-    inv_sum = sum(1 / o for o in odds_list)
-    combined_odds = round(1 / inv_sum, 2) if inv_sum > 0 else 0
+# --- 三連複 合成オッズチェック ---
+valid_indices = [i for i, odd in enumerate(odds_lines) if odd >= 3.0]
+valid_ranks = [rank_input[i] for i in valid_indices]
 
-    if combined_odds < 3.0:
-        to_cut = [(combos[i], odds_list[i]) for i in range(len(confidences)) if confidences[i] == "B"]
-        remaining = [(combos[i], odds_list[i], confidences[i]) for i in range(len(confidences)) if confidences[i] != "B"]
-        return f"⚠ 合成オッズが3倍未満です（{combined_odds}倍） → Bランクから削減候補を検討", to_cut, remaining
+reduced_odds = [odds_lines[i] for i in valid_indices]
+reduced_baimoku = [sanrenpuku[i] for i in valid_indices]
 
-    return f"✅ 合成オッズ：{combined_odds}倍 → 購入OK", [], []
+# --- 合成計算（削減後 or フル） ---
+base_odds = odds_lines if combined_odds(odds_lines) >= 3.0 else reduced_odds
+base_set = sanrenpuku if combined_odds(odds_lines) >= 3.0 else reduced_baimoku
 
-def evaluate_pairs(odds_list):
-    valid_odds = [o for o in odds_list if o >= 1.5]
-    if not valid_odds:
-        return "❌ ガミ回避できる二車複がありません → 見送り"
-    inv_sum = sum(1 / o for o in valid_odds)
-    combined_odds = round(1 / inv_sum, 2) if inv_sum > 0 else 0
-    if combined_odds < 1.5:
-        return f"❌ 合成オッズが1.5倍未満です（{combined_odds}倍） → 見送り"
-    return f"✅ 二車複 合成オッズ：{combined_odds}倍 → 購入OK"
+final_odds = combined_odds(base_odds)
 
-def recommend_thick_bet(confidences, odds_list, combos):
-    s_candidates = [(combos[i], odds_list[i]) for i in range(len(confidences)) if confidences[i] == "S"]
-    if not s_candidates:
-        return "厚張り対象：なし（Sランクが存在しないか未入力）"
-    s_candidates.sort(key=lambda x: x[1])
-    return f"厚張り対象：{s_candidates[0][0]}（オッズ {s_candidates[0][1]}倍）"
+# --- 表示 ---
+st.subheader("三連複 結果")
+st.markdown(f"**合成オッズ：{final_odds}倍（{len(base_set)}点）**")
 
-# --- 出力 ---
-st.subheader("③ 判定結果")
+if final_odds >= 3.0 and len(base_set) >= 4:
+    st.success("✅ 購入OK")
+    for i, (o, b) in enumerate(zip(base_odds, base_set)):
+        st.write(f"{b}：{o}倍")
+        
+    # Sランク抽出（補足）
+    s_odds = [odds_lines[i] for i in range(len(rank_input)) if rank_input[i] == "S"]
+    if s_odds:
+        s_min = min(s_odds)
+        st.info(f"Sランク内最低オッズ：{s_min}倍 → 厚張り候補")
+else:
+    st.warning("⛔ 購入NG（点数 or 合成オッズ未達）")
 
-if triplet_combos:
-    st.markdown("### 三連複 判定")
-    triplet_msg, to_cut, remaining = evaluate_combos(triplet_odds, triplet_confidences, triplet_combos)
-    st.info(triplet_msg)
-    if to_cut:
-        st.warning("🔻 Bランク削減候補：")
-        for c, o in to_cut:
-            st.markdown(f"- {c}（{o}倍）")
-    if remaining:
-        st.success("✅ 削減後の構成候補：")
-        for c, o, conf in remaining:
-            st.markdown(f"- {c}（{o}倍）｜自信度：{conf}")
-    st.markdown("### 厚張り判定")
-    st.info(recommend_thick_bet(triplet_confidences, triplet_odds, triplet_combos))
+# --- 削除候補 ---
+st.subheader("削除候補（Bランク）")
+b_indices = [i for i, r in enumerate(rank_input) if r == "B"]
+b_candidates = [(i, sanrenpuku[i], odds_lines[i]) for i in b_indices if odds_lines[i] < 5.0]
 
-if pair_combos:
-    st.markdown("### 二車複 判定")
-    st.info(evaluate_pairs(pair_odds))
+for i, b, o in b_candidates:
+    st.write(f"候補：{b} → {o}倍")
+
+# --- 二車複 判定 ---
+st.subheader("二車複 結果")
+ni_valid = [o for o in ni_odds if o >= 1.5]
+
+if len(ni_valid) >= 3:
+    ni_combined = combined_odds(ni_valid)
+    st.markdown(f"**合成オッズ：{ni_combined}倍（{len(ni_valid)}点）**")
+    st.success("✅ 購入OK")
+    s_odds_ni = min(ni_valid)
+    st.info(f"最低オッズ（厚張り候補）：{s_odds_ni}倍")
+else:
+    st.warning("⛔ 二車複：購入NG（オッズ or 点数不足）")
