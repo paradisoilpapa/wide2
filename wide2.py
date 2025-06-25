@@ -23,21 +23,22 @@ if anchor and himos:
 
         # --- 三連複 買い目の生成 ---
         sanren_pats = list(itertools.combinations(himo_list, 2))
-        sanren_kaime = ["".join(sorted([anchor, p1, p2])) for p1, p2 in sanren_pats]
+        sanren_kaime = [f"{anchor}{p1}{p2}" for p1, p2 in sanren_pats]
 
         # --- 二車複 買い目の生成 ---
-        nisha_kaime = ["".join(sorted([anchor, h])) for h in himo_list]
+        nisha_kaime = [f"{anchor}{h}" for h in himo_list]
 
         # --- 三連複 表示 ---
         st.markdown("### ✅ 三連複：買い目とオッズ入力")
         sanren_data = []
+        sanren_table = []
         for k in sanren_kaime:
-            cols = st.columns([1, 2])
-            with cols[0]:
-                st.markdown(f"▶ **{k}**")
-            with cols[1]:
-                odd = st.number_input("三連複オッズ", key=f"sanren_{k}", min_value=1.0, step=0.1)
+            odd = st.number_input(f"オッズ入力 ({k})", key=f"sanren_{k}", min_value=1.0, step=0.1)
             sanren_data.append((k, odd))
+            sanren_table.append({"買い目": k, "オッズ": odd})
+
+        df_sanren = pd.DataFrame(sanren_table)
+        st.table(df_sanren)
 
         valid_odds = [1/o for _, o in sanren_data if o > 0]
         if valid_odds:
@@ -53,13 +54,14 @@ if anchor and himos:
         st.markdown("---")
         st.markdown("### ✅ 二車複：買い目とオッズ入力")
         nisha_data = []
+        nisha_table = []
         for k in nisha_kaime:
-            cols = st.columns([1, 2])
-            with cols[0]:
-                st.markdown(f"▶ **{k}**")
-            with cols[1]:
-                odd = st.number_input("二車複オッズ", key=f"nisha_{k}", min_value=1.0, step=0.1)
+            odd = st.number_input(f"オッズ入力 ({k})", key=f"nisha_{k}", min_value=1.0, step=0.1)
             nisha_data.append((k, odd))
+            nisha_table.append({"買い目": k, "オッズ": odd})
+
+        df_nisha = pd.DataFrame(nisha_table)
+        st.table(df_nisha)
 
         valid_odds2 = [1/o for _, o in nisha_data if o > 0]
         if valid_odds2:
