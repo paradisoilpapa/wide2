@@ -32,11 +32,8 @@ if anchor and himos:
         st.markdown("### ✅ 三連複：買い目とオッズ入力")
         sanren_data = []
         for k in sanren_kaime:
-            cols = st.columns([1, 2])
-            with cols[0]:
-                st.markdown(f"**{k}**")
-            with cols[1]:
-                odd = st.number_input("三連複オッズ", key=f"sanren_{k}", min_value=1.0, step=0.1)
+            st.markdown(f"**{k}**")
+            odd = st.number_input(f"オッズ ({k})", key=f"sanren_{k}", min_value=1.0, step=0.1)
             sanren_data.append((k, odd))
 
         valid_odds = [1/o for _, o in sanren_data if o > 0]
@@ -54,11 +51,8 @@ if anchor and himos:
         st.markdown("### ✅ 二車複：買い目とオッズ入力")
         nisha_data = []
         for k in nisha_kaime:
-            cols = st.columns([1, 2])
-            with cols[0]:
-                st.markdown(f"**{k}**")
-            with cols[1]:
-                odd = st.number_input("二車複オッズ", key=f"nisha_{k}", min_value=1.0, step=0.1)
+            st.markdown(f"**{k}**")
+            odd = st.number_input(f"オッズ ({k})", key=f"nisha_{k}", min_value=1.0, step=0.1)
             nisha_data.append((k, odd))
 
         valid_odds2 = [1/o for _, o in nisha_data if o > 0]
