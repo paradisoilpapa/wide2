@@ -1,125 +1,168 @@
+# app.py
+# 7車立て 二車複4点自動選定（通算＋日別係数固定・オッズ不要）
+# pip install streamlit
+
+from __future__ import annotations
+from dataclasses import dataclass
+import itertools, re
 import streamlit as st
-import itertools
-import pandas as pd
 
-st.title("三連複・二車複 買い目評価ツール（7車立て対応）")
+# ================== 通算の基準値（％→小数） ==================
+BASE_P12  = {1:0.382, 2:0.307, 3:0.278, 4:0.321, 5:0.292, 6:0.279, 7:0.171}  # 連対率
+BASE_PIN3 = {1:0.519, 2:0.476, 3:0.472, 4:0.448, 5:0.382, 6:0.358, 7:0.322}  # 3着内率
 
-# --- 入力 ---
-anchor_input = st.text_input("◎（本命）", placeholder="例：5")
-himos_input = st.text_input("ヒモ（最大4車）", placeholder="例：1 2 3 4")
+# ================== 日別係数（あなたの実測から算出） ==================
+# k12(day,rank) = (日別連対率) / (通算連対率)
+K12 = {
+    "初日":   {1:0.9240837696, 2:1.4169381107, 3:1.0575539568, 4:0.8785046729, 5:0.6849315068, 6:1.0967741935, 7:0.7543859649},
+    "2日目":  {1:1.1361256545, 2:0.6416938111, 3:0.8992805755, 4:1.1059190031, 5:1.2157534247, 6:0.9892473118, 7:1.2339181287},
+    "最終日": {1:0.9240837696, 2:0.8306188925, 3:1.0575539568, 4:1.0373831776, 5:1.2089041096, 6:0.8422939068, 7:1.0526315789},
+}
+# k3(day,rank) = (日別3着内率) / (通算3着内率)
+K3 = {
+    "初日":   {1:0.9749518304, 2:1.2857142857, 3:1.1207627119, 4:0.9196428571, 5:0.8010471204, 6:1.0502793296, 7:0.8043478261},
+    "2日目":  {1:1.1156069364, 2:0.7457983193, 3:0.8368644068, 4:0.9687500000, 5:1.1020942408, 6:1.0279329609, 7:1.1428571429},
+    "最終日": {1:0.8689788054, 2:0.9054621849, 3:1.0381355932, 4:1.1808035714, 5:1.1806282723, 6:0.8770949721, 7:1.1180124224},
+}
 
-if anchor_input and himos_input:
-    try:
-        anchor_input = anchor_input.strip()
-        himos_input = himos_input.strip()
-        anchor_num = int(anchor_input)
+# ================== ライン・相性係数 ==================
+LINE_COEF = {  # 同一ライン：隣接/非隣接、別ライン
+    "初日":   {"adj":1.35, "same":1.10, "diff":1.00},
+    "2日目":  {"adj":1.20, "same":1.05, "diff":1.00},
+    "最終日": {"adj":1.25, "same":1.05, "diff":1.00},
+}
 
-        if " " in himos_input:
-            himo_str_list = himos_input.split()
-        else:
-            himo_str_list = list(himos_input)
+def role_name(pos:int)->str:
+    return {1:"先行", 2:"番手", 3:"三番手"}.get(pos, "その他")
 
-        himo_str_list = [h for h in himo_str_list if h != ""]
-        himo_nums = []
-        for h in himo_str_list:
-            if h.isdigit():
-                himo_nums.append(int(h))
+def style_factor_same_line(pos_a:int, pos_b:int)->float:
+    a,b = sorted([pos_a,pos_b])
+    if (a,b)==(1,2): return 1.15  # 先行-番手
+    if (a,b)==(2,3): return 1.08  # 番手-三番手
+    if (a,b)==(1,3): return 1.03  # 先行-三番手
+    return 1.00
 
-        himo_set = set(himo_nums)
-        if anchor_num in himo_set:
-            himo_set.remove(anchor_num)
-        himo_nums = sorted(himo_set)
+STYLE_COEF_DIFF = {
+    ("逃","逃"):0.90, ("両","逃"):0.95,
+    ("追","追"):1.00, ("両","追"):1.00, ("追","両"):1.00,
+    ("両","両"):1.00, ("逃","追"):1.00, ("追","逃"):1.00,
+}
 
-        st.markdown(f"### 🎯 入力内容")
-        st.markdown(f"◎ 本命：**{anchor_num}**")
-        st.markdown(f"ヒモ候補：**{' '.join(map(str, himo_nums))}**")
+# ================== 型 ==================
+@dataclass
+class Runner:
+    no:int
+    rank:int          # ヴェロビ評価順位(1..7)
+    line:str          # A,B,C...
+    pos:int           # 1=先行/2=番手/3=三番手…
+    style:str         # '逃','両','追'
 
-        trifecta_combos = []
-        if len(himo_nums) >= 2:
-            for combo in itertools.combinations(himo_nums, 2):
-                trifecta_combos.append((anchor_num, *combo))
-        else:
-            trifecta_combos = []
+# ================== 補助 ==================
+def parse_line_pattern(pattern:str):
+    """ '123 45 6 7' → 車番→ラインID, 車番→ライン内位置 """
+    pattern = re.sub(r"[^\d\s]", "", pattern).strip()
+    groups = [g for g in pattern.split() if g]
+    id_map, pos_map = {}, {}
+    for gi, g in enumerate(groups):
+        lid = chr(ord('A') + gi)
+        for idx, ch in enumerate(g):
+            n = int(ch)
+            id_map[n]  = lid
+            pos_map[n] = idx+1
+    used = set(id_map.keys())
+    for n in range(1,8):
+        if n not in used:
+            lid = chr(ord('A') + len(groups))
+            id_map[n]  = lid
+            pos_map[n] = 1
+            groups.append(str(n))
+    return id_map, pos_map
 
-        st.markdown("### ✅ 三連複：買い目とオッズ入力")
-        trifecta_data = []
-        for idx, combo in enumerate(trifecta_combos):
-            combo_str = "-".join(map(str, sorted(combo)))
-            odd = st.number_input(
-                f"{combo_str} のオッズ", min_value=0.0, value=0.0, step=0.1,
-                key=f"odds_trifecta_{idx}"
-            )
-            trifecta_data.append((combo_str, odd))
+def line_factor(a:Runner, b:Runner, day:str)->float:
+    if a.line == b.line:
+        if abs(a.pos - b.pos) == 1:
+            return LINE_COEF[day]["adj"]
+        return LINE_COEF[day]["same"]
+    return LINE_COEF[day]["diff"]
 
-        valid_trifecta_data = [(k, o) for k, o in trifecta_data if o > 0]
-        low_odds = [(k, o) for k, o in valid_trifecta_data if o < 3.0]
+def style_factor(a:Runner, b:Runner)->float:
+    if a.line == b.line:
+        return style_factor_same_line(a.pos, b.pos)
+    key = (a.style, b.style)
+    return STYLE_COEF_DIFF.get(key, STYLE_COEF_DIFF.get((key[1],key[0]), 1.00))
 
-        if low_odds:
-            st.error("🚫 見送り：3倍未満の買い目が含まれているため購入不可")
-        else:
-            inv_sum = sum((1 / o) for _, o in valid_trifecta_data) if valid_trifecta_data else 0.0
-            synth_odds = round(1 / inv_sum, 2) if inv_sum != 0 else 0.0
-            st.markdown(f"### 📊 三連複 合成オッズ：**{synth_odds}倍**")
+# ================== スコア計算 ==================
+def score_pair(a:Runner, b:Runner, day:str, w:float)->float:
+    # 連対×3内のブレンド（w=0.7 推奨）
+    p12_i = max(min(BASE_P12[a.rank]  * K12[day][a.rank],  0.9999), 0.0001)
+    p12_j = max(min(BASE_P12[b.rank]  * K12[day][b.rank],  0.9999), 0.0001)
+    p3_i  = max(min(BASE_PIN3[a.rank] * K3[day][a.rank],   0.9999), 0.0001)
+    p3_j  = max(min(BASE_PIN3[b.rank] * K3[day][b.rank],   0.9999), 0.0001)
+    L = line_factor(a,b,day)
+    R = style_factor(a,b)
+    s12 = (p12_i * p12_j)
+    s3  = (p3_i  * p3_j)
+    return (s12**w) * (s3**(1.0-w)) * L * R
 
-            if synth_odds >= 3.0:
-                st.success("✅ 購入可：6点構成で合成オッズ3倍以上クリア")
-            else:
-                sorted_candidates = sorted(
-                    valid_trifecta_data,
-                    key=lambda x: (-1 if x[1] >= 30.0 else 0, x[1])
-                )
-                reduced = sorted_candidates.copy()
-                removed = []
-                while len(reduced) >= 4:
-                    inv_sum_new = sum(1 / o for _, o in reduced)
-                    synth_new = round(1 / inv_sum_new, 2) if inv_sum_new != 0 else 0.0
-                    if synth_new >= 3.0:
-                        st.warning(f"💡 削減後 合成オッズ：{synth_new}倍 → {len(reduced)}点で購入可")
-                        st.markdown(f"除外買い目：{', '.join(k for k, _ in removed)}")
-                        break
-                    removed.append(reduced.pop(0))
-                else:
-                    st.error("🚫 見送り：削減しても4点未満 or 合成3倍未満")
+def pick_pairs(runners:list[Runner], day:str, w:float, k:int=4):
+    cand = []
+    for a,b in itertools.combinations(runners,2):
+        s = score_pair(a,b,day,w)
+        cand.append(((min(a.no,b.no), max(a.no,b.no)), s,
+                     a.line==b.line and abs(a.pos-b.pos)==1, {a.no,b.no}))
+    cand.sort(key=lambda x: x[1], reverse=True)
 
-        st.markdown("---")
-        st.markdown("### ✅ 二車複：買い目とオッズ入力")
-        nishafuku_combos = [(anchor_num, h) for h in himo_nums]
-        nishafuku_data = []
-        for idx, pair in enumerate(nishafuku_combos):
-            pair_str = "-".join(map(str, sorted(pair)))
-            odd = st.number_input(
-                f"{pair_str} のオッズ", min_value=0.0, value=0.0, step=0.1,
-                key=f"odds_pair_{idx}"
-            )
-            nishafuku_data.append((pair_str, odd))
+    # 制約: ①同一ライン隣接を最低1点 ②同一選手は最大2点 ③計k点
+    selected, cnt = [], {}
+    # 隣接を1点確保
+    for pair,s,adj,inv in cand:
+        if not adj: continue
+        i,j = list(inv)
+        if cnt.get(i,0)>=2 or cnt.get(j,0)>=2: continue
+        selected.append((pair,s,adj)); cnt[i]=cnt.get(i,0)+1; cnt[j]=cnt.get(j,0)+1
+        break
+    # 残り充足
+    for pair,s,adj,inv in cand:
+        if len(selected)>=k: break
+        i,j = list(inv)
+        if cnt.get(i,0)>=2 or cnt.get(j,0)>=2: continue
+        if (pair,s,adj) in selected: continue
+        selected.append((pair,s,adj)); cnt[i]=cnt.get(i,0)+1; cnt[j]=cnt.get(j,0)+1
+    return selected[:k]
 
-        # --- ガミオッズ除外・4点制限・合成オッズ評価 ---
-        valid_nishafuku_data = [(k, o) for k, o in nishafuku_data if o > 1.4]
-        if not valid_nishafuku_data:
-            st.error("🚫 見送り：二車複すべてガミオッズ（1.4倍以下）のため除外")
-        else:
-            if len(valid_nishafuku_data) > 4:
-                valid_nishafuku_data = sorted(valid_nishafuku_data, key=lambda x: -x[1])[:4]
+# ================== UI ==================
+st.set_page_config(page_title="ヴェロビ二車複4点（固定係数）", layout="wide")
+st.title("ヴェロビ：二車複 4点（オッズ不要・固定係数・ライン考慮）")
 
-            inv_sum2 = sum(1 / o for _, o in valid_nishafuku_data)
-            synth_odds2 = round(1 / inv_sum2, 2) if inv_sum2 != 0 else 0.0
-            st.markdown(f"### 📊 二車複 合成オッズ：**{synth_odds2}倍**")
+day = st.selectbox("開催日", ["初日","2日目","最終日"], index=0)
+w   = st.slider("連対重視ブレンド係数 w（0〜1）", 0.0, 1.0, 0.7, 0.05)
 
-            if synth_odds2 >= 1.5:
-                st.success("✅ 二車複：1.4倍以下切り捨てで購入基準クリア（合成1.5倍以上、最大4点）")
-            else:
-                st.error("🚫 二車複：合成オッズ1.5倍未満 → 見送り")
+st.subheader("ライン入力（例：123 45 6 7）")
+pattern = st.text_input("ラインパターン", value="123 45 6 7")
+id_map, pos_map = parse_line_pattern(pattern)
 
-        # --- 勝負レース選別ランク評価の仮表示（条件は今後追加可能） ---
-        st.markdown("---")
-        st.markdown("### 🏁 勝負レースランク評価（試験実装）")
-        st.markdown("- **Sランク**：◎＋ライン＋ヒモ構成で\"ほぼ穴なし\" → 厚張り対象")
-        st.markdown("- **Aランク**：◎の信頼度が高く、ヒモの一部は展開依存 → 通常買い")
-        st.markdown("- **Bランク**：展開待ち・低確率のヒモが混じる → 削減対象／見送り候補")
-        st.info("※ ランク自動評価は今後条件追加により実装予定")
+st.subheader("各選手の入力（評価順位・脚質）")
+cols = st.columns(7, gap="small")
+runners = []
+for i in range(7):
+    with cols[i]:
+        no = i+1
+        st.markdown(f"**{no}番**")
+        rank = st.number_input("評価順位", 1, 7, value=min(no,7), key=f"rank{no}")
+        style = st.selectbox("脚質", ['逃','両','追'], index=0 if no in [1,6] else 2, key=f"style{no}")
+        runners.append(Runner(no=no, rank=rank, line=id_map[no], pos=pos_map[no], style=style))
 
-    except Exception as e:
-        st.error(f"エラーが発生しました: {e}")
-else:
-    st.info("◎とヒモを入力してください。例：◎=5, ヒモ=1 2 3 4")
+st.markdown("---")
+if st.button("４点を選定"):
+    picks = pick_pairs(runners, day, w, k=4)
+    if not picks:
+        st.error("候補が出ません。入力を確認してください。")
+    else:
+        st.subheader("選定結果（上位4点）")
+        for i,(pair,score,adj) in enumerate(picks,1):
+            a,b = pair
+            st.write(f"**{i}. {a}-{b}** | スコア: {score:.6f} {'（同一ライン隣接）' if adj else ''}")
 
+with st.expander("参照：固定係数（検算用）", expanded=False):
+    st.write("K12（連対率係数）", K12)
+    st.write("K3（3着内率係数）", K3)
