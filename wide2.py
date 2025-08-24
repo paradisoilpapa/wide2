@@ -1,6 +1,10 @@
 # app.py
-# 7車立て 二車複4点 + 三連複 + ワイド（p1+p12/p3・固定係数・脚質まとめ入力・ヴェロビ並び一括） v5
-# pip install streamlit
+# 7車立て：二車複4点 + 三連複 + ワイド
+# - 脚質は「逃/両/追」に車番を列挙（ミス削減）
+# - ヴェロビ評価順は車番並びを1行ペーストで自動順位
+# - 二車複: p1(PL2)×p12、三連複: PL3×p3、ワイド: Qwide×p3
+# - 三連複は「軸(=二車複1位)／全体最適／両方表示」を切替可能
+# - チェック等をボタン外に配置し、初期化されないように修正
 
 from __future__ import annotations
 from dataclasses import dataclass
@@ -9,24 +13,26 @@ import streamlit as st
 
 # ================== 通算の基準値（％→小数） ==================
 BASE_P12  = {1:0.382, 2:0.307, 3:0.278, 4:0.321, 5:0.292, 6:0.279, 7:0.171}  # 連対率
-DEFAULT_P1_RATIO = 0.481  # rank1: 0.184/0.382 ≈ 0.481
-BASE_P1 = {r: max(min(BASE_P12[r]*DEFAULT_P1_RATIO, 0.95), 0.0001) for r in range(1,8)}  # 1着率の比例近似
+BASE_PIN3 = {1:0.519, 2:0.476, 3:0.472, 4:0.448, 5:0.382, 6:0.358, 7:0.322}  # 3着内率
 
-# 三連複/ワイド用に3着内率も（分析アプリと同じ値）
-BASE_PIN3 = {1:0.519, 2:0.476, 3:0.472, 4:0.448, 5:0.382, 6:0.358, 7:0.322}
+# 通算 p1（1着率）は p12 に比例の簡易近似（rank1: 0.184/0.382 ≈ 0.481）
+DEFAULT_P1_RATIO = 0.481
+BASE_P1 = {r: max(min(BASE_P12[r]*DEFAULT_P1_RATIO, 0.95), 1e-4) for r in range(1,8)}
 
-# ================== 日別係数 ==================
+# ================== 日別係数（あなたの実測） ==================
+# k12(day,rank) = (日別連対率) / (通算連対率)
 K12 = {
     "初日":   {1:0.9240837696, 2:1.4169381107, 3:1.0575539568, 4:0.8785046729, 5:0.6849315068, 6:1.0967741935, 7:0.7543859649},
     "2日目":  {1:1.1361256545, 2:0.6416938111, 3:0.8992805755, 4:1.1059190031, 5:1.2157534247, 6:0.9892473118, 7:1.2339181287},
     "最終日": {1:0.9240837696, 2:0.8306188925, 3:1.0575539568, 4:1.0373831776, 5:1.2089041096, 6:0.8422939068, 7:1.0526315789},
 }
+# k1(day,rank) = (日別1着率) / (通算1着率)  … 初日は実測、2日目/最終日は暫定でK12流用（差替え可）
 K1 = {
-    "初日":   {1:0.766, 2:1.282, 3:1.106, 4:1.000, 5:0.746, 6:1.110, 7:0.728},  # 実測
+    "初日":   {1:0.766, 2:1.282, 3:1.106, 4:1.000, 5:0.746, 6:1.110, 7:0.728},
     "2日目":  {},
     "最終日": {},
 }
-for r in range(1,8):  # p1日別が未整備のため暫定でK12流用（差し替え可）
+for r in range(1,8):
     K1["2日目"][r]  = K12["2日目"][r]
     K1["最終日"][r] = K12["最終日"][r]
 
@@ -45,13 +51,15 @@ LINE_COEF = {  # 同一ライン：隣接/非隣接、別ライン
 }
 def role_name(pos:int)->str:
     return {1:"先行", 2:"番手", 3:"三番手"}.get(pos, "その他")
+
 def style_factor_same_line(pos_a:int, pos_b:int)->float:
     a,b = sorted([pos_a,pos_b])
-    if (a,b)==(1,2): return 1.15
-    if (a,b)==(2,3): return 1.08
-    if (a,b)==(1,3): return 1.03
+    if (a,b)==(1,2): return 1.15  # 先行-番手
+    if (a,b)==(2,3): return 1.08  # 番手-三番手
+    if (a,b)==(1,3): return 1.03  # 先行-三番手
     return 1.00
-STYLE_COEF_DIFF = {  # 別線のみ
+
+STYLE_COEF_DIFF = {  # 別線のみ適用（同線は“位置”で評価）
     ("逃","逃"):0.90, ("両","逃"):0.95, ("逃","両"):0.95,
     ("追","追"):1.00, ("両","追"):1.00, ("追","両"):1.00,
     ("逃","追"):1.00, ("追","逃"):1.00, ("両","両"):1.00,
@@ -124,21 +132,20 @@ def style_factor(a:Runner, b:Runner)->float:
     if a.line == b.line:
         return style_factor_same_line(a.pos, b.pos)
     key = (a.style, b.style)
-    return STYLE_COEF_DIFF.get(key, 1.00)
+    return STYLE_COEF_DIFF.get(key, STYLE_COEF_DIFF.get((key[1],key[0]), 1.00))
 
 # ================== 当日p1/p12/p3 と PL ==================
 def day_p1(rank:int, day:str)->float:
-    return max(min(BASE_P1[rank]  * K1[day][rank],  0.9999), 0.0001)
+    return max(min(BASE_P1[rank]  * K1[day][rank],  0.9999), 1e-4)
 def day_p12(rank:int, day:str)->float:
-    return max(min(BASE_P12[rank] * K12[day][rank], 0.9999), 0.0001)
+    return max(min(BASE_P12[rank] * K12[day][rank], 0.9999), 1e-4)
 def day_p3(rank:int, day:str)->float:
-    return max(min(BASE_PIN3[rank]* K3[day][rank], 0.9999), 0.0001)
+    return max(min(BASE_PIN3[rank]* K3[day][rank], 0.9999), 1e-4)
 
 def pl_joint_prob_pair(strength:dict[int,float], i:int, j:int)->float:
     """PLで上位2が{i,j}になる確率（順序入替を和）。strengthは正の“強さ”（ここでは当日p1）。"""
     S = sum(strength.values())
     if S <= 0: return 0.0
-    pi, pj = strength[i], strength[j]
     out = 0.0
     for a,b in [(i,j),(j,i)]:
         sa, sb = strength[a], strength[b]
@@ -156,7 +163,7 @@ def pl_joint_prob_trio(strength:dict[int,float], i:int, j:int, k:int)->float:
             out += (sa/S) * (sb/(S-sa)) * (sc/(S-sa-sb))
     return out
 
-# ================== スコア計算（二車複・三連複・ワイド） ==================
+# ================== スコア計算 ==================
 def score_pairs_and_pick(runners:list[Runner], day:str, w_pair:float, k:int=4):
     """二車複：Score = [(PL2)^w × (p12_i p12_j)^(1-w)] × L × R"""
     strength = {r.no: day_p1(r.rank, day) for r in runners}
@@ -217,7 +224,6 @@ def score_wide_and_pick(runners:list[Runner], day:str, w_wide:float, n:int=3):
        Qwide(i,j) = Σ_{k≠i,j} PL3(i,j,k)  （i,jが“上位3内”に入る確率）"""
     strength = {r.no: day_p1(r.rank, day) for r in runners}
     by_no = {r.no:r for r in runners}
-    # 事前に全PL3を必要に応じ算出して合算
     def Qwide(i:int,j:int)->float:
         s = 0.0
         for k in by_no.keys():
@@ -242,56 +248,48 @@ def score_wide_and_pick(runners:list[Runner], day:str, w_wide:float, n:int=3):
 st.set_page_config(page_title="ヴェロビ 二車複＋三連複＋ワイド（p1+p12/p3）", layout="wide")
 st.title("ヴェロビ：二車複 4点 ＋ 三連複 ＋ ワイド（p1+p12/p3・固定係数・ライン考慮）")
 
-day = st.selectbox("開催日", ["初日","2日目","最終日"], index=0)
-
+# 基本設定
+day = st.selectbox("開催日", ["初日","2日目","最終日"], index=0, key="day")
 c_w1, c_w3, c_ww = st.columns(3)
 with c_w1:
-    w_pair = st.slider("二車複 w_pair（PL2 : p12）", 0.0, 1.0, 0.7, 0.05)
+    w_pair = st.slider("二車複 w_pair（PL2 : p12）", 0.0, 1.0, 0.7, 0.05, key="w_pair")
 with c_w3:
-    w_trio = st.slider("三連複 w_trio（PL3 : p3）", 0.0, 1.0, 0.6, 0.05)
+    w_trio = st.slider("三連複 w_trio（PL3 : p3）", 0.0, 1.0, 0.6, 0.05, key="w_trio")
 with c_ww:
-    w_wide = st.slider("ワイド w_wide（Qwide : p3）", 0.0, 1.0, 0.4, 0.05)
+    w_wide = st.slider("ワイド w_wide（Qwide : p3）", 0.0, 1.0, 0.4, 0.05, key="w_wide")
 
+# ライン入力
 st.subheader("ライン入力（例：123 45 6 7）")
-pattern = st.text_input("ラインパターン", value="123 45 6 7")
+pattern = st.text_input("ラインパターン", value="123 45 6 7", key="pattern")
 id_map, pos_map = parse_line_pattern(pattern)
 
-# ---- 脚質：車番まとめ入力（ミス削減） ----
+# 脚質：車番まとめ入力（ミス削減）
 st.subheader("脚質入力（車番をまとめて）")
 c1, c2, c3 = st.columns(3)
-raw_nige = c1.text_input("逃（例: 1 6）", value="")
-raw_ryo  = c2.text_input("両（例: 2 3）", value="")
-raw_tsu  = c3.text_input("追（例: 4 5 7）", value="")
+raw_nige = c1.text_input("逃（例: 1 6）", value="", key="raw_nige")
+raw_ryo  = c2.text_input("両（例: 2 3）", value="", key="raw_ryo")
+raw_tsu  = c3.text_input("追（例: 4 5 7）", value="", key="raw_tsu")
 list_nige = parse_car_list(raw_nige, 7)
 list_ryo  = parse_car_list(raw_ryo, 7)
 list_tsu  = parse_car_list(raw_tsu, 7)
 dup = (set(list_nige) & set(list_ryo)) | (set(list_nige) & set(list_tsu)) | (set(list_ryo) & set(list_tsu))
 if dup:
     st.error(f"脚質の重複指定: {sorted(dup)} が複数の欄に入っています。どれか一方にしてください。")
-default_unassigned = st.radio("未指定車番の既定脚質", options=["追", "両", "逃"], index=0, horizontal=True)
+default_unassigned = st.radio("未指定車番の既定脚質", options=["追", "両", "逃"], index=0, horizontal=True, key="default_style")
 
-# ---- ヴェロビ評価順（車番並びを1行） or 手動 ----
+# 評価順位入力：ヴェロビ並び or 手動
 st.subheader("評価順位の入力")
-method = st.radio("入力方法を選択", ["ヴェロビ評価順（車番並びを1行）", "手動で各選手に入力"], horizontal=True, index=0)
+method = st.radio("入力方法を選択", ["ヴェロビ評価順（車番並びを1行）", "手動で各選手に入力"], horizontal=True, index=0, key="rank_method")
 
 rank_map = {}
 if method.startswith("ヴェロビ"):
-    vorder_str = st.text_input("ヴェロビ評価順（例: 3142576 や 3 1 4 2 5 7 6）", value="")
-    # パース
-    def parse_verovi_order_local(s: str) -> list[int]:
-        if not s: return []
-        t = re.sub(r"[^\d]", "", s)
-        if len(t) != 7: return []
-        order = [int(ch) for ch in t]
-        if sorted(order) != list(range(1,8)): return []
-        return order
-    vorder = parse_verovi_order_local(vorder_str)
+    vorder_str = st.text_input("ヴェロビ評価順（例: 3142576 や 3 1 4 2 5 7 6）", value="", key="vorder_str")
+    vorder = parse_verovi_order(vorder_str)
     if vorder:
         rank_map = {car: i+1 for i,car in enumerate(vorder)}
     else:
         st.info("7桁・重複なしで 1〜7 を並べてください。未入力や不正な場合は下の手動欄を使えます。")
 
-# ---- 各選手レコード生成
 cols = st.columns(7, gap="small")
 runners = []
 for i in range(7):
@@ -306,13 +304,27 @@ for i in range(7):
         st.caption(f"脚質: {style}")
         # 順位
         if rank_map:
-            rank = rank_map[no]; st.text(f"評価順位: {rank}")
+            rank = rank_map[no]
+            st.text(f"評価順位: {rank}")
         else:
             rank = st.number_input("評価順位", 1, 7, value=min(no,7), key=f"rank{no}")
         runners.append(Runner(no=no, rank=int(rank), line=id_map[no], pos=pos_map[no], style=style))
 
+# --- 三連複・ワイドの選定オプション（ボタン外に常駐：初期化されない） ---
+st.subheader("三連複・ワイドの選定オプション")
+trio_mode = st.radio(
+    "三連複のモード",
+    ["二車複1位ペアを軸", "全体最適", "両方表示"],
+    index=0,
+    horizontal=True,
+    key="trio_mode",
+    help="軸=二車複1位ペアに限定。全体=軸に縛られずに上位。両方=両方を並べて表示。"
+)
+m_trio = st.slider("三連複の点数（上位）", 1, 6, 3, 1, key="m_trio")
+n_wide  = st.slider("ワイドの点数（上位）", 1, 5, 3, 1, key="n_wide")
+
 st.markdown("---")
-if st.button("買い目を選定（二車複＋三連複＋ワイド）"):
+if st.button("買い目を選定（二車複＋三連複＋ワイド）", key="btn_run"):
     if dup:
         st.error("脚質の重複指定を解消してください。")
     else:
@@ -326,23 +338,53 @@ if st.button("買い目を選定（二車複＋三連複＋ワイド）"):
                 a,b = pair
                 st.write(f"**{i}. {a}-{b}** | Score: {score:.6f} {'（同一ライン隣接）' if adj else ''}")
 
-            # 三連複（デフォは二車複1位ペアを“軸”）
-            st.subheader("三連複：選定（デフォ=二車複1位ペアを軸）")
-            axis = st.checkbox("三連複は“二車複1位ペア”を軸に限定する", value=True)
-            m = st.slider("三連複の点数（上位）", 1, 6, 3, 1)
-            axis_pair = set(picks2[0][0]) if axis else None
-            top3, _ = score_trios_and_pick(runners, day, w_trio, m=m, axis_pair=axis_pair)
-            if not top3:
-                st.info("条件を満たす三連複がありません。軸を外すか点数を増やしてみてください。")
-            else:
-                for i,(tri,score,meta) in enumerate(top3,1):
-                    a,b,c = tri
-                    st.write(f"**{i}. {a}-{b}-{c}** | Score: {score:.6f} "
-                             f"(PL3={meta['qpl3']:.5f}, p3prod={meta['p3prod']:.5f}, L3={meta['L3']:.2f}, R3={meta['R3']:.2f})")
+            # 三連複（軸／全体／両方）
+            st.subheader("三連複：選定")
+            axis_pair = set(picks2[0][0]) if trio_mode in ["二車複1位ペアを軸", "両方表示"] else None
+
+            top_trio_axis, top_trio_all = [], []
+            if trio_mode in ["二車複1位ペアを軸", "両方表示"]:
+                top_trio_axis, _ = score_trios_and_pick(runners, day, w_trio, m=m_trio, axis_pair=axis_pair)
+            if trio_mode in ["全体最適", "両方表示"]:
+                top_trio_all,  _ = score_trios_and_pick(runners, day, w_trio, m=m_trio, axis_pair=None)
+
+            if trio_mode == "二車複1位ペアを軸":
+                if not top_trio_axis:
+                    st.info("条件を満たす三連複がありません。")
+                else:
+                    for i,(tri,score,meta) in enumerate(top_trio_axis,1):
+                        a,b,c = tri
+                        st.write(f"**{i}. {a}-{b}-{c}** | Score: {score:.6f} "
+                                 f"(PL3={meta['qpl3']:.5f}, p3prod={meta['p3prod']:.5f}, L3={meta['L3']:.2f}, R3={meta['R3']:.2f})")
+            elif trio_mode == "全体最適":
+                if not top_trio_all:
+                    st.info("三連複（全体最適）の候補がありません。")
+                else:
+                    for i,(tri,score,meta) in enumerate(top_trio_all,1):
+                        a,b,c = tri
+                        st.write(f"**{i}. {a}-{b}-{c}** | Score: {score:.6f} "
+                                 f"(PL3={meta['qpl3']:.5f}, p3prod={meta['p3prod']:.5f}, L3={meta['L3']:.2f}, R3={meta['R3']:.2f})")
+            else:  # 両方表示
+                colA, colB = st.columns(2)
+                with colA:
+                    st.markdown("**軸（＝二車複1位ペアを含む）**")
+                    if not top_trio_axis:
+                        st.info("該当なし")
+                    else:
+                        for i,(tri,score,_meta) in enumerate(top_trio_axis,1):
+                            a,b,c = tri
+                            st.write(f"**{i}. {a}-{b}-{c}** | Score: {score:.6f}")
+                with colB:
+                    st.markdown("**全体最適**")
+                    if not top_trio_all:
+                        st.info("該当なし")
+                    else:
+                        for i,(tri,score,_meta) in enumerate(top_trio_all,1):
+                            a,b,c = tri
+                            st.write(f"**{i}. {a}-{b}-{c}** | Score: {score:.6f}")
 
             # ワイド
             st.subheader("ワイド：選定（p3寄りスコア）")
-            n_wide = st.slider("ワイドの点数（上位）", 1, 5, 3, 1)
             topW, _allW = score_wide_and_pick(runners, day, w_wide, n=n_wide)
             if not topW:
                 st.info("ワイド候補が出ません。入力を確認してください。")
@@ -362,15 +404,17 @@ if st.button("買い目を選定（二車複＋三連複＋ワイド）"):
                         key = f"oddsW_{pair}"
                         O = st.number_input(f"{pair} のオッズ（ワイド）", min_value=0.0, value=0.0, step=0.1, key=key)
                         inv_sum_w += (1.0/O) if O>0 else 0.0
-                    st.write(f"Σ(1/O)_wide = **{inv_sum_w:.3f}** → {'✅ トリガミ回避可' if inv_sum_w<=1.0 else '⚠️ 要削減/配分'}")
-                if top3:
+                    st.write(f"Σ(1/O)_wide = **{inv_sum_w:.3f}** → {'✅ 回避可' if inv_sum_w<=1.0 else '⚠️ 要削減/配分'}")
+                # trio_modeに応じて表示した方の三連複に対してチェック
+                targets = top_trio_all if trio_mode=="全体最適" else (top_trio_axis if trio_mode=="二車複1位ペアを軸" else (top_trio_axis or top_trio_all))
+                if targets:
                     st.markdown("**三連複**")
                     inv_sum_t = 0.0
-                    for tri,_,_ in top3:
+                    for tri,_,_ in targets:
                         key = f"oddsT_{tri}"
                         O = st.number_input(f"{tri} のオッズ（三連複）", min_value=0.0, value=0.0, step=0.1, key=key)
                         inv_sum_t += (1.0/O) if O>0 else 0.0
-                    st.write(f"Σ(1/O)_trio = **{inv_sum_t:.3f}** → {'✅ トリガミ回避可' if inv_sum_t<=1.0 else '⚠️ 要削減/配分'}")
+                    st.write(f"Σ(1/O)_trio = **{inv_sum_t:.3f}** → {'✅ 回避可' if inv_sum_t<=1.0 else '⚠️ 要削減/配分'}")
 
 with st.expander("参照：固定係数（検算用）", expanded=False):
     st.write("K1（1着率係数）", K1)
@@ -380,9 +424,9 @@ with st.expander("参照：固定係数（検算用）", expanded=False):
 st.caption("""
 二車複 Score = [(PL2)^w_pair × (p12_i p12_j)^(1-w_pair)] × ライン係数 × 役割/脚質係数。
 三連複 Score = [(PL3)^w_trio × (p3_i p3_j p3_k)^(1-w_trio)] × {ペア係数(ライン/脚質)の幾何平均}。
-ワイド   Score = [(Qwide)^w_wide × (p3_i p3_j)^(1-w_wide)] × ライン係数 × 役割/脚質係数
+ワイド   Score = [(Qwide)^w_wide × (p3_i p3_j)^(1-w_wide)] × ライン係数 × 役割/脚質係数。
 （Qwide(i,j) = Σ_k PL3(i,j,k)：iとjが“上位3内”に含まれる確率）
 ・脚質は「逃/両/追」に車番を列挙（重複は赤エラー、未指定は既定で補完）。
 ・順位は「ヴェロビ評価順」を1行貼付で自動付与。未入力/不正は手動入力に切替。
-・オッズ入力時は Σ(1/O)≤1 の判定でトリガミ回避、配分は別アプリ/手計算で調整してください。
+・三連複は「軸／全体最適／両方表示」を切替可。ウィジェットは常駐で初期化されません。
 """)
