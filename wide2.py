@@ -1,5 +1,5 @@
 # app.py
-# 7車立て 二車複4点自動選定（p1+p12・固定係数・脚質まとめ入力） v3
+# 7車立て 二車複4点自動選定（p1+p12・固定係数・脚質まとめ入力・ヴェロビ並び一括） v3.1
 # pip install streamlit
 
 from __future__ import annotations
@@ -9,26 +9,21 @@ import streamlit as st
 
 # ================== 通算の基準値（％→小数） ==================
 BASE_P12  = {1:0.382, 2:0.307, 3:0.278, 4:0.321, 5:0.292, 6:0.279, 7:0.171}  # 連対率
+DEFAULT_P1_RATIO = 0.481  # rank1: 0.184/0.382 ≈ 0.481
+BASE_P1 = {r: max(min(BASE_P12[r]*DEFAULT_P1_RATIO, 0.95), 0.0001) for r in range(1,8)}  # 1着率の比例近似
 
-# 通算 p1（1着率）は p12 に比例させる簡易近似（rank1の 0.184/0.382 ≈ 0.481 を採用）
-DEFAULT_P1_RATIO = 0.481
-BASE_P1 = {r: max(min(BASE_P12[r]*DEFAULT_P1_RATIO, 0.95), 0.0001) for r in range(1,8)}
-
-# ================== 日別係数（あなたの実測から算出） ==================
-# k12(day,rank) = (日別連対率) / (通算連対率)
+# ================== 日別係数 ==================
 K12 = {
     "初日":   {1:0.9240837696, 2:1.4169381107, 3:1.0575539568, 4:0.8785046729, 5:0.6849315068, 6:1.0967741935, 7:0.7543859649},
     "2日目":  {1:1.1361256545, 2:0.6416938111, 3:0.8992805755, 4:1.1059190031, 5:1.2157534247, 6:0.9892473118, 7:1.2339181287},
     "最終日": {1:0.9240837696, 2:0.8306188925, 3:1.0575539568, 4:1.0373831776, 5:1.2089041096, 6:0.8422939068, 7:1.0526315789},
 }
-# k1(day,rank) = (日別1着率) / (通算1着率)
-# 初日は実測係数、2日目/最終日は p1日別が未整備なので K12 を暫定流用（差し替え可能）
 K1 = {
-    "初日":   {1:0.766, 2:1.282, 3:1.106, 4:1.000, 5:0.746, 6:1.110, 7:0.728},
+    "初日":   {1:0.766, 2:1.282, 3:1.106, 4:1.000, 5:0.746, 6:1.110, 7:0.728},  # 実測
     "2日目":  {},
     "最終日": {},
 }
-for r in range(1,8):
+for r in range(1,8):  # p1日別が未整備のため暫定でK12流用（差し替え可）
     K1["2日目"][r]  = K12["2日目"][r]
     K1["最終日"][r] = K12["最終日"][r]
 
@@ -40,15 +35,13 @@ LINE_COEF = {  # 同一ライン：隣接/非隣接、別ライン
 }
 def role_name(pos:int)->str:
     return {1:"先行", 2:"番手", 3:"三番手"}.get(pos, "その他")
-
 def style_factor_same_line(pos_a:int, pos_b:int)->float:
     a,b = sorted([pos_a,pos_b])
-    if (a,b)==(1,2): return 1.15  # 先行-番手
-    if (a,b)==(2,3): return 1.08  # 番手-三番手
-    if (a,b)==(1,3): return 1.03  # 先行-三番手
+    if (a,b)==(1,2): return 1.15
+    if (a,b)==(2,3): return 1.08
+    if (a,b)==(1,3): return 1.03
     return 1.00
-
-STYLE_COEF_DIFF = {  # 別線のみ適用（同線は“位置”で評価）
+STYLE_COEF_DIFF = {  # 別線のみ
     ("逃","逃"):0.90, ("両","逃"):0.95, ("逃","両"):0.95,
     ("追","追"):1.00, ("両","追"):1.00, ("追","両"):1.00,
     ("逃","追"):1.00, ("追","逃"):1.00, ("両","両"):1.00,
@@ -84,19 +77,6 @@ def parse_line_pattern(pattern:str):
             groups.append(str(n))
     return id_map, pos_map
 
-def line_factor(a:Runner, b:Runner, day:str)->float:
-    if a.line == b.line:
-        if abs(a.pos - b.pos) == 1:
-            return LINE_COEF[day]["adj"]
-        return LINE_COEF[day]["same"]
-    return LINE_COEF[day]["diff"]
-
-def style_factor(a:Runner, b:Runner)->float:
-    if a.line == b.line:
-        return style_factor_same_line(a.pos, b.pos)
-    key = (a.style, b.style)
-    return STYLE_COEF_DIFF.get(key, 1.00)
-
 def parse_car_list(s: str, n_max: int = 7) -> list[int]:
     """ '1 6' / '1,6' / '１・６' 等を [1,6] に """
     if not s: return []
@@ -114,36 +94,50 @@ def parse_car_list(s: str, n_max: int = 7) -> list[int]:
             pass
     return out
 
+def parse_verovi_order(s: str) -> list[int]:
+    """ ヴェロビ評価順（車番の並び）を1行で受け取り、長さ7・重複なしなら[car,...]を返す """
+    if not s: return []
+    t = re.sub(r"[^\d]", "", s)  # 数字以外削除
+    if len(t) != 7: return []
+    order = [int(ch) for ch in t]
+    if sorted(order) != list(range(1,8)): return []
+    return order
+
+def line_factor(a:Runner, b:Runner, day:str)->float:
+    if a.line == b.line:
+        if abs(a.pos - b.pos) == 1:
+            return LINE_COEF[day]["adj"]
+        return LINE_COEF[day]["same"]
+    return LINE_COEF[day]["diff"]
+
+def style_factor(a:Runner, b:Runner)->float:
+    if a.line == b.line:
+        return style_factor_same_line(a.pos, b.pos)
+    key = (a.style, b.style)
+    return STYLE_COEF_DIFF.get(key, 1.00)
+
 # ================== 当日p1/p12とPL近似 ==================
 def day_p1(rank:int, day:str)->float:
     return max(min(BASE_P1[rank]  * K1[day][rank],  0.9999), 0.0001)
-
 def day_p12(rank:int, day:str)->float:
     return max(min(BASE_P12[rank] * K12[day][rank], 0.9999), 0.0001)
 
 def pl_joint_prob(p1_day_by_runner:dict[int,float], i:int, j:int)->float:
-    """ Plackett–Luceの上位2位“同時”確率の対称近似。
-        入力は“当日の p1”を全員分集め、内部で正規化（sum=1）。 """
+    """ Plackett–Luceの上位2位同時確率の対称近似。内部で正規化（sum=1）。 """
     total = sum(p1_day_by_runner.values())
     if total <= 0: return 0.0
-    # 正規化（数値安定化のためクリップ）
     pi = max(min(p1_day_by_runner[i]/total, 0.9999), 0.0001)
     pj = max(min(p1_day_by_runner[j]/total, 0.9999), 0.0001)
-    # q_ij ≈ p(i1st,j2nd)+p(j1st,i2nd) = p_i p_j (1/(1-p_i)+1/(1-p_j))
     return (pi*pj) * ((1.0/(1.0-pi)) + (1.0/(1.0-pj)))
 
 # ================== スコア計算（p1×PL と p12 のCobb–Douglasブレンド） ==================
 def pick_pairs(runners:list[Runner], day:str, w:float, k:int=4):
-    # 全員の当日p1（正規化用）
     p1_day_map = {r.no: day_p1(r.rank, day) for r in runners}
-
     cand = []
     for a,b in itertools.combinations(runners,2):
-        # 核：PL近似のjoint & 連対積
-        qpl = pl_joint_prob(p1_day_map, a.no, b.no)
-        s12 = day_p12(a.rank, day) * day_p12(b.rank, day)
+        qpl = pl_joint_prob(p1_day_map, a.no, b.no)               # 頭2つの確率近似
+        s12 = day_p12(a.rank, day) * day_p12(b.rank, day)         # 連対積
         core = (qpl**w) * (s12**(1.0-w))
-        # ライン・役割/脚質
         L = line_factor(a,b,day)
         R = style_factor(a,b)
         s = core * L * R
@@ -153,15 +147,13 @@ def pick_pairs(runners:list[Runner], day:str, w:float, k:int=4):
 
     # 制約: ①同一ライン隣接を最低1点 ②同一選手は最大2点 ③計k点
     selected, cnt = [], {}
-    # 隣接を1点確保
-    for pair,s,adj,inv in cand:
+    for pair,s,adj,inv in cand:  # 隣接を1点確保
         if not adj: continue
         i,j = list(inv)
         if cnt.get(i,0)>=2 or cnt.get(j,0)>=2: continue
         selected.append((pair,s,adj)); cnt[i]=cnt.get(i,0)+1; cnt[j]=cnt.get(j,0)+1
         break
-    # 残り充足
-    for pair,s,adj,inv in cand:
+    for pair,s,adj,inv in cand:  # 残り充足
         if len(selected)>=k: break
         i,j = list(inv)
         if cnt.get(i,0)>=2 or cnt.get(j,0)>=2: continue
@@ -186,34 +178,49 @@ c1, c2, c3 = st.columns(3)
 raw_nige = c1.text_input("逃（例: 1 6）", value="")
 raw_ryo  = c2.text_input("両（例: 2 3）", value="")
 raw_tsu  = c3.text_input("追（例: 4 5 7）", value="")
-
 list_nige = parse_car_list(raw_nige, 7)
 list_ryo  = parse_car_list(raw_ryo, 7)
 list_tsu  = parse_car_list(raw_tsu, 7)
-
 dup = set(list_nige) & set(list_ryo) | set(list_nige) & set(list_tsu) | set(list_ryo) & set(list_tsu)
 if dup:
     st.error(f"脚質の重複指定: {sorted(dup)} が複数の欄に入っています。どれか一方にしてください。")
-
 default_unassigned = st.radio("未指定車番の既定脚質", options=["追", "両", "逃"], index=0, horizontal=True)
 
-st.subheader("各選手の入力（評価順位のみ）")
+# ---- ヴェロビ評価順（車番並びを1行で） or 手動 ----
+st.subheader("評価順位の入力")
+method = st.radio("入力方法を選択", ["ヴェロビ評価順（車番並びを1行）", "手動で各選手に入力"], horizontal=True, index=0)
+
+rank_map = {}
+if method == "ヴェロビ評価順（車番並びを1行）":
+    vorder_str = st.text_input("ヴェロビ評価順（例: 3142576 や 3 1 4 2 5 7 6）", value="")
+    vorder = parse_verovi_order(vorder_str)
+    if vorder:
+        rank_map = {car: i+1 for i,car in enumerate(vorder)}
+    else:
+        st.info("7桁・重複なしで 1〜7 を並べてください。未入力や不正な場合は下の手動欄を使えます。")
+
 cols = st.columns(7, gap="small")
 runners = []
 for i in range(7):
     with cols[i]:
         no = i+1
         st.markdown(f"**{no}番**")
-        rank = st.number_input("評価順位", 1, 7, value=min(no,7), key=f"rank{no}")
 
-        # まとめ入力から脚質を自動付与（見た目だけ表示）
+        # 脚質の割当（まとめ入力から）
         if no in list_nige:   style = "逃"
         elif no in list_ryo:  style = "両"
         elif no in list_tsu:  style = "追"
         else:                 style = default_unassigned
         st.caption(f"脚質: {style}")
 
-        runners.append(Runner(no=no, rank=rank, line=id_map[no], pos=pos_map[no], style=style))
+        # 順位の決定（ヴェロビ並び or 手動）
+        if rank_map:
+            rank = rank_map[no]
+            st.text(f"評価順位: {rank}")  # 表示のみ（編集不可）
+        else:
+            rank = st.number_input("評価順位", 1, 7, value=min(no,7), key=f"rank{no}")
+
+        runners.append(Runner(no=no, rank=int(rank), line=id_map[no], pos=pos_map[no], style=style))
 
 st.markdown("---")
 if st.button("４点を選定"):
@@ -235,7 +242,8 @@ with st.expander("参照：固定係数（検算用）", expanded=False):
 
 st.caption("""
 Score = [(PL由来の上位2同時確率)^w × (連対積)^(1-w)] × ライン係数 × 役割/脚質係数。
-・同一ラインは“位置”で評価（先行-番手1.15 等）、別線は“脚質”で微調整（逃-逃0.90 等）。
-・通算p1は p12の比例近似（既定0.481倍）。p1日別が揃い次第、K1を差し替えるだけで反映されます。
+・脚質は「逃/両/追」に車番を列挙（重複は赤エラー、未指定は既定で補完）。
+・順位は「ヴェロビ評価順」を1行で貼ると自動付与。未入力/不正なら手動入力に切替。
+・通算p1は p12の比例近似（0.481倍）。p1日別が整えばK1を書き換えるだけで反映。
 ・制約：同一ライン隣接を最低1点／同一選手は最大2点／合計4点。
 """)
