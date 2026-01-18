@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union
 
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ分析（開催区分別）", layout="wide")
-st.title("ヴェロビ 組み方分析（可変頭数・開催区分別／全体集計） v2.7+復習分布累積")
+st.title("ヴェロビ 組み方分析（可変頭数・開催区分別／全体集計） v2.7+条件付き2着分布")
 
 # -------- 基本設定 --------
 MAX_FIELD = 9
@@ -66,59 +66,58 @@ def parse_finish(s: str) -> List[str]:
     return out
 
 
-# ===== 復習分布（累積用）設定 =====
-WINNER_RANKS = (1, 2, 3)      # 1着が評価1～3位の条件だけ見る
-RUNNERUP_MAX = 6             # 2着は評価1～6位を個別
-RUNNERUP_BIN = 7             # 7位以上はまとめて「7+」
+# =========================
+# 追加：条件付き2着分布（累積対応）
+# =========================
+WINNER_RANKS = (1, 2, 3)  # 1着が評価1～3位のときだけ見る
+RR_OUT = "圏外"           # 2着車がV順位内にいない等
 
+PairKey = Tuple[int, Union[int, str]]  # (winner_rank, runnerup_rank or "圏外")
 
-def build_runnerup_dist_from_counts(pair_counts: Dict[Tuple[int, int], int]) -> pd.DataFrame:
+def build_conditional_runnerup_tables(pair_counts: Dict[PairKey, int], max_field: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    pair_counts[(winner_rank, runnerup_rank_bin)] = 回数
-    runnerup_rank_bin: 1..6, 7(=7+)
+    pair_counts[(wr, rr)] = 回数
+    出力：回数ピボット、割合%ピボット
     """
-    rows = []
+    cols = list(range(1, max_field + 1)) + [RR_OUT]
+    count_rows = []
+    pct_rows = []
+
     for wr in WINNER_RANKS:
-        N = 0
-        for rr in list(range(1, RUNNERUP_MAX + 1)) + [RUNNERUP_BIN]:
-            N += int(pair_counts.get((wr, rr), 0))
+        # このwr条件の総数
+        total = 0
+        for rr in cols:
+            total += int(pair_counts.get((wr, rr), 0))
 
-        if N == 0:
-            rows.append({
-                "条件(1着の評価順位)": wr,
-                "対象レース数N": 0,
-                "2着の評価順位": "-",
-                "回数": 0,
-                "割合%": 0.0,
-            })
-            continue
+        # 回数行
+        row_c = {"1着の評価順位": wr, "N": total}
+        for rr in cols:
+            row_c[str(rr)] = int(pair_counts.get((wr, rr), 0))
+        count_rows.append(row_c)
 
-        for rr in list(range(1, RUNNERUP_MAX + 1)) + [RUNNERUP_BIN]:
-            c = int(pair_counts.get((wr, rr), 0))
-            if c == 0:
-                continue
-            label = rr if rr != RUNNERUP_BIN else "7+"
-            rows.append({
-                "条件(1着の評価順位)": wr,
-                "対象レース数N": N,
-                "2着の評価順位": label,
-                "回数": c,
-                "割合%": round(100.0 * c / N, 1),
-            })
-    return pd.DataFrame(rows)
+        # ％行（wr自身は「ありえない」ので空欄にする：1→1, 2→2, 3→3）
+        row_p = {"1着の評価順位": wr, "N": total}
+        for rr in cols:
+            if isinstance(rr, int) and rr == wr:
+                row_p[str(rr)] = None
+            else:
+                v = int(pair_counts.get((wr, rr), 0))
+                row_p[str(rr)] = round(100.0 * v / total, 1) if total > 0 else 0.0
+        pct_rows.append(row_p)
+
+    df_count = pd.DataFrame(count_rows)
+    df_pct = pd.DataFrame(pct_rows)
+    return df_count, df_pct
 
 
 # -------- 入力タブ --------
-input_tabs = st.tabs(["日次手入力（最大12R）", "前日までの集計（累積）", "分析結果"])
+input_tabs = st.tabs(["日次手入力（最大12R）", "前日までの集計（ランク別回数）", "分析結果"])
 
 byrace_rows: List[Dict] = []
-
-# 既存：ランク別回数の累積（開催区分別）
 agg_counts_manual: Dict[Tuple[str, int], Dict[str, int]] = defaultdict(lambda: {"N": 0, "C1": 0, "C2": 0, "C3": 0})
 
-# ★追加：復習分布の累積（開催区分なし・全体のみ）
-# pair_counts_manual[(winner_rank, runnerup_rank_bin)] = 回数
-pair_counts_manual: Dict[Tuple[int, int], int] = defaultdict(int)
+# ★追加：前日まで累積（条件付き2着分布）
+pair_counts_manual: Dict[PairKey, int] = defaultdict(int)
 
 
 # A. 日次手入力（開催区分は1回だけ指定→全行に適用）
@@ -150,10 +149,9 @@ with input_tabs[0]:
 
         any_input = any([vorder, finish])
         if any_input:
-            # V順位は頭数以下の桁であること（例外: 未入力は許容）
             if vorder and (4 <= field <= MAX_FIELD) and len(vorder) <= field:
                 byrace_rows.append({
-                    "day": day_global,   # 内部キー（"L","F2","F1","G"）
+                    "day": day_global,
                     "race": rid,
                     "field": field,
                     "vorder": vorder,
@@ -165,10 +163,7 @@ with input_tabs[0]:
 
 # B. 前日までの集計（手入力）
 with input_tabs[1]:
-    st.subheader("前日までの集計（累積）")
-
-    # ---- 既存：開催区分×ランク別（1着/2着/3着） ----
-    st.markdown("## ① ランク別 入賞回数（開催区分別・既存）")
+    st.subheader("前日までの集計（開催区分 × ランク（◎〜無）の入賞回数）")
 
     MU_BIN_R = 7  # 無 まとめ先のランク番号（内部は7に集約）
     def add_rec(day: str, r: int, N: int, C1: int, C2: int, C3: int):
@@ -186,7 +181,6 @@ with input_tabs[1]:
         ch[2].markdown("1着回数")
         ch[3].markdown("2着回数／3着回数")
 
-        # 1～6を個別入力
         for r in range(1, 7):
             c0, c1, c2, c3 = st.columns([1,1,1,1])
             c0.write(rank_symbol(r))
@@ -198,7 +192,6 @@ with input_tabs[1]:
             if any([N, C1, C2, C3]):
                 add_rec(day, r, N, C1, C2, C3)
 
-        # 無（7位以降）
         c0, c1, c2, c3 = st.columns([1,1,1,1])
         c0.write("carFR順位７～位")
         N_mu  = c1.number_input("", key=f"agg_{day}_N_{MU_BIN_R}",  min_value=0, value=0)
@@ -209,40 +202,38 @@ with input_tabs[1]:
         if any([N_mu, C1_mu, C2_mu, C3_mu]):
             add_rec(day, MU_BIN_R, N_mu, C1_mu, C2_mu, C3_mu)
 
+    # ★追加：前日までの累積（条件付き2着分布）
     st.divider()
+    st.subheader("前日までの集計（復習用）：1着が評価1〜3位のとき、2着の評価順位（累積回数）")
+    st.caption("ここは開催区分なし（全体累積）。『回数』だけ入力。未入力は0のままでOK。")
 
-    # ---- ★追加：復習用（1着評価X→2着評価Yの回数）累積 ----
-    st.markdown("## ② 復習用：『1着が評価1〜3位』のとき、2着の評価順位（累積）")
-    st.caption("ここは開催区分なし（全体累積）です。2着は 1〜6位 + 7位以上(7+) にまとめます。")
+    cols = list(range(1, MAX_FIELD + 1)) + [RR_OUT]
 
     # ヘッダ
-    hdr = st.columns([1] + [1]*RUNNERUP_MAX + [1])
-    hdr[0].markdown("**条件：1着の評価順位**")
-    for rr in range(1, RUNNERUP_MAX + 1):
-        hdr[rr].markdown(f"**2着=評価{rr}位**")
-    hdr[-1].markdown("**2着=7+**")
+    h = st.columns([1] + [1]*len(cols))
+    h[0].markdown("**条件：1着の評価順位**")
+    for j, rr in enumerate(cols, start=1):
+        h[j].markdown(f"**2着={rr}**")
 
+    # 行（wr=1..3）
     for wr in WINNER_RANKS:
-        cols = st.columns([1] + [1]*RUNNERUP_MAX + [1])
-        cols[0].write(f"評価{wr}位が1着")
-        for rr in range(1, RUNNERUP_MAX + 1):
-            v = cols[rr].number_input(
+        row_cols = st.columns([1] + [1]*len(cols))
+        row_cols[0].write(f"評価{wr}位が1着")
+
+        for j, rr in enumerate(cols, start=1):
+            # 1→1, 2→2, 3→3 は理屈上ありえないので入力欄を出さない（固定0）
+            if isinstance(rr, int) and rr == wr:
+                row_cols[j].write("-")
+                continue
+
+            v = row_cols[j].number_input(
                 "",
-                key=f"pair_wr{wr}_rr{rr}",
+                key=f"pair_prev_wr{wr}_rr{rr}",
                 min_value=0,
                 value=0
             )
             if v:
                 pair_counts_manual[(wr, rr)] += int(v)
-
-        v7 = cols[-1].number_input(
-            "",
-            key=f"pair_wr{wr}_rr7p",
-            min_value=0,
-            value=0
-        )
-        if v7:
-            pair_counts_manual[(wr, RUNNERUP_BIN)] += int(v7)
 
 
 # -------- 集計構築（開催区分別 + 全体） --------
@@ -266,30 +257,30 @@ for row in byrace_rows:
         if len(finish) >= 3 and finish[2] == car:
             rank_counts_daily[(day, i)]["C3"] += 1
 
-# 手入力の前日まで集計を合算
 for (day, r), rec in agg_counts_manual.items():
     rank_counts_daily[(day, r)]["N"]  += rec["N"]
     rank_counts_daily[(day, r)]["C1"] += rec["C1"]
     rank_counts_daily[(day, r)]["C2"] += rec["C2"]
     rank_counts_daily[(day, r)]["C3"] += rec["C3"]
 
-# 全体集計の構築
 rank_counts_total: Dict[int, Dict[str, int]] = {r: {"N":0, "C1":0, "C2":0, "C3":0} for r in range(1, MAX_FIELD + 1)}
 for (day, r), rec in rank_counts_daily.items():
     for k in ("N","C1","C2","C3"):
         rank_counts_total[r][k] += rec[k]
 
-# ===== ★追加：復習分布（レース入力ぶん）を作る =====
-pair_counts_daily: Dict[Tuple[int, int], int] = defaultdict(int)
+
+# ★追加：日次手入力分から「条件付き2着」回数を作る
+pair_counts_daily: Dict[PairKey, int] = defaultdict(int)
 
 for row in byrace_rows:
     vorder = row.get("vorder", [])
     finish = row.get("finish", [])
 
-    if len(finish) < 2:
+    if len(finish) < 2 or len(vorder) < 1:
         continue
 
     car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+
     win_car = finish[0]
     run_car = finish[1]
 
@@ -297,16 +288,11 @@ for row in byrace_rows:
     if win_rank not in WINNER_RANKS:
         continue
 
-    r2 = car_to_rank.get(run_car)
-    if r2 is None or r2 >= RUNNERUP_BIN:
-        rr_bin = RUNNERUP_BIN
-    else:
-        rr_bin = r2
+    run_rank = car_to_rank.get(run_car, RR_OUT)
+    pair_counts_daily[(win_rank, run_rank)] += 1
 
-    pair_counts_daily[(win_rank, rr_bin)] += 1
-
-# 日次 + 前日累積 を合算
-pair_counts_total: Dict[Tuple[int, int], int] = defaultdict(int)
+# 合算（累積）
+pair_counts_total: Dict[PairKey, int] = defaultdict(int)
 for k, v in pair_counts_daily.items():
     pair_counts_total[k] += int(v)
 for k, v in pair_counts_manual.items():
@@ -315,16 +301,23 @@ for k, v in pair_counts_manual.items():
 
 # -------- 出力タブ --------
 with input_tabs[2]:
-    # ★復習分布（累積）
-    st.subheader("復習：『1着が評価1〜3位』のとき、2着は評価何位が多いか（累積分布）")
-    st.dataframe(build_runnerup_dist_from_counts(pair_counts_total), use_container_width=True, hide_index=True)
+    # ★目的の分布：1-2.. / 2-1.. / 3-1..
+    st.subheader("復習：1着が評価1〜3位のとき、2着の評価順位分布（累積）")
+
+    df_count, df_pct = build_conditional_runnerup_tables(pair_counts_total, MAX_FIELD)
+
+    st.markdown("### 回数（Nは条件付き総数）")
+    st.dataframe(df_count, use_container_width=True, hide_index=True)
+
+    st.markdown("### 割合%（1→1 / 2→2 / 3→3 は空欄）")
+    st.dataframe(df_pct, use_container_width=True, hide_index=True)
 
     st.divider()
 
+    # 既存出力（そのまま）
     st.subheader("開催区分別：ランク別 入賞テーブル（◎〜carFR順位７～位）")
     for day in DAY_OPTIONS:
         rows_out = []
-        # 1～6位は個別
         for r in range(1, 7):
             rec = rank_counts_daily.get((day, r), {"N":0,"C1":0,"C2":0,"C3":0})
             N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
@@ -340,7 +333,6 @@ with input_tabs[2]:
                 "3着内率%": rate(C1+C2+C3,N),
             })
 
-        # 7位以降を「無」にまとめる
         N=C1=C2=C3=0
         for r in range(7, MAX_FIELD+1):
             rec = rank_counts_daily.get((day, r), {"N":0,"C1":0,"C2":0,"C3":0})
@@ -364,7 +356,6 @@ with input_tabs[2]:
         st.markdown(f"### {DAY_LABELS[day]}")
         st.dataframe(df_day, use_container_width=True, hide_index=True)
 
-    # 全体集計も同じ処理
     rows_total = []
     for r in range(1, 7):
         rec = rank_counts_total.get(r, {"N":0,"C1":0,"C2":0,"C3":0})
