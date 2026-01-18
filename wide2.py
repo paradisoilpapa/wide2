@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜条件付き2着分布 + ランク別入賞 v1.0")
+st.title("ヴェロビ 復習（全体累積）｜2着順位分布 → ランク別入賞 v1.1")
 
 # -------- 基本設定 --------
 MAX_FIELD = 9  # 最大頭数（4～9）
@@ -61,8 +61,8 @@ def parse_finish(s: str) -> List[str]:
 # =========================
 # 条件付き2着分布（累積対応）
 # =========================
-WINNER_RANKS = (1, 2, 3)  # 1着が評価1～3位のときだけ見る
-RR_OUT = "圏外"           # 2着車がV順位内にいない等（実運用ではほぼ出ないが保険）
+WINNER_RANKS = (1, 2, 3)   # 1着が評価1～3位のときだけ見る
+RR_OUT = "圏外"            # 2着車がV順位内にいない等（保険）
 
 PairKey = Tuple[int, Union[int, str]]  # (winner_rank, runnerup_rank or "圏外")
 
@@ -144,66 +144,21 @@ with tabs[0]:
                 st.warning(f"R{rid}: 入力不整合（V順位/頭数を確認）。V順位は頭数桁以下、4～{MAX_FIELD}車のみ対象。")
 
 
-# -------- B. 前日までの集計（累積） --------
+# -------- B. 前日までの集計（累積） ※順番統一：2着分布→ランク別 --------
 with tabs[1]:
     st.subheader("前日までの集計（累積・全体）")
 
-    # ① ランク別入賞回数（全体）
-    st.markdown("## ① ランク別 入賞回数（全体累積）")
-
-    MU_BIN_R = 7  # 7位以降まとめ（表示は「carFR順位７～位」）
-
-    def add_rank_rec(r: int, N: int, C1: int, C2: int, C3: int):
-        rec = agg_rank_manual[r]
-        rec["N"]  += int(N)
-        rec["C1"] += int(C1)
-        rec["C2"] += int(C2)
-        rec["C3"] += int(C3)
-
-    hdr = st.columns([1, 1, 1, 1])
-    hdr[0].markdown("ランク（表示）")
-    hdr[1].markdown("N_r")
-    hdr[2].markdown("1着回数")
-    hdr[3].markdown("2着回数／3着回数")
-
-    # 1～6
-    for r in range(1, 7):
-        c0, c1, c2, c3 = st.columns([1, 1, 1, 1])
-        c0.write(rank_symbol(r))
-        N  = c1.number_input("", key=f"aggN_{r}",  min_value=0, value=0)
-        C1 = c2.number_input("", key=f"aggC1_{r}", min_value=0, value=0)
-        c3_cols = c3.columns(2)
-        C2 = c3_cols[0].number_input("", key=f"aggC2_{r}", min_value=0, value=0)
-        C3 = c3_cols[1].number_input("", key=f"aggC3_{r}", min_value=0, value=0)
-        if any([N, C1, C2, C3]):
-            add_rank_rec(r, N, C1, C2, C3)
-
-    # 7位以降まとめ
-    c0, c1, c2, c3 = st.columns([1, 1, 1, 1])
-    c0.write("carFR順位７～位")
-    N_mu  = c1.number_input("", key=f"aggN_{MU_BIN_R}",  min_value=0, value=0)
-    C1_mu = c2.number_input("", key=f"aggC1_{MU_BIN_R}", min_value=0, value=0)
-    c3_cols = c3.columns(2)
-    C2_mu = c3_cols[0].number_input("", key=f"aggC2_{MU_BIN_R}", min_value=0, value=0)
-    C3_mu = c3_cols[1].number_input("", key=f"aggC3_{MU_BIN_R}", min_value=0, value=0)
-    if any([N_mu, C1_mu, C2_mu, C3_mu]):
-        add_rank_rec(MU_BIN_R, N_mu, C1_mu, C2_mu, C3_mu)
-
-    st.divider()
-
-    # ② 条件付き2着分布（全体）
-    st.markdown("## ② 復習用：1着が評価1〜3位のとき、2着の評価順位（全体累積・回数）")
-    st.caption("「回数」だけ入力。1→1 / 2→2 / 3→3 は理屈上ありえないので入力欄を出しません。")
+    # ② 条件付き2着分布（全体）※先頭
+    st.markdown("## 2着順位分布（累積・回数）")
+    st.caption("復習用：1着が評価1〜3位のとき、2着の評価順位の回数を入力。1→1 / 2→2 / 3→3 は入力不要。")
 
     cols = list(range(1, MAX_FIELD + 1)) + [RR_OUT]
 
-    # ヘッダ
     h = st.columns([1] + [1]*len(cols))
     h[0].markdown("**条件：1着の評価順位**")
     for j, rr in enumerate(cols, start=1):
         h[j].markdown(f"**2着={rr}**")
 
-    # 行
     for wr in WINNER_RANKS:
         row_cols = st.columns([1] + [1]*len(cols))
         row_cols[0].write(f"評価{wr}位が1着")
@@ -220,6 +175,47 @@ with tabs[1]:
             )
             if v:
                 pair_counts_manual[(wr, rr)] += int(v)
+
+    st.divider()
+
+    # ① ランク別入賞回数（全体）※後ろ
+    st.markdown("## ランク別 入賞回数（累積）")
+
+    MU_BIN_R = 7  # 7位以降まとめ
+
+    def add_rank_rec(r: int, N: int, C1: int, C2: int, C3: int):
+        rec = agg_rank_manual[r]
+        rec["N"]  += int(N)
+        rec["C1"] += int(C1)
+        rec["C2"] += int(C2)
+        rec["C3"] += int(C3)
+
+    hdr = st.columns([1, 1, 1, 1])
+    hdr[0].markdown("ランク（表示）")
+    hdr[1].markdown("N_r")
+    hdr[2].markdown("1着回数")
+    hdr[3].markdown("2着回数／3着回数")
+
+    for r in range(1, 7):
+        c0, c1, c2, c3 = st.columns([1, 1, 1, 1])
+        c0.write(rank_symbol(r))
+        N  = c1.number_input("", key=f"aggN_{r}",  min_value=0, value=0)
+        C1 = c2.number_input("", key=f"aggC1_{r}", min_value=0, value=0)
+        c3_cols = c3.columns(2)
+        C2 = c3_cols[0].number_input("", key=f"aggC2_{r}", min_value=0, value=0)
+        C3 = c3_cols[1].number_input("", key=f"aggC3_{r}", min_value=0, value=0)
+        if any([N, C1, C2, C3]):
+            add_rank_rec(r, N, C1, C2, C3)
+
+    c0, c1, c2, c3 = st.columns([1, 1, 1, 1])
+    c0.write("carFR順位７～位")
+    N_mu  = c1.number_input("", key=f"aggN_{MU_BIN_R}",  min_value=0, value=0)
+    C1_mu = c2.number_input("", key=f"aggC1_{MU_BIN_R}", min_value=0, value=0)
+    c3_cols = c3.columns(2)
+    C2_mu = c3_cols[0].number_input("", key=f"aggC2_{MU_BIN_R}", min_value=0, value=0)
+    C3_mu = c3_cols[1].number_input("", key=f"aggC3_{MU_BIN_R}", min_value=0, value=0)
+    if any([N_mu, C1_mu, C2_mu, C3_mu]):
+        add_rank_rec(MU_BIN_R, N_mu, C1_mu, C2_mu, C3_mu)
 
 
 # =========================
@@ -253,10 +249,9 @@ for r in range(1, MAX_FIELD + 1):
     for k in ("N", "C1", "C2", "C3"):
         rank_total[r][k] += rank_daily[r][k]
 
-# 前日まで累積（1～6と7+のみ入力される想定）
+# 前日まで累積（1～6と7+）
 for r, rec in agg_rank_manual.items():
     if r == 7:
-        # 7+ は 7..MAX_FIELD にまとめて足す（内部は7として扱う）
         rank_total[7]["N"]  += rec["N"]
         rank_total[7]["C1"] += rec["C1"]
         rank_total[7]["C2"] += rec["C2"]
@@ -273,7 +268,6 @@ pair_counts_daily: Dict[PairKey, int] = defaultdict(int)
 for row in byrace_rows:
     vorder = row.get("vorder", [])
     finish = row.get("finish", [])
-
     if len(finish) < 2 or not vorder:
         continue
 
@@ -297,10 +291,10 @@ for k, v in pair_counts_manual.items():
 
 
 # =========================
-# 出力：分析結果（UD統一：分布→ランク表）
+# 出力：分析結果（順番統一：2着分布→ランク表）
 # =========================
 with tabs[2]:
-    st.subheader("復習：1着が評価1〜3位のとき、2着の評価順位分布（全体累積）")
+    st.subheader("2着順位分布（全体累積）｜1着が評価1〜3位のとき")
 
     df_count, df_pct = build_conditional_runnerup_tables(pair_counts_total, MAX_FIELD)
 
@@ -311,7 +305,6 @@ with tabs[2]:
     st.dataframe(df_pct, use_container_width=True, hide_index=True)
 
     st.divider()
-
     st.subheader("ランク別 入賞テーブル（全体累積）")
 
     def rate(x, n):
