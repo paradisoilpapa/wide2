@@ -1,29 +1,33 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict
-from typing import List, Dict, Tuple, Union
+from typing import List, Dict, Tuple
 
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2着分布 → 3連複分布 → ランク別入賞 v1.4")
+st.title("ヴェロビ 復習（全体累積）｜2着分布 → 3連複分布 → ランク別入賞 v1.5（7車固定）")
 
 # -------- 基本設定 --------
-MAX_FIELD = 9  # 最大頭数（4～9）
+MAX_FIELD = 7              # ★ 7車固定（8車以降は一切出さない）
 WINNER_RANKS = (1, 2, 3)   # 1着が評価1～3位を対象
-RR_OUT = "圏外"            # 保険（通常は出ない）
 
 RANK_SYMBOLS = {
-    1: "carFR順位１位", 2: "carFR順位２位", 3: "carFR順位３位", 4: "carFR順位４位",
-    5: "carFR順位５位", 6: "carFR順位６位",
-    7: "carFR順位７～位", 8: "carFR順位７～位", 9: "carFR順位７～位",
+    1: "carFR順位１位",
+    2: "carFR順位２位",
+    3: "carFR順位３位",
+    4: "carFR順位４位",
+    5: "carFR順位５位",
+    6: "carFR順位６位",
+    7: "carFR順位７～位",
 }
 def rank_symbol(r: int) -> str:
     return RANK_SYMBOLS.get(r, "carFR順位７～位")
 
 
 def parse_rankline(s: str) -> List[str]:
+    """V順位（例: '1432...'）をパース。"""
     if not s:
         return []
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
@@ -36,6 +40,7 @@ def parse_rankline(s: str) -> List[str]:
     return list(s)
 
 def parse_finish(s: str) -> List[str]:
+    """着順（～3桁まで使用、余分は切り捨て）"""
     if not s:
         return []
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
@@ -52,10 +57,10 @@ def parse_finish(s: str) -> List[str]:
 # =========================
 # 2着分布（条件付き）
 # =========================
-PairKey = Tuple[int, Union[int, str]]  # (winner_rank, runnerup_rank or "圏外")
+PairKey = Tuple[int, int]  # (1着の評価順位wr, 2着の評価順位rr)
 
 def build_runnerup_tables(pair_counts: Dict[PairKey, int], max_field: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    cols = list(range(1, max_field + 1)) + [RR_OUT]
+    cols = list(range(1, max_field + 1))
     rows_c, rows_p = [], []
 
     for wr in WINNER_RANKS:
@@ -68,7 +73,7 @@ def build_runnerup_tables(pair_counts: Dict[PairKey, int], max_field: int) -> Tu
 
         row_p = {"1着の評価順位": wr, "N": total}
         for rr in cols:
-            if isinstance(rr, int) and rr == wr:
+            if rr == wr:
                 row_p[str(rr)] = None
             else:
                 v = int(pair_counts.get((wr, rr), 0))
@@ -81,60 +86,57 @@ def build_runnerup_tables(pair_counts: Dict[PairKey, int], max_field: int) -> Tu
 # =========================
 # 3連複分布（1着×2着→3着）
 # =========================
-TriKey = Tuple[int, int, Union[int, str]]  # (wr, rr, tr or "圏外")
+TriKey = Tuple[int, int, int]  # (wr, rr, tr)
 
 def tri_matrix_counts(tri_counts: Dict[TriKey, int], wr: int, max_field: int) -> pd.DataFrame:
-    # rows: 2着順位, cols: 3着順位
-    cols = [str(i) for i in range(1, max_field + 1)] + [RR_OUT]
-    idx = [str(i) for i in range(1, max_field + 1)] + [RR_OUT]
+    cols = [str(i) for i in range(1, max_field + 1)]  # 3着
+    idx  = [str(i) for i in range(1, max_field + 1)]  # 2着
 
     data = []
     for rr_s in idx:
-        rr = int(rr_s) if rr_s.isdigit() else RR_OUT
+        rr = int(rr_s)
         row = []
         for tr_s in cols:
-            tr = int(tr_s) if tr_s.isdigit() else RR_OUT
+            tr = int(tr_s)
 
-            # 同一順位の組み合わせは無効
-            if rr != RR_OUT and rr == wr:
+            invalid = (rr == wr) or (tr == wr) or (tr == rr)
+            if invalid:
                 row.append(None)
-                continue
-            if tr != RR_OUT and (tr == wr or (rr != RR_OUT and tr == rr)):
-                row.append(None)
-                continue
-            if rr == RR_OUT or tr == RR_OUT:
-                # 保険枠：通常は使わない
-                v = int(tri_counts.get((wr, rr, tr), 0))
-                row.append(v)
             else:
-                v = int(tri_counts.get((wr, rr, tr), 0))
-                row.append(v)
+                row.append(int(tri_counts.get((wr, rr, tr), 0)))
         data.append(row)
 
-    df = pd.DataFrame(data, index=idx, columns=cols)
+    # dtype=object で None を NaN に変えない（割合計算のint化事故を防ぐ）
+    df = pd.DataFrame(data, index=idx, columns=cols, dtype="object")
     df.index.name = f"2着(評価順位)｜1着=評価{wr}位"
     return df
 
 def tri_matrix_pct(tri_counts: Dict[TriKey, int], wr: int, max_field: int) -> pd.DataFrame:
-    # rrごとに行内%（= 1着wr & 2着rr に絞った時の3着分布）
+    """行内%：『1着=wr & 2着=rr』での3着分布"""
     df_c = tri_matrix_counts(tri_counts, wr, max_field)
     df_p = df_c.copy()
 
     for rr in df_c.index:
-        # rr行の合計（None除外）
-        vals = [v for v in df_c.loc[rr].tolist() if v is not None]
-        denom = sum(int(v) for v in vals)
+        denom = 0
+        for c in df_c.columns:
+            v = df_c.loc[rr, c]
+            if v is None:
+                continue
+            denom += int(v)
+
         if denom <= 0:
             for c in df_p.columns:
                 if df_p.loc[rr, c] is None:
                     continue
                 df_p.loc[rr, c] = 0.0
             continue
+
         for c in df_p.columns:
-            if df_p.loc[rr, c] is None:
-                continue
-            v = int(df_c.loc[rr, c])
-            df_p.loc[rr, c] = round(100.0 * v / denom, 1)
+            v = df_c.loc[rr, c]
+            if v is None:
+                df_p.loc[rr, c] = None
+            else:
+                df_p.loc[rr, c] = round(100.0 * int(v) / denom, 1)
 
     return df_p
 
@@ -169,7 +171,7 @@ with tabs[0]:
     for i in range(1, 13):
         c1, c2, c3, c4 = st.columns([1, 1, 2, 1.5])
         rid = c1.text_input("", key=f"rid_{i}", value=str(i))
-        field = c2.number_input("", min_value=4, max_value=MAX_FIELD, value=min(7, MAX_FIELD), key=f"field_{i}")
+        field = c2.number_input("", min_value=4, max_value=MAX_FIELD, value=7, key=f"field_{i}")
         vline = c3.text_input("", key=f"vline_{i}", value="")
         fin = c4.text_input("", key=f"fin_{i}", value="")
 
@@ -195,19 +197,19 @@ with tabs[1]:
 
     # 1) 2着分布（累積・回数）
     st.markdown("## 2着順位分布（累積・回数）")
-    st.caption("復習用：1着が評価1〜3位のとき、2着の評価順位の回数を入力。1→1 / 2→2 / 3→3 は入力不要。")
+    st.caption("復習用：1着が評価1〜3位のとき、2着の評価順位の回数を入力（回数だけ）。")
 
-    cols = list(range(1, MAX_FIELD + 1)) + [RR_OUT]
-    h = st.columns([1] + [1]*len(cols))
+    cols = list(range(1, MAX_FIELD + 1))
+    h = st.columns([1] + [1] * len(cols))
     h[0].markdown("**条件：1着の評価順位**")
     for j, rr in enumerate(cols, start=1):
         h[j].markdown(f"**2着={rr}**")
 
     for wr in WINNER_RANKS:
-        row_cols = st.columns([1] + [1]*len(cols))
+        row_cols = st.columns([1] + [1] * len(cols))
         row_cols[0].write(f"評価{wr}位が1着")
         for j, rr in enumerate(cols, start=1):
-            if isinstance(rr, int) and rr == wr:
+            if rr == wr:
                 row_cols[j].write("-")
                 continue
             v = row_cols[j].number_input("", key=f"pair_prev_wr{wr}_rr{rr}", min_value=0, value=0)
@@ -216,45 +218,35 @@ with tabs[1]:
 
     st.divider()
 
-    # 2) 3連複（累積・回数）＝ 1着×2着→3着（2車単と同じ思想）
+    # 2) 3連複（累積・回数）＝ 1着×2着→3着
     st.markdown("## 3連複 分布（累積・回数）｜1着×2着→3着")
-    st.caption("復習用：1着が評価1〜3位のとき、2着評価と3着評価の組み合わせ回数を入力（回数だけ）。")
+    st.caption("復習用：1着が評価1〜3位のとき、2着評価×3着評価の回数を入力（回数だけ）。")
 
-    # wrごとに折りたたみ
+    cols3 = [str(i) for i in range(1, MAX_FIELD + 1)]  # 3着
+    rows2 = [str(i) for i in range(1, MAX_FIELD + 1)]  # 2着
+
     for wr in WINNER_RANKS:
         with st.expander(f"1着=評価{wr}位 のとき（2着×3着 回数表）", expanded=(wr == 1)):
-            cols3 = [str(i) for i in range(1, MAX_FIELD + 1)] + [RR_OUT]
-            rows2 = [str(i) for i in range(1, MAX_FIELD + 1)] + [RR_OUT]
-
-            # ヘッダ（3着）
-            hh = st.columns([1] + [1]*len(cols3))
+            hh = st.columns([1] + [1] * len(cols3))
             hh[0].markdown("**2着\\3着**")
-            for j, tr in enumerate(cols3, start=1):
-                hh[j].markdown(f"**{tr}**")
+            for j, tr_s in enumerate(cols3, start=1):
+                hh[j].markdown(f"**{tr_s}**")
 
-            # 本体（2着×3着）
             for rr_s in rows2:
-                rr = int(rr_s) if rr_s.isdigit() else RR_OUT
-                row = st.columns([1] + [1]*len(cols3))
+                rr = int(rr_s)
+                row = st.columns([1] + [1] * len(cols3))
                 row[0].write(rr_s)
 
                 for j, tr_s in enumerate(cols3, start=1):
-                    tr = int(tr_s) if tr_s.isdigit() else RR_OUT
-
-                    # 無効セル（同一順位の重複）
-                    invalid = False
-                    if rr != RR_OUT and rr == wr:
-                        invalid = True
-                    if tr != RR_OUT and (tr == wr or (rr != RR_OUT and tr == rr)):
-                        invalid = True
-
+                    tr = int(tr_s)
+                    invalid = (rr == wr) or (tr == wr) or (tr == rr)
                     if invalid:
                         row[j].write("-")
                         continue
 
                     v = row[j].number_input(
                         "",
-                        key=f"tri_prev_wr{wr}_rr{rr_s}_tr{tr_s}",
+                        key=f"tri_prev_wr{wr}_rr{rr}_tr{tr}",
                         min_value=0,
                         value=0
                     )
@@ -265,7 +257,7 @@ with tabs[1]:
 
     # 3) ランク別入賞回数（累積）
     st.markdown("## ランク別 入賞回数（累積）")
-    MU_BIN_R = 7  # 7位以降まとめ
+    MU_BIN_R = 7  # 7位以降まとめ（7車なので実質7位）
 
     def add_rank_rec(r: int, N: int, C1: int, C2: int, C3: int):
         rec = agg_rank_manual[r]
@@ -305,14 +297,8 @@ with tabs[1]:
 # =========================
 # 集計（日次 + 前日まで累積 を合算）
 # =========================
-
-# --- 2着分布（日次） ---
 pair_counts_daily: Dict[PairKey, int] = defaultdict(int)
-
-# --- 3連複（1着×2着→3着）（日次） ---
 tri_counts_daily: Dict[TriKey, int] = defaultdict(int)
-
-# --- ランク別（日次） ---
 rank_daily = {r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, MAX_FIELD + 1)}
 
 for row in byrace_rows:
@@ -323,7 +309,7 @@ for row in byrace_rows:
 
     car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
 
-    # ランク別入賞（日次）
+    # ランク別（日次）
     for r in range(1, min(len(vorder), MAX_FIELD) + 1):
         rank_daily[r]["N"] += 1
         car = vorder[r - 1]
@@ -337,39 +323,34 @@ for row in byrace_rows:
     # 2着分布（日次）
     if len(finish) >= 2:
         wr = car_to_rank.get(finish[0])
-        rr = car_to_rank.get(finish[1], RR_OUT)
-        if wr in WINNER_RANKS:
+        rr = car_to_rank.get(finish[1])
+        if wr in WINNER_RANKS and rr is not None:
             pair_counts_daily[(wr, rr)] += 1
 
     # 3連複分布（日次）＝ wr×rr→tr
     if len(finish) >= 3:
         wr = car_to_rank.get(finish[0])
-        rr = car_to_rank.get(finish[1], RR_OUT)
-        tr = car_to_rank.get(finish[2], RR_OUT)
-        if wr in WINNER_RANKS:
-            # 同一順位重複を除外（通常は起きない）
-            if rr != RR_OUT and rr == wr:
-                pass
-            elif tr != RR_OUT and (tr == wr or (rr != RR_OUT and tr == rr)):
-                pass
-            else:
+        rr = car_to_rank.get(finish[1])
+        tr = car_to_rank.get(finish[2])
+        if wr in WINNER_RANKS and rr is not None and tr is not None:
+            if (rr != wr) and (tr != wr) and (tr != rr):
                 tri_counts_daily[(wr, rr, tr)] += 1
 
-# --- 合算：2着分布 ---
+# 合算：2着分布
 pair_counts_total: Dict[PairKey, int] = defaultdict(int)
 for k, v in pair_counts_daily.items():
     pair_counts_total[k] += int(v)
 for k, v in pair_counts_manual.items():
     pair_counts_total[k] += int(v)
 
-# --- 合算：3連複（wr×rr→tr） ---
+# 合算：3連複（wr×rr→tr）
 tri_counts_total: Dict[TriKey, int] = defaultdict(int)
 for k, v in tri_counts_daily.items():
     tri_counts_total[k] += int(v)
 for k, v in tri_counts_manual.items():
     tri_counts_total[k] += int(v)
 
-# --- 合算：ランク別 ---
+# 合算：ランク別
 rank_total = {r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, MAX_FIELD + 1)}
 for r in range(1, MAX_FIELD + 1):
     for k in ("N", "C1", "C2", "C3"):
@@ -400,7 +381,7 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("3連複 分布（全体累積）｜1着×2着→3着（2車単と同じ見方）")
+    st.subheader("3連複 分布（全体累積）｜1着×2着→3着")
     for wr in WINNER_RANKS:
         st.markdown(f"### 1着=評価{wr}位 のとき")
         st.markdown("**回数**（行=2着順位 / 列=3着順位）")
@@ -429,15 +410,9 @@ with tabs[2]:
             "3着内率%": rate(C1 + C2 + C3, N),
         })
 
-    # 7+（7..MAX_FIELD をまとめ）
-    N = C1 = C2 = C3 = 0
-    for r in range(7, MAX_FIELD + 1):
-        rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-        N  += rec["N"]
-        C1 += rec["C1"]
-        C2 += rec["C2"]
-        C3 += rec["C3"]
-
+    # 7位（7車なので「7～位」は実質7位）
+    rec7 = rank_total.get(7, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+    N, C1, C2, C3 = rec7["N"], rec7["C1"], rec7["C2"], rec7["C3"]
     rows_out.append({
         "ランク": "carFR順位７～位",
         "出走数N": N,
