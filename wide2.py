@@ -7,10 +7,10 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2着分布 → 3連複分布 → ランク別入賞 v1.5（7車固定）")
+st.title("ヴェロビ 復習（全体累積）｜2着分布 → 3連複分布 → ランク別入賞 v1.6（7車固定）")
 
 # -------- 基本設定 --------
-MAX_FIELD = 7              # ★ 7車固定（8車以降は一切出さない）
+MAX_FIELD = 7              # ★ 7車固定
 WINNER_RANKS = (1, 2, 3)   # 1着が評価1～3位を対象
 
 RANK_SYMBOLS = {
@@ -27,7 +27,7 @@ def rank_symbol(r: int) -> str:
 
 
 def parse_rankline(s: str) -> List[str]:
-    """V順位（例: '1432...'）をパース。"""
+    """V順位（例: '1432...'）をパース（7車固定）。"""
     if not s:
         return []
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
@@ -84,60 +84,67 @@ def build_runnerup_tables(pair_counts: Dict[PairKey, int], max_field: int) -> Tu
 
 
 # =========================
-# 3連複分布（1着×2着→3着）
+# 3連複分布（順番なし：wr と 残り2枠の組）
+#   key = (wr, a, b) where a < b, a/b は評価順位（2着と3着を区別しない）
 # =========================
-TriKey = Tuple[int, int, int]  # (wr, rr, tr)
+TrifukuKey = Tuple[int, int, int]  # (wr, a, b) ただし a<b
 
-def tri_matrix_counts(tri_counts: Dict[TriKey, int], wr: int, max_field: int) -> pd.DataFrame:
-    cols = [str(i) for i in range(1, max_field + 1)]  # 3着
-    idx  = [str(i) for i in range(1, max_field + 1)]  # 2着
+def trifuku_matrix_counts(tri: Dict[TrifukuKey, int], wr: int, max_field: int) -> pd.DataFrame:
+    ranks = list(range(1, max_field + 1))
+    cols = [str(j) for j in ranks]
+    idx  = [str(i) for i in ranks]
 
     data = []
-    for rr_s in idx:
-        rr = int(rr_s)
+    for i_s in idx:
+        i = int(i_s)
         row = []
-        for tr_s in cols:
-            tr = int(tr_s)
+        for j_s in cols:
+            j = int(j_s)
 
-            invalid = (rr == wr) or (tr == wr) or (tr == rr)
+            # 無効セル：
+            # - i==j（同じ順位の重複はない）
+            # - i==wr or j==wr（wrは別枠なので相手2枠に出ない）
+            # - i>j は下三角は使わない（a<b の片側だけに集約）
+            invalid = (i == j) or (i == wr) or (j == wr) or (i > j)
+
             if invalid:
                 row.append(None)
             else:
-                row.append(int(tri_counts.get((wr, rr, tr), 0)))
+                a, b = i, j  # i<j のみ採用
+                row.append(int(tri.get((wr, a, b), 0)))
         data.append(row)
 
-    # dtype=object で None を NaN に変えない（割合計算のint化事故を防ぐ）
-    df = pd.DataFrame(data, index=idx, columns=cols, dtype="object")
-    df.index.name = f"2着(評価順位)｜1着=評価{wr}位"
-    return df
+    return pd.DataFrame(data, index=idx, columns=cols, dtype="object")
 
-def tri_matrix_pct(tri_counts: Dict[TriKey, int], wr: int, max_field: int) -> pd.DataFrame:
-    """行内%：『1着=wr & 2着=rr』での3着分布"""
-    df_c = tri_matrix_counts(tri_counts, wr, max_field)
+def trifuku_matrix_pct(tri: Dict[TrifukuKey, int], wr: int, max_field: int) -> pd.DataFrame:
+    df_c = trifuku_matrix_counts(tri, wr, max_field)
     df_p = df_c.copy()
 
-    for rr in df_c.index:
-        denom = 0
+    # wrごとの総数（有効セルのみ）
+    total = 0
+    for i in df_c.index:
         for c in df_c.columns:
-            v = df_c.loc[rr, c]
+            v = df_c.loc[i, c]
             if v is None:
                 continue
-            denom += int(v)
+            total += int(v)
 
-        if denom <= 0:
+    if total <= 0:
+        # 0埋め（Noneはそのまま）
+        for i in df_p.index:
             for c in df_p.columns:
-                if df_p.loc[rr, c] is None:
+                if df_p.loc[i, c] is None:
                     continue
-                df_p.loc[rr, c] = 0.0
-            continue
+                df_p.loc[i, c] = 0.0
+        return df_p
 
+    for i in df_p.index:
         for c in df_p.columns:
-            v = df_c.loc[rr, c]
+            v = df_c.loc[i, c]
             if v is None:
-                df_p.loc[rr, c] = None
+                df_p.loc[i, c] = None
             else:
-                df_p.loc[rr, c] = round(100.0 * int(v) / denom, 1)
-
+                df_p.loc[i, c] = round(100.0 * int(v) / total, 1)
     return df_p
 
 
@@ -154,8 +161,8 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(lambda: {"N": 0, "C1": 
 # 前日まで：2着分布（全体）
 pair_counts_manual: Dict[PairKey, int] = defaultdict(int)
 
-# 前日まで：3連複（1着×2着→3着）分布（全体）
-tri_counts_manual: Dict[TriKey, int] = defaultdict(int)
+# 前日まで：3連複（順番なし）分布（全体）
+trifuku_counts_manual: Dict[TrifukuKey, int] = defaultdict(int)
 
 
 # -------- 日次手入力 --------
@@ -197,8 +204,6 @@ with tabs[1]:
 
     # 1) 2着分布（累積・回数）
     st.markdown("## 2着順位分布（累積・回数）")
-    st.caption("復習用：1着が評価1〜3位のとき、2着の評価順位の回数を入力（回数だけ）。")
-
     cols = list(range(1, MAX_FIELD + 1))
     h = st.columns([1] + [1] * len(cols))
     h[0].markdown("**条件：1着の評価順位**")
@@ -218,46 +223,51 @@ with tabs[1]:
 
     st.divider()
 
-    # 2) 3連複（累積・回数）＝ 1着×2着→3着
-    st.markdown("## 3連複 分布（累積・回数）｜1着×2着→3着")
-    st.caption("復習用：1着が評価1〜3位のとき、2着評価×3着評価の回数を入力（回数だけ）。")
+    # 2) 3連複（累積・回数）＝ 1着がwrのとき、残り2枠(a,b)（順番なし）
+    st.markdown("## 3連複 分布（累積・回数）｜1着=wr のとき『相手2枠（順番なし）』")
+    st.caption("※三連単ではありません。2着と3着の順は無視して a-b（a<b）で入力します。")
 
-    cols3 = [str(i) for i in range(1, MAX_FIELD + 1)]  # 3着
-    rows2 = [str(i) for i in range(1, MAX_FIELD + 1)]  # 2着
+    ranks = list(range(1, MAX_FIELD + 1))
 
     for wr in WINNER_RANKS:
-        with st.expander(f"1着=評価{wr}位 のとき（2着×3着 回数表）", expanded=(wr == 1)):
-            hh = st.columns([1] + [1] * len(cols3))
-            hh[0].markdown("**2着\\3着**")
-            for j, tr_s in enumerate(cols3, start=1):
-                hh[j].markdown(f"**{tr_s}**")
+        with st.expander(f"1着=評価{wr}位 のとき（相手2枠 a-b の回数表）", expanded=(wr == 1)):
+            cols_j = [str(j) for j in ranks]
+            rows_i = [str(i) for i in ranks]
 
-            for rr_s in rows2:
-                rr = int(rr_s)
-                row = st.columns([1] + [1] * len(cols3))
-                row[0].write(rr_s)
+            hh = st.columns([1] + [1] * len(cols_j))
+            hh[0].markdown("**a\\b**")
+            for j, b_s in enumerate(cols_j, start=1):
+                hh[j].markdown(f"**{b_s}**")
 
-                for j, tr_s in enumerate(cols3, start=1):
-                    tr = int(tr_s)
-                    invalid = (rr == wr) or (tr == wr) or (tr == rr)
+            for i_s in rows_i:
+                i = int(i_s)
+                row = st.columns([1] + [1] * len(cols_j))
+                row[0].write(i_s)
+
+                for j, b_s in enumerate(cols_j, start=1):
+                    b = int(b_s)
+
+                    # 無効：同順位 / wrを含む / 下三角(i>=b)は使わない
+                    invalid = (i == b) or (i == wr) or (b == wr) or (i > b)
                     if invalid:
                         row[j].write("-")
                         continue
 
                     v = row[j].number_input(
                         "",
-                        key=f"tri_prev_wr{wr}_rr{rr}_tr{tr}",
+                        key=f"tri_prev_wr{wr}_a{i}_b{b}",
                         min_value=0,
                         value=0
                     )
                     if v:
-                        tri_counts_manual[(wr, rr, tr)] += int(v)
+                        a = i
+                        trifuku_counts_manual[(wr, a, b)] += int(v)
 
     st.divider()
 
     # 3) ランク別入賞回数（累積）
     st.markdown("## ランク別 入賞回数（累積）")
-    MU_BIN_R = 7  # 7位以降まとめ（7車なので実質7位）
+    MU_BIN_R = 7  # 7車なので実質7位
 
     def add_rank_rec(r: int, N: int, C1: int, C2: int, C3: int):
         rec = agg_rank_manual[r]
@@ -298,7 +308,7 @@ with tabs[1]:
 # 集計（日次 + 前日まで累積 を合算）
 # =========================
 pair_counts_daily: Dict[PairKey, int] = defaultdict(int)
-tri_counts_daily: Dict[TriKey, int] = defaultdict(int)
+trifuku_counts_daily: Dict[TrifukuKey, int] = defaultdict(int)
 rank_daily = {r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, MAX_FIELD + 1)}
 
 for row in byrace_rows:
@@ -327,14 +337,16 @@ for row in byrace_rows:
         if wr in WINNER_RANKS and rr is not None:
             pair_counts_daily[(wr, rr)] += 1
 
-    # 3連複分布（日次）＝ wr×rr→tr
+    # 3連複（日次）＝ wr と 残り2枠（順番なし）
     if len(finish) >= 3:
         wr = car_to_rank.get(finish[0])
-        rr = car_to_rank.get(finish[1])
-        tr = car_to_rank.get(finish[2])
-        if wr in WINNER_RANKS and rr is not None and tr is not None:
-            if (rr != wr) and (tr != wr) and (tr != rr):
-                tri_counts_daily[(wr, rr, tr)] += 1
+        r2 = car_to_rank.get(finish[1])
+        r3 = car_to_rank.get(finish[2])
+        if wr in WINNER_RANKS and r2 is not None and r3 is not None:
+            # 相手2枠は wr と重複しない＆互いに重複しない
+            if (r2 != wr) and (r3 != wr) and (r2 != r3):
+                a, b = sorted((r2, r3))
+                trifuku_counts_daily[(wr, a, b)] += 1
 
 # 合算：2着分布
 pair_counts_total: Dict[PairKey, int] = defaultdict(int)
@@ -343,12 +355,12 @@ for k, v in pair_counts_daily.items():
 for k, v in pair_counts_manual.items():
     pair_counts_total[k] += int(v)
 
-# 合算：3連複（wr×rr→tr）
-tri_counts_total: Dict[TriKey, int] = defaultdict(int)
-for k, v in tri_counts_daily.items():
-    tri_counts_total[k] += int(v)
-for k, v in tri_counts_manual.items():
-    tri_counts_total[k] += int(v)
+# 合算：3連複（順番なし）
+trifuku_counts_total: Dict[TrifukuKey, int] = defaultdict(int)
+for k, v in trifuku_counts_daily.items():
+    trifuku_counts_total[k] += int(v)
+for k, v in trifuku_counts_manual.items():
+    trifuku_counts_total[k] += int(v)
 
 # 合算：ランク別
 rank_total = {r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, MAX_FIELD + 1)}
@@ -381,17 +393,16 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("3連複 分布（全体累積）｜1着×2着→3着")
+    st.subheader("3連複 分布（全体累積）｜1着=wr のとき『相手2枠（順番なし）』")
     for wr in WINNER_RANKS:
         st.markdown(f"### 1着=評価{wr}位 のとき")
-        st.markdown("**回数**（行=2着順位 / 列=3着順位）")
-        st.dataframe(tri_matrix_counts(tri_counts_total, wr, MAX_FIELD), use_container_width=True)
-        st.markdown("**割合%**（行内%：『1着=wr & 2着=rr』での3着分布）")
-        st.dataframe(tri_matrix_pct(tri_counts_total, wr, MAX_FIELD), use_container_width=True)
+        st.markdown("**回数**（上三角だけ使用：a<b）")
+        st.dataframe(trifuku_matrix_counts(trifuku_counts_total, wr, MAX_FIELD), use_container_width=True)
+        st.markdown("**割合%**（wr内での構成比）")
+        st.dataframe(trifuku_matrix_pct(trifuku_counts_total, wr, MAX_FIELD), use_container_width=True)
         st.divider()
 
     st.subheader("ランク別 入賞テーブル（全体累積）")
-
     def rate(x, n):
         return round(100.0 * x / n, 1) if n > 0 else None
 
@@ -410,7 +421,6 @@ with tabs[2]:
             "3着内率%": rate(C1 + C2 + C3, N),
         })
 
-    # 7位（7車なので「7～位」は実質7位）
     rec7 = rank_total.get(7, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
     N, C1, C2, C3 = rec7["N"], rec7["C1"], rec7["C2"], rec7["C3"]
     rows_out.append({
