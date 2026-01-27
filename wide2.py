@@ -7,15 +7,15 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2着順位分布 → ランク別入賞 v1.1")
+st.title("ヴェロビ 復習（全体累積）｜2着順位分布 → ランク別入賞 v1.2")
 
 # -------- 基本設定 --------
-MAX_FIELD = 9  # 最大頭数（4～9）
+MAX_FIELD = 7  # ★7車まで（8・9は不要）
 
 RANK_SYMBOLS = {
     1: "carFR順位１位", 2: "carFR順位２位", 3: "carFR順位３位", 4: "carFR順位４位",
     5: "carFR順位５位", 6: "carFR順位６位",
-    7: "carFR順位７～位", 8: "carFR順位７～位", 9: "carFR順位７～位",
+    7: "carFR順位７～位",
 }
 def rank_symbol(r: int) -> str:
     return RANK_SYMBOLS.get(r, "carFR順位７～位")
@@ -24,8 +24,8 @@ def rank_symbol(r: int) -> str:
 def parse_rankline(s: str) -> List[str]:
     """
     V順位（例: '1432...'）をパース。
-    - 許容文字: 1～9
-    - 4～MAX_FIELD 桁
+    - 許容文字: 1～7（※7車運用）
+    - 4～MAX_FIELD 桁（4～7）
     - 重複なし
     """
     if not s:
@@ -33,7 +33,7 @@ def parse_rankline(s: str) -> List[str]:
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
     if not s.isdigit() or not (4 <= len(s) <= MAX_FIELD):
         return []
-    if any(ch not in "123456789" for ch in s):
+    if any(ch not in "1234567" for ch in s):  # ★1～7のみ
         return []
     if len(set(s)) != len(s):
         return []
@@ -42,13 +42,13 @@ def parse_rankline(s: str) -> List[str]:
 def parse_finish(s: str) -> List[str]:
     """
     着順（～3桁まで使用、余分は切り捨て）
-    - 許容文字: 1～9
+    - 許容文字: 1～7（※7車運用）
     - 重複は先着優先で無視
     """
     if not s:
         return []
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
-    s = "".join(ch for ch in s if ch in "123456789")
+    s = "".join(ch for ch in s if ch in "1234567")  # ★1～7のみ
     out: List[str] = []
     for ch in s:
         if ch not in out:
@@ -61,8 +61,8 @@ def parse_finish(s: str) -> List[str]:
 # =========================
 # 条件付き2着分布（累積対応）
 # =========================
-WINNER_RANKS = (1, 2, 3)   # 1着が評価1～3位のときだけ見る
-RR_OUT = "圏外"            # 2着車がV順位内にいない等（保険）
+WINNER_RANKS = (1, 2, 3, 4, 5)  # ★1着が評価1～5位のときだけ見る
+RR_OUT = "圏外"                 # 2着車がV順位内にいない等（保険）
 
 PairKey = Tuple[int, Union[int, str]]  # (winner_rank, runnerup_rank or "圏外")
 
@@ -124,7 +124,10 @@ with tabs[0]:
     for i in range(1, 13):
         c1, c2, c3, c4 = st.columns([1, 1, 2, 1.5])
         rid = c1.text_input("", key=f"rid_{i}", value=str(i))
-        field = c2.number_input("", min_value=4, max_value=MAX_FIELD, value=min(7, MAX_FIELD), key=f"field_{i}")
+
+        # ★8・9車は排除（4～7のみ）
+        field = c2.number_input("", min_value=4, max_value=MAX_FIELD, value=7, key=f"field_{i}")
+
         vline = c3.text_input("", key=f"vline_{i}", value="")
         fin = c4.text_input("", key=f"fin_{i}", value="")
 
@@ -150,7 +153,7 @@ with tabs[1]:
 
     # ② 条件付き2着分布（全体）※先頭
     st.markdown("## 2着順位分布（累積・回数）")
-    st.caption("復習用：1着が評価1〜3位のとき、2着の評価順位の回数を入力。1→1 / 2→2 / 3→3 は入力不要。")
+    st.caption("復習用：1着が評価1〜5位のとき、2着の評価順位の回数を入力。1→1 / 2→2 / 3→3 / 4→4 / 5→5 は入力不要。")
 
     cols = list(range(1, MAX_FIELD + 1)) + [RR_OUT]
 
@@ -294,14 +297,14 @@ for k, v in pair_counts_manual.items():
 # 出力：分析結果（順番統一：2着分布→ランク表）
 # =========================
 with tabs[2]:
-    st.subheader("2着順位分布（全体累積）｜1着が評価1〜3位のとき")
+    st.subheader("2着順位分布（全体累積）｜1着が評価1〜5位のとき")
 
     df_count, df_pct = build_conditional_runnerup_tables(pair_counts_total, MAX_FIELD)
 
     st.markdown("### 回数（Nは条件付き総数）")
     st.dataframe(df_count, use_container_width=True, hide_index=True)
 
-    st.markdown("### 割合%（1→1 / 2→2 / 3→3 は空欄）")
+    st.markdown("### 割合%（1→1 / 2→2 / 3→3 / 4→4 / 5→5 は空欄）")
     st.dataframe(df_pct, use_container_width=True, hide_index=True)
 
     st.divider()
@@ -325,7 +328,7 @@ with tabs[2]:
             "3着内率%": rate(C1 + C2 + C3, N),
         })
 
-    # 7+（7..MAX_FIELD をまとめ）
+    # 7+（7..MAX_FIELD をまとめ）※MAX_FIELD=7なので実質「7位のみ」だが形は維持
     N = C1 = C2 = C3 = 0
     for r in range(7, MAX_FIELD + 1):
         rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
