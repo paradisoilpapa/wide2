@@ -310,48 +310,44 @@ with tabs[2]:
     st.divider()
     st.subheader("ランク別 入賞テーブル（全体累積）")
 
-    def rate(x, n):
-        return round(100.0 * x / n, 1) if n > 0 else None
+def rate(x, n):
+    return round(100.0 * x / n, 1) if n > 0 else None
 
-    rows_out = []
-    for r in range(1, 7):
-        rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-        N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
-        rows_out.append({
-            "ランク": rank_symbol(r),
-            "出走数N": N,
-            "1着回数": C1,
-            "2着回数": C2,
-            "3着回数": C3,
-            "1着率%": rate(C1, N),
-            "連対率%": rate(C1 + C2, N),
-            "3着内率%": rate(C1 + C2 + C3, N),
-        })
+rows_out = []
 
-    # 7+（7..MAX_FIELD をまとめ）※MAX_FIELD=7なので実質「7位のみ」だが形は維持
-    N = C1 = C2 = C3 = 0
-    for r in range(7, MAX_FIELD + 1):
-        rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-        N  += rec["N"]
-        C1 += rec["C1"]
-        C2 += rec["C2"]
-        C3 += rec["C3"]
+# 1～6位を個別に出す
+for r in range(1, 7):
+    rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+    N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
 
     rows_out.append({
+        "ランク": rank_symbol(r),
+        "出走数N": N,
+        "1着回数": C1,
+        "2着回数": C2,
+        "3着回数": C3,
+        "1着率%": rate(C1, N),
+        "連対率%": rate(C1 + C2, N),
+        "3着内率%": rate(C1 + C2 + C3, N),
+    })
+
+# 7位（＝carFR順位７～位）を出す ※7車なのでこれが「7～位」
+rec7 = rank_total.get(7, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+N7, C17, C27, C37 = rec7["N"], rec7["C1"], rec7["C2"], rec7["C3"]
+
+rows_out.append({
     "ランク": "carFR順位７～位",
-    "出走数N": N,
-    "1着回数": C1,
-    "2着回数": C2,
-    "3着回数": C3,
-    "1着率%": rate(C1, N),
-    "連対率%": rate(C1 + C2, N),
-    "3着内率%": rate(C1 + C2 + C3, N),
+    "出走数N": N7,
+    "1着回数": C17,
+    "2着回数": C27,
+    "3着回数": C37,
+    "1着率%": rate(C17, N7),
+    "連対率%": rate(C17 + C27, N7),
+    "3着内率%": rate(C17 + C27 + C37, N7),
 })
 
-# ★6位＋7位 合算（3連複のヒモ参考用）
+# ★6位＋7位 合算（3連複のヒモ参考用） ← 必ず dataframe の前で append
 rec6 = rank_total.get(6, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-rec7 = rank_total.get(7, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-
 N67  = rec6["N"]  + rec7["N"]
 C167 = rec6["C1"] + rec7["C1"]
 C267 = rec6["C2"] + rec7["C2"]
