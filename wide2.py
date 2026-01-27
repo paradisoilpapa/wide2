@@ -338,14 +338,34 @@ with tabs[2]:
         C3 += rec["C3"]
 
     rows_out.append({
-        "ランク": "carFR順位７～位",
-        "出走数N": N,
-        "1着回数": C1,
-        "2着回数": C2,
-        "3着回数": C3,
-        "1着率%": rate(C1, N),
-        "連対率%": rate(C1 + C2, N),
-        "3着内率%": rate(C1 + C2 + C3, N),
-    })
+    "ランク": "carFR順位７～位",
+    "出走数N": N,
+    "1着回数": C1,
+    "2着回数": C2,
+    "3着回数": C3,
+    "1着率%": rate(C1, N),
+    "連対率%": rate(C1 + C2, N),
+    "3着内率%": rate(C1 + C2 + C3, N),
+})
 
-    st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
+# ★6位＋7位 合算（3連複のヒモ参考用）
+rec6 = rank_total.get(6, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+rec7 = rank_total.get(7, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+
+N67  = rec6["N"]  + rec7["N"]
+C167 = rec6["C1"] + rec7["C1"]
+C267 = rec6["C2"] + rec7["C2"]
+C367 = rec6["C3"] + rec7["C3"]
+
+rows_out.append({
+    "ランク": "carFR順位６～７位（合算）",
+    "出走数N": N67,
+    "1着回数": C167,
+    "2着回数": C267,
+    "3着回数": C367,
+    "1着率%": rate(C167, N67),
+    "連対率%": rate(C167 + C267, N67),
+    "3着内率%": rate(C167 + C267 + C367, N67),
+})
+
+st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
