@@ -308,15 +308,23 @@ with tabs[2]:
     st.dataframe(df_pct, use_container_width=True, hide_index=True)
 
     st.divider()
-    st.subheader("ランク別 入賞テーブル（全体累積）")
+    # =========================
+# tabs[2]：ランク別 入賞テーブル（全体累積）
+# ※前提：予想は5車（1～5位のみ集計される）
+# ※6～7位は「推定合算」＝出走数N_baseから(1～5位の各着回数合計)を引いて作る
+# =========================
+st.subheader("ランク別 入賞テーブル（全体累積）")
 
 def rate(x, n):
     return round(100.0 * x / n, 1) if n > 0 else None
 
 rows_out = []
 
-# 1～6位を個別に出す
-for r in range(1, 7):
+# --- ベース母数（各ランクのNが揃っている前提で、rank1のNを採用） ---
+N_base = rank_total.get(1, {"N": 0})["N"]
+
+# --- 1～5位（予想で出ている範囲） ---
+for r in range(1, 6):
     rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
     N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
 
@@ -331,37 +339,24 @@ for r in range(1, 7):
         "3着内率%": rate(C1 + C2 + C3, N),
     })
 
-# 7位（＝carFR順位７～位）を出す ※7車なのでこれが「7～位」
-rec7 = rank_total.get(7, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-N7, C17, C27, C37 = rec7["N"], rec7["C1"], rec7["C2"], rec7["C3"]
+# --- 6～7位（推定合算） ---
+sum_c1_1to5 = sum(rank_total.get(r, {"C1": 0})["C1"] for r in range(1, 6))
+sum_c2_1to5 = sum(rank_total.get(r, {"C2": 0})["C2"] for r in range(1, 6))
+sum_c3_1to5 = sum(rank_total.get(r, {"C3": 0})["C3"] for r in range(1, 6))
+
+C1_67 = max(0, N_base - sum_c1_1to5)
+C2_67 = max(0, N_base - sum_c2_1to5)
+C3_67 = max(0, N_base - sum_c3_1to5)
 
 rows_out.append({
-    "ランク": "carFR順位７～位",
-    "出走数N": N7,
-    "1着回数": C17,
-    "2着回数": C27,
-    "3着回数": C37,
-    "1着率%": rate(C17, N7),
-    "連対率%": rate(C17 + C27, N7),
-    "3着内率%": rate(C17 + C27 + C37, N7),
-})
-
-# ★6位＋7位 合算（3連複のヒモ参考用） ← 必ず dataframe の前で append
-rec6 = rank_total.get(6, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-N67  = rec6["N"]  + rec7["N"]
-C167 = rec6["C1"] + rec7["C1"]
-C267 = rec6["C2"] + rec7["C2"]
-C367 = rec6["C3"] + rec7["C3"]
-
-rows_out.append({
-    "ランク": "carFR順位６～７位（合算）",
-    "出走数N": N67,
-    "1着回数": C167,
-    "2着回数": C267,
-    "3着回数": C367,
-    "1着率%": rate(C167, N67),
-    "連対率%": rate(C167 + C267, N67),
-    "3着内率%": rate(C167 + C267 + C367, N67),
+    "ランク": "carFR順位６～７位（推定合算）",
+    "出走数N": N_base,
+    "1着回数": C1_67,
+    "2着回数": C2_67,
+    "3着回数": C3_67,
+    "1着率%": rate(C1_67, N_base),
+    "連対率%": rate(C1_67 + C2_67, N_base),
+    "3着内率%": rate(C1_67 + C2_67 + C3_67, N_base),
 })
 
 st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
