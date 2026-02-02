@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict
-from typing import List, Dict, Tuple, Union, Iterable, Set
+from typing import List, Dict, Tuple, Union
 
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2 / 1→3順位分布 ＋ ランク別入賞 v1.5（ライン必須＋濃いゾーン）")
+st.title("ヴェロビ 復習（全体累積）｜1→2 / 1→3順位分布 ＋ ランク別入賞 v1.3")
 
 # =========================
 # 基本設定（7車レース／予想は5車）
 # =========================
 FIELD_SIZE = 7         # レースは7車固定
-PRED_RANKS = 5         # 政春さん評価順は上位5車のみ
+PRED_RANKS = 5         # V順位（評価順）は上位5車のみ
 WINNER_RANKS = (1, 2, 3, 4, 5)  # 条件：1着が評価1〜5位のとき
-RR_OUT = "圏外"        # 2着/3着が評価(上位5)にいない場合
+RR_OUT = "圏外"        # 2着/3着がV順位(上位5)にいない場合
 
 RANK_SYMBOLS = {
     1: "carFR順位１位",
@@ -28,15 +28,11 @@ def rank_symbol(r: int) -> str:
     return RANK_SYMBOLS.get(r, "")
 
 PairKey = Tuple[int, Union[int, str]]  # (winner_rank, other_rank or "圏外")
-Cell = Tuple[int, Union[int, str]]     # (wr, rr) と同じ
 
 
-# =========================
-# パーサ
-# =========================
 def parse_rankline(s: str) -> List[str]:
     """
-    政春さん評価順（例: '14325'）をパース（上位5車固定）
+    V順位（例: '14325'）をパース（予想は5車固定）
     - 許容文字: 1～7
     - 桁数: 5固定
     - 重複なし
@@ -72,49 +68,6 @@ def parse_finish(s: str) -> List[str]:
     return out
 
 
-def parse_line_groups(s: str) -> List[str]:
-    """
-    ライン入力（スペース区切り）を7車のラインID配列に変換（必須）
-    例:
-      '123 45 6'        / '1 2 34 56 7'
-    仕様:
-      - 7車すべて指定必須（欠けたら無効）
-      - 車番の重複があれば無効
-    戻り:
-      line_ids[0..6] が 車番1..7 のラインID（'1','2','3'...）
-    """
-    if not s:
-        return []
-    s = s.strip().replace("　", " ")
-    parts = [p.strip() for p in s.split(" ") if p.strip()]
-    if not parts:
-        return []
-
-    used = set()
-    line_ids = [""] * FIELD_SIZE
-
-    for i, part in enumerate(parts, start=1):
-        cars = [ch for ch in part if ch in "1234567"]
-        if not cars:
-            return []
-        if len(set(cars)) != len(cars):
-            return []
-        for c in cars:
-            if c in used:
-                return []
-            used.add(c)
-            line_ids[int(c) - 1] = str(i)
-
-    # ★必須：7車すべて指定
-    if any(x == "" for x in line_ids):
-        return []
-
-    return line_ids
-
-
-# =========================
-# ピボット表（回数/割合%）
-# =========================
 def build_conditional_tables(
     pair_counts: Dict[PairKey, int],
     max_field: int
@@ -157,116 +110,6 @@ def build_conditional_tables(
 
 
 # =========================
-# マス（セル）→ 濃いゾーン集計
-# =========================
-def zone_totalN(pair_counts: Dict[PairKey, int], max_field: int) -> int:
-    cols = list(range(1, max_field + 1)) + [RR_OUT]
-    total = 0
-    for wr in WINNER_RANKS:
-        for rr in cols:
-            if isinstance(rr, int) and rr == wr:
-                continue
-            total += int(pair_counts.get((wr, rr), 0))
-    return total
-
-
-def dense_cells_by_threshold(
-    df_pct: pd.DataFrame,
-    threshold_pct: float,
-    max_field: int
-) -> Set[Cell]:
-    """
-    割合%テーブル(df_pct)から、threshold_pct以上のセル(wr, rr)を抽出
-    """
-    cols = list(range(1, max_field + 1)) + [RR_OUT]
-    dense: Set[Cell] = set()
-
-    for _, row in df_pct.iterrows():
-        wr = int(row["1着の評価順位"])
-        for rr in cols:
-            key = str(rr)
-            v = row.get(key, None)
-            if v is None:
-                continue
-            try:
-                pv = float(v)
-            except Exception:
-                continue
-            if pv >= threshold_pct:
-                # wr==rr は df_pct上 None なのでここには入らない想定
-                dense.add((wr, rr))
-    return dense
-
-
-def dense_cells_detail_df(
-    pair_counts: Dict[PairKey, int],
-    df_pct: pd.DataFrame,
-    dense_cells: Set[Cell],
-    max_field: int
-) -> pd.DataFrame:
-    """
-    濃いセル一覧（セルごとの回数・割合%）を作成
-    """
-    cols = list(range(1, max_field + 1)) + [RR_OUT]
-    pct_lookup: Dict[Cell, float] = {}
-
-    for _, row in df_pct.iterrows():
-        wr = int(row["1着の評価順位"])
-        for rr in cols:
-            key = str(rr)
-            v = row.get(key, None)
-            if v is None:
-                continue
-            try:
-                pct_lookup[(wr, rr)] = float(v)
-            except Exception:
-                pass
-
-    rows = []
-    for (wr, rr) in sorted(dense_cells, key=lambda x: (x[0], str(x[1]))):
-        rows.append({
-            "1着評価(wr)": wr,
-            "相手(rr)": rr,
-            "回数": int(pair_counts.get((wr, rr), 0)),
-            "割合%": pct_lookup.get((wr, rr), None),
-        })
-
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.sort_values(["1着評価(wr)", "回数"], ascending=[True, False])
-    return df
-
-
-def zone_summary_df(
-    pair_counts: Dict[PairKey, int],
-    dense_cells: Set[Cell],
-    max_field: int,
-    zone_name: str
-) -> pd.DataFrame:
-    """
-    濃いゾーン（セル集合）の回数・全体比
-    """
-    totalN = zone_totalN(pair_counts, max_field)
-    denseN = sum(int(pair_counts.get((wr, rr), 0)) for (wr, rr) in dense_cells)
-
-    rows = [
-        {
-            "ゾーン": zone_name,
-            "回数": denseN,
-            "全体に占める割合%": round(100.0 * denseN / totalN, 1) if totalN > 0 else 0.0,
-            "セル数": len(dense_cells),
-        },
-        {
-            "ゾーン": "全体（除外セル除く）",
-            "回数": totalN,
-            "全体に占める割合%": 100.0 if totalN > 0 else 0.0,
-            "セル数": None,
-        }
-    ]
-    return pd.DataFrame(rows)
-
-
-# =========================
 # Tabs
 # =========================
 tabs = st.tabs(["日次手入力（最大12R）", "前日までの集計（累積）", "分析結果"])
@@ -284,51 +127,38 @@ pair13_manual: Dict[PairKey, int] = defaultdict(int)
 
 
 # =========================
-# A. 日次手入力（ライン必須・先）
+# A. 日次手入力
 # =========================
 with tabs[0]:
     st.subheader("日次手入力（7車固定・最大12R）")
-    st.caption("入力順：ライン（必須）→ 政春さん評価順（上位5）→ 着順（～3着）｜ライン例：123 45 6 / 1 2 34 56 7")
+    st.caption("V順位は「上位5車の評価順」を5桁で入力（例：14325）。着順は～3桁。")
 
-    cols_hdr = st.columns([1, 1, 2.2, 2.2, 1.5])
+    cols_hdr = st.columns([1, 1, 2, 1.5])
     cols_hdr[0].markdown("**R**")
     cols_hdr[1].markdown("**頭数**")
-    cols_hdr[2].markdown("**ライン（必須・スペース区切り）**")
-    cols_hdr[3].markdown("**政春さん評価順(上位5車・例:14325)**")
-    cols_hdr[4].markdown("**着順(～3桁)**")
+    cols_hdr[2].markdown("**V順位(上位5車・例:14325)**")
+    cols_hdr[3].markdown("**着順(～3桁)**")
 
     for i in range(1, 13):
-        c1, c2, c3, c4, c5 = st.columns([1, 1, 2.2, 2.2, 1.5])
+        c1, c2, c3, c4 = st.columns([1, 1, 2, 1.5])
         rid = c1.text_input("", key=f"rid_{i}", value=str(i))
         c2.write(str(FIELD_SIZE))
-
-        line_str = c3.text_input("", key=f"line_{i}", value="")
-        line_ids = parse_line_groups(line_str)
-
-        # ラインが有効になるまで評価順は入力不可（事故防止）
-        vline = c4.text_input("", key=f"vline_{i}", value="", disabled=(not line_ids))
-        fin = c5.text_input("", key=f"fin_{i}", value="")
+        vline = c3.text_input("", key=f"vline_{i}", value="")
+        fin = c4.text_input("", key=f"fin_{i}", value="")
 
         vorder = parse_rankline(vline)
         finish = parse_finish(fin)
 
-        any_input = any([line_str.strip(), vline.strip(), fin.strip()])
+        any_input = any([vline.strip(), fin.strip()])
         if any_input:
-            if not line_ids:
-                st.warning(f"R{rid}: ラインは必須です（例：123 45 6）。7車すべて指定してください。")
-                continue
-            if vline.strip() and not vorder:
-                st.warning(f"R{rid}: 評価順は上位5車を5桁で入力してください（例：14325）。")
-                continue
-
-            # ライン必須・評価順OKのときだけ記録
-            if line_ids and vorder:
+            if vorder:
                 byrace_rows.append({
                     "race": rid,
-                    "line": line_ids,   # ここでは保持のみ（次段階でA1/B2等に使用）
-                    "vorder": vorder,
-                    "finish": finish,
+                    "vorder": vorder,   # 上位5車のみ
+                    "finish": finish,   # ～3着
                 })
+            else:
+                st.warning(f"R{rid}: V順位は上位5車を5桁で入力してください（例：14325）。")
 
 
 # =========================
@@ -353,7 +183,7 @@ with tabs[1]:
         row_cols[0].write(f"評価{wr}位が1着")
         for j, rr in enumerate(cols, start=1):
             if isinstance(rr, int) and rr == wr:
-                row_cols[j].write("")  # 空欄
+                row_cols[j].write("")  # ★空欄
                 continue
             v = row_cols[j].number_input(
                 "",
@@ -380,7 +210,7 @@ with tabs[1]:
         row_cols[0].write(f"評価{wr}位が1着")
         for j, rr in enumerate(cols, start=1):
             if isinstance(rr, int) and rr == wr:
-                row_cols[j].write("")  # 空欄
+                row_cols[j].write("")  # ★空欄
                 continue
             v = row_cols[j].number_input(
                 "",
@@ -513,10 +343,9 @@ for k, v in pair13_manual.items():
 
 
 # =========================
-# 出力：分析結果（マス表＋濃いゾーン）
+# 出力：分析結果
 # =========================
 with tabs[2]:
-    # ===== 1→2 =====
     st.subheader("1→2 着順位分布（全体累積）｜1着が評価1〜5位のとき")
     df12_count, df12_pct = build_conditional_tables(pair12_total, PRED_RANKS)
 
@@ -528,20 +357,6 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("1→2 濃いゾーン集計（マス＝評価順位セル）")
-    thr12 = st.number_input("濃い判定（1→2：セル割合%がこの値以上）", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
-    dense12 = dense_cells_by_threshold(df12_pct, float(thr12), PRED_RANKS)
-
-    st.markdown("### 濃いゾーン（合計）")
-    st.dataframe(zone_summary_df(pair12_total, dense12, PRED_RANKS, f"濃い（>= {thr12}%）"), use_container_width=True, hide_index=True)
-
-    st.markdown("### 濃いセル一覧（セルごとの回数・割合%）")
-    df_dense12 = dense_cells_detail_df(pair12_total, df12_pct, dense12, PRED_RANKS)
-    st.dataframe(df_dense12, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # ===== 1→3 =====
     st.subheader("1→3 着順位分布（全体累積）｜1着が評価1〜5位のとき")
     df13_count, df13_pct = build_conditional_tables(pair13_total, PRED_RANKS)
 
@@ -553,20 +368,6 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("1→3 濃いゾーン集計（マス＝評価順位セル）")
-    thr13 = st.number_input("濃い判定（1→3：セル割合%がこの値以上）", min_value=0.0, max_value=100.0, value=10.0, step=0.5)
-    dense13 = dense_cells_by_threshold(df13_pct, float(thr13), PRED_RANKS)
-
-    st.markdown("### 濃いゾーン（合計）")
-    st.dataframe(zone_summary_df(pair13_total, dense13, PRED_RANKS, f"濃い（>= {thr13}%）"), use_container_width=True, hide_index=True)
-
-    st.markdown("### 濃いセル一覧（セルごとの回数・割合%）")
-    df_dense13 = dense_cells_detail_df(pair13_total, df13_pct, dense13, PRED_RANKS)
-    st.dataframe(df_dense13, use_container_width=True, hide_index=True)
-
-    st.divider()
-
-    # ===== ランク別 =====
     st.subheader("ランク別 入賞テーブル（全体累積）｜6～7位は推定合算")
 
     def rate(x, n):
@@ -574,6 +375,7 @@ with tabs[2]:
 
     rows_out = []
 
+    # 1～5位（実測）
     for r in range(1, 6):
         rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
         N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
@@ -588,7 +390,8 @@ with tabs[2]:
             "3着内率%": rate(C1 + C2 + C3, N),
         })
 
-    N_base = rank_total.get(1, {"N": 0})["N"]
+    # 6～7位（推定合算）：N_base - (1～5位の各着回数合計)
+    N_base = rank_total.get(1, {"N": 0})["N"]  # 予想5車固定なら rank1 のNが総レース数
 
     sum_c1_1to5 = sum(rank_total.get(r, {"C1": 0})["C1"] for r in range(1, 6))
     sum_c2_1to5 = sum(rank_total.get(r, {"C2": 0})["C2"] for r in range(1, 6))
