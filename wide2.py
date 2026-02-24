@@ -10,12 +10,21 @@ st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wi
 st.title("ヴェロビ 復習（全体累積）｜1→2 / 1→3順位分布 ＋ ランク別入賞 v1.3")
 
 # =========================
-# 基本設定（7車レース／予想は5車）
+# 基本設定（7車レース）
 # =========================
-FIELD_SIZE = 7         # レースは7車固定
-PRED_RANKS = 5         # V順位（評価順）は上位5車のみ
-WINNER_RANKS = (1, 2, 3, 4, 5)  # 条件：1着が評価1〜5位のとき
-RR_OUT = "圏外"        # 2着/3着がV順位(上位5)にいない場合
+FIELD_SIZE = 7  # レースは7車固定
+RR_OUT = "圏外"  # 5車入力時にのみ使う可能性あり
+
+# V順位入力モード（5車 or 7車）
+v_mode = st.radio(
+    "V順位入力モード",
+    options=["上位5車入力", "7車フル入力"],
+    horizontal=True,
+    index=0
+)
+
+PRED_RANKS = 5 if v_mode == "上位5車入力" else 7
+WINNER_RANKS = tuple(range(1, PRED_RANKS + 1))  # 1着条件も入力モードに合わせる
 
 RANK_SYMBOLS = {
     1: "carFR順位１位",
@@ -23,24 +32,26 @@ RANK_SYMBOLS = {
     3: "carFR順位３位",
     4: "carFR順位４位",
     5: "carFR順位５位",
+    6: "carFR順位６位",
+    7: "carFR順位７位",
 }
 def rank_symbol(r: int) -> str:
-    return RANK_SYMBOLS.get(r, "")
+    return RANK_SYMBOLS.get(r, f"carFR順位{r}位")
 
 PairKey = Tuple[int, Union[int, str]]  # (winner_rank, other_rank or "圏外")
 
 
-def parse_rankline(s: str) -> List[str]:
+def parse_rankline(s: str, pred_ranks: int) -> List[str]:
     """
-    V順位（例: '14325'）をパース（予想は5車固定）
+    V順位（例: 5車='14325', 7車='1432567'）をパース
     - 許容文字: 1～7
-    - 桁数: 5固定
+    - 桁数: pred_ranks 固定
     - 重複なし
     """
     if not s:
         return []
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
-    if not s.isdigit() or len(s) != PRED_RANKS:
+    if not s.isdigit() or len(s) != pred_ranks:
         return []
     if any(ch not in "1234567" for ch in s):
         return []
@@ -131,12 +142,13 @@ pair13_manual: Dict[PairKey, int] = defaultdict(int)
 # =========================
 with tabs[0]:
     st.subheader("日次手入力（7車固定・最大12R）")
-    st.caption("V順位は「上位5車の評価順」を5桁で入力（例：14325）。着順は～3桁。")
+    example_v = "14325" if PRED_RANKS == 5 else "1432567"
+    st.caption(f"V順位は「評価順」を{PRED_RANKS}桁で入力（例：{example_v}）。着順は～3桁。")
 
     cols_hdr = st.columns([1, 1, 2, 1.5])
     cols_hdr[0].markdown("**R**")
     cols_hdr[1].markdown("**頭数**")
-    cols_hdr[2].markdown("**V順位(上位5車・例:14325)**")
+    cols_hdr[2].markdown(f"**V順位({PRED_RANKS}桁・例:{example_v})**")
     cols_hdr[3].markdown("**着順(～3桁)**")
 
     for i in range(1, 13):
@@ -146,7 +158,7 @@ with tabs[0]:
         vline = c3.text_input("", key=f"vline_{i}", value="")
         fin = c4.text_input("", key=f"fin_{i}", value="")
 
-        vorder = parse_rankline(vline)
+        vorder = parse_rankline(vline, PRED_RANKS)
         finish = parse_finish(fin)
 
         any_input = any([vline.strip(), fin.strip()])
@@ -158,7 +170,7 @@ with tabs[0]:
                     "finish": finish,   # ～3着
                 })
             else:
-                st.warning(f"R{rid}: V順位は上位5車を5桁で入力してください（例：14325）。")
+                st.warning(f"R{rid}: V順位は{PRED_RANKS}桁で入力してください（例：{example_v}）。")
 
 
 # =========================
@@ -257,7 +269,24 @@ with tabs[1]:
 # =========================
 
 # --- ランク別（日次） 1～5のみ ---
-rank_daily = {r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 6)}
+rank_daily = {r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, PRED_RANKS + 1)}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    if not vorder:
+        continue
+
+    car_by_rank = {i + 1: vorder[i] for i in range(len(vorder))}  # 1..PRED_RANKS
+    for r in range(1, PRED_RANKS + 1):
+        rank_daily[r]["N"] += 1
+        car = car_by_rank[r]
+        if len(finish) >= 1 and finish[0] == car:
+            rank_daily[r]["C1"] += 1
+        if len(finish) >= 2 and finish[1] == car:
+            rank_daily[r]["C2"] += 1
+        if len(finish) >= 3 and finish[2] == car:
+            rank_daily[r]["C3"] += 1
 
 for row in byrace_rows:
     vorder = row.get("vorder", [])
@@ -277,10 +306,18 @@ for row in byrace_rows:
             rank_daily[r]["C3"] += 1
 
 # --- ランク別（合算） ---
-rank_total = {r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 6)}
-for r in range(1, 6):
-    for k in ("N", "C1", "C2", "C3"):
-        rank_total[r][k] += rank_daily[r][k]
+st.caption(f"V順位入力モードが{PRED_RANKS}車なので、1～{PRED_RANKS}位まで入力。")
+
+for r in range(1, PRED_RANKS + 1):
+    c0, c1, c2, c3 = st.columns([1.3, 1, 1, 1.2])
+    c0.write(rank_symbol(r))
+    N  = c1.number_input("", key=f"aggN_{r}",  min_value=0, value=0)
+    C1 = c2.number_input("", key=f"aggC1_{r}", min_value=0, value=0)
+    c3_cols = c3.columns(2)
+    C2 = c3_cols[0].number_input("", key=f"aggC2_{r}", min_value=0, value=0)
+    C3 = c3_cols[1].number_input("", key=f"aggC3_{r}", min_value=0, value=0)
+    if any([N, C1, C2, C3]):
+        add_rank_rec(r, N, C1, C2, C3)
 
 for r, rec in agg_rank_manual.items():
     if r in rank_total:
@@ -368,48 +405,53 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("ランク別 入賞テーブル（全体累積）｜6～7位は推定合算")
+    st.subheader("ランク別 入賞テーブル（全体累積）")
 
-    def rate(x, n):
-        return round(100.0 * x / n, 1) if n > 0 else None
+def rate(x, n):
+    return round(100.0 * x / n, 1) if n > 0 else None
 
-    rows_out = []
+rows_out = []
 
-    # 1～5位（実測）
-    for r in range(1, 6):
-        rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-        N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
-        rows_out.append({
-            "ランク": rank_symbol(r),
-            "出走数N": N,
-            "1着回数": C1,
-            "2着回数": C2,
-            "3着回数": C3,
-            "1着率%": rate(C1, N),
-            "連対率%": rate(C1 + C2, N),
-            "3着内率%": rate(C1 + C2 + C3, N),
-        })
-
-    # 6～7位（推定合算）：N_base - (1～5位の各着回数合計)
-    N_base = rank_total.get(1, {"N": 0})["N"]  # 予想5車固定なら rank1 のNが総レース数
-
-    sum_c1_1to5 = sum(rank_total.get(r, {"C1": 0})["C1"] for r in range(1, 6))
-    sum_c2_1to5 = sum(rank_total.get(r, {"C2": 0})["C2"] for r in range(1, 6))
-    sum_c3_1to5 = sum(rank_total.get(r, {"C3": 0})["C3"] for r in range(1, 6))
-
-    C1_67 = max(0, N_base - sum_c1_1to5)
-    C2_67 = max(0, N_base - sum_c2_1to5)
-    C3_67 = max(0, N_base - sum_c3_1to5)
-
+# 実測（1～PRED_RANKS）
+for r in range(1, PRED_RANKS + 1):
+    rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+    N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
     rows_out.append({
-        "ランク": "carFR順位６～７位（推定合算）",
-        "出走数N": N_base,
-        "1着回数": C1_67,
-        "2着回数": C2_67,
-        "3着回数": C3_67,
-        "1着率%": rate(C1_67, N_base),
-        "連対率%": rate(C1_67 + C2_67, N_base),
-        "3着内率%": rate(C1_67 + C2_67 + C3_67, N_base),
+        "ランク": rank_symbol(r),
+        "出走数N": N,
+        "1着回数": C1,
+        "2着回数": C2,
+        "3着回数": C3,
+        "1着率%": rate(C1, N),
+        "連対率%": rate(C1 + C2, N),
+        "3着内率%": rate(C1 + C2 + C3, N),
     })
 
-    st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
+# 5車入力モードのときだけ、6～7位推定合算を表示
+if PRED_RANKS < FIELD_SIZE:
+    N_base = rank_total.get(1, {"N": 0})["N"]
+
+    sum_c1 = sum(rank_total.get(r, {"C1": 0})["C1"] for r in range(1, PRED_RANKS + 1))
+    sum_c2 = sum(rank_total.get(r, {"C2": 0})["C2"] for r in range(1, PRED_RANKS + 1))
+    sum_c3 = sum(rank_total.get(r, {"C3": 0})["C3"] for r in range(1, PRED_RANKS + 1))
+
+    unknown_count = FIELD_SIZE - PRED_RANKS  # 7車なら2（=6位,7位）
+    label = f"carFR順位{PRED_RANKS+1}～{FIELD_SIZE}位（推定合算）"
+
+    C1_rest = max(0, N_base - sum_c1)
+    C2_rest = max(0, N_base - sum_c2)
+    C3_rest = max(0, N_base - sum_c3)
+
+    rows_out.append({
+        "ランク": label,
+        "出走数N": N_base,
+        "1着回数": C1_rest,
+        "2着回数": C2_rest,
+        "3着回数": C3_rest,
+        "1着率%": rate(C1_rest, N_base),
+        "連対率%": rate(C1_rest + C2_rest, N_base),
+        "3着内率%": rate(C1_rest + C2_rest + C3_rest, N_base),
+    })
+
+st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
+
