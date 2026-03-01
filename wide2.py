@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 v1.6（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 ＋ 全流し回収期待値 v1.7（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -113,6 +113,23 @@ def rate(x: int, n: int):
     return round(100.0 * x / n, 1) if n > 0 else None
 
 
+def comb2(n: int) -> int:
+    return n * (n - 1) // 2 if n >= 2 else 0
+
+
+def points_per_race(bet: str, field_n: int) -> int:
+    """
+    全流し点数（100円×点数で買う前提）
+    2車複/2車単：頭数-1
+    3連複：C(head-1, 2)
+    """
+    if bet in ("2車複", "2車単"):
+        return max(field_n - 1, 0)
+    if bet == "3連複":
+        return comb2(field_n - 1)
+    return 0
+
+
 # =========================
 # Tabs
 # =========================
@@ -138,26 +155,34 @@ with tabs[0]:
     st.caption(
         "各Rごとに頭数（5/6/7）を選択してください。"
         "V順位はその頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。着順は～3桁。"
+        "配当は100円あたりの払戻金（円）を入力。未入力は0のままでOK（集計上は“配当未入力”としてカウント）。"
     )
 
-    cols_hdr = st.columns([1, 1.2, 2.8, 1.6])
+    cols_hdr = st.columns([1, 1.1, 2.4, 1.2, 1.1, 1.1, 1.1])
     cols_hdr[0].markdown("**R**")
     cols_hdr[1].markdown("**頭数**")
     cols_hdr[2].markdown("**V順位（頭数ぶんの桁数）**")
     cols_hdr[3].markdown("**着順(～3桁)**")
+    cols_hdr[4].markdown("**2車複配当**")
+    cols_hdr[5].markdown("**2車単配当**")
+    cols_hdr[6].markdown("**3連複配当**")
 
     for i in range(1, 13):
-        c1, c2, c3, c4 = st.columns([1, 1.2, 2.8, 1.6])
+        c1, c2, c3, c4, c5, c6, c7 = st.columns([1, 1.1, 2.4, 1.2, 1.1, 1.1, 1.1])
 
         rid = c1.text_input("", key=f"rid_{i}", value=str(i))
         field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
         vline = c3.text_input("", key=f"vline_{i}", value="")
         fin = c4.text_input("", key=f"fin_{i}", value="")
 
+        pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
+        pay_2t = c6.number_input("", key=f"pay2t_{i}", min_value=0, value=0, step=10)
+        pay_3f = c7.number_input("", key=f"pay3f_{i}", min_value=0, value=0, step=10)
+
         vorder = parse_rankline(vline, field_n)
         finish = parse_finish(fin)
 
-        any_input = any([vline.strip(), fin.strip()])
+        any_input = any([vline.strip(), fin.strip(), pay_2f > 0, pay_2t > 0, pay_3f > 0])
         if any_input:
             if not vorder:
                 st.warning(f"R{rid}: 頭数{field_n}なので、V順位は{field_n}桁で入力してください。")
@@ -172,7 +197,6 @@ with tabs[0]:
                     " 欠車/入力ミスの可能性があります。"
                 )
                 # ここでは集計から除外せず、そのまま保持（後段で該当箇所のみ自然に無効化）
-                # 必要なら continue に変更可
 
             byrace_rows.append(
                 {
@@ -180,6 +204,9 @@ with tabs[0]:
                     "field_n": field_n,  # 5/6/7
                     "vorder": vorder,    # 頭数ぶんの評価順
                     "finish": finish,    # ～3着
+                    "pay_2f": int(pay_2f),
+                    "pay_2t": int(pay_2t),
+                    "pay_3f": int(pay_3f),
                 }
             )
 
@@ -327,6 +354,79 @@ for k, v in pair12_daily.items():
 for k, v in pair12_manual.items():
     pair12_total[k] += int(v)
 
+# --- 全流し 回収期待値（日次） ---
+# stats[bet][axis_rank] = {"N":..., "KSUM":..., "H":..., "U":..., "SUM":...}
+# H: 配当入力ありの的中数
+# U: 的中したのに配当未入力（0）の回数（集計の歪みを可視化）
+payout_daily = {
+    "2車複": {r: {"N": 0, "KSUM": 0, "H": 0, "U": 0, "SUM": 0} for r in range(1, 8)},
+    "2車単": {r: {"N": 0, "KSUM": 0, "H": 0, "U": 0, "SUM": 0} for r in range(1, 8)},
+    "3連複": {r: {"N": 0, "KSUM": 0, "H": 0, "U": 0, "SUM": 0} for r in range(1, 8)},
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+    if not vorder or field_n <= 0:
+        continue
+
+    car_by_rank = {i + 1: vorder[i] for i in range(len(vorder))}
+
+    k_2 = points_per_race("2車複", field_n)
+    k_3f = points_per_race("3連複", field_n)
+
+    # 2車複：軸が1or2着
+    if len(finish) >= 2:
+        win, sec = finish[0], finish[1]
+        pay = int(row.get("pay_2f", 0))
+        for r in range(1, len(vorder) + 1):
+            rec = payout_daily["2車複"][r]
+            rec["N"] += 1
+            rec["KSUM"] += k_2
+            axis_car = car_by_rank[r]
+            hit = (axis_car == win) or (axis_car == sec)
+            if hit:
+                if pay > 0:
+                    rec["H"] += 1
+                    rec["SUM"] += pay
+                else:
+                    rec["U"] += 1
+
+    # 2車単：軸が1着（固定）
+    if len(finish) >= 2:
+        win = finish[0]
+        pay = int(row.get("pay_2t", 0))
+        for r in range(1, len(vorder) + 1):
+            rec = payout_daily["2車単"][r]
+            rec["N"] += 1
+            rec["KSUM"] += k_2
+            axis_car = car_by_rank[r]
+            hit = (axis_car == win)
+            if hit:
+                if pay > 0:
+                    rec["H"] += 1
+                    rec["SUM"] += pay
+                else:
+                    rec["U"] += 1
+
+    # 3連複：軸が3着内
+    if len(finish) >= 3:
+        top3 = set(finish[:3])
+        pay = int(row.get("pay_3f", 0))
+        for r in range(1, len(vorder) + 1):
+            rec = payout_daily["3連複"][r]
+            rec["N"] += 1
+            rec["KSUM"] += k_3f
+            axis_car = car_by_rank[r]
+            hit = (axis_car in top3)
+            if hit:
+                if pay > 0:
+                    rec["H"] += 1
+                    rec["SUM"] += pay
+                else:
+                    rec["U"] += 1
+
 
 # =========================
 # 出力：分析結果
@@ -365,3 +465,41 @@ with tabs[2]:
         )
 
     st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    st.subheader("全流し 回収期待値%（軸別・券種別）｜欠車対応")
+    st.caption("回収期待値% = 払戻合計SUM ÷ 総点数KSUM（100円×点数で全流しした想定の実測回収率）。75%以上を候補として残す。")
+
+    THRESH = 75.0
+
+    for bet in ["2車複", "2車単", "3連複"]:
+        rows = []
+        for r in range(1, 8):
+            rec = payout_daily[bet][r]
+            N = rec["N"]
+            KSUM = rec["KSUM"]
+            H = rec["H"]
+            U = rec["U"]
+            SUM = rec["SUM"]
+
+            roi = round(SUM / KSUM, 1) if KSUM > 0 else None  # 回収期待値%
+            avg_pay = round(SUM / H, 1) if H > 0 else None
+            hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+
+            rows.append(
+                {
+                    "軸（評価順位）": r,
+                    "対象N": N,
+                    "総点数KSUM": KSUM,
+                    "的中H（配当あり）": H,
+                    "的中U（配当未入力）": U,
+                    "的中率%（配当あり分）": hit_rate,
+                    "平均配当（配当あり分）": avg_pay,
+                    "回収期待値%（全流し）": roi,
+                    "判定": "◎" if (roi is not None and roi >= THRESH) else "",
+                }
+            )
+
+        st.markdown(f"### {bet}")
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
