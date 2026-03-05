@@ -16,18 +16,18 @@ FIELD_SIZE = 7  # 基本は7車立て（欠車で日次頭数は5/6/7）
 WINNER_RANKS = tuple(range(1, 8))  # 1着条件は評価1〜7位（存在しない順位はN=0のまま）
 
 RANK_SYMBOLS = {
-    1: "carFR順位１位",
-    2: "carFR順位２位",
-    3: "carFR順位３位",
-    4: "carFR順位４位",
-    5: "carFR順位５位",
-    6: "carFR順位６位",
-    7: "carFR順位７位",
+    1: "順流順位１位",
+    2: "順流順位２位",
+    3: "順流順位３位",
+    4: "順流順位４位",
+    5: "順流順位５位",
+    6: "順流順位６位",
+    7: "順流順位７位",
 }
 
 
 def rank_symbol(r: int) -> str:
-    return RANK_SYMBOLS.get(r, f"carFR順位{r}位")
+    return RANK_SYMBOLS.get(r, f"順流順位{r}位")
 
 
 PairKey = Tuple[int, int]  # (winner_rank, second_rank)
@@ -89,7 +89,7 @@ def build_conditional_tables(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFr
                 continue
             total += int(pair_counts.get((wr, rr), 0))
 
-        row_c = {"1着の評価順位": wr, "N": total}
+        row_c = {"1着の順流順位": wr, "N": total}
         for rr in cols:
             if rr == wr:
                 row_c[str(rr)] = None
@@ -97,7 +97,7 @@ def build_conditional_tables(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFr
                 row_c[str(rr)] = int(pair_counts.get((wr, rr), 0))
         count_rows.append(row_c)
 
-        row_p = {"1着の評価順位": wr, "N": total}
+        row_p = {"1着の順流順位": wr, "N": total}
         for rr in cols:
             if rr == wr:
                 row_p[str(rr)] = None
@@ -152,7 +152,7 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
     lambda: {"N": 0, "C1": 0, "C2": 0, "C3": 0}
 )
 
-# 前日まで：1→2（評価順位）
+# 前日まで：1→2（順流順位）
 pair12_manual: Dict[PairKey, int] = defaultdict(int)
 
 # 前日まで：全流し回収（券種×軸）
@@ -234,16 +234,16 @@ with tabs[1]:
 
     # ---- 1→2（累積入力）
     st.markdown("## 1→2 着順位分布（累積・回数）")
-    st.caption("1着が評価1〜7位のとき、2着の評価順位の回数を入力。1→1 / 2→2 / ... / 7→7 は空欄（入力不可）。")
+    st.caption("1着が順流順位1〜7位のとき、2着の順流順位の回数を入力。1→1 / 2→2 / ... / 7→7 は空欄（入力不可）。")
 
     h = st.columns([1.8] + [1] * len(cols_12))
-    h[0].markdown("**条件：1着の評価順位**")
+    h[0].markdown("**条件：1着の順流順位**")
     for j, rr in enumerate(cols_12, start=1):
         h[j].markdown(f"**2着={rr}**")
 
     for wr in WINNER_RANKS:
         row_cols = st.columns([1.8] + [1] * len(cols_12))
-        row_cols[0].write(f"評価{wr}位が1着")
+        row_cols[0].write(f"順流順位{wr}位が1着")
         for j, rr in enumerate(cols_12, start=1):
             if rr == wr:
                 row_cols[j].write("")
@@ -261,7 +261,7 @@ with tabs[1]:
 
     # ---- ランク別 入賞回数（累積入力）
     st.markdown("## ランク別 入賞回数（累積）")
-    st.caption("評価順位1～7位まで入力。Nは各順位が存在したレース数（欠車があると下位順位のNは減ります）。")
+    st.caption("順流順位1～7位まで入力。Nは各順位が存在したレース数（欠車があると下位順位のNは減ります）。")
 
     hdr = st.columns([1.8, 1, 1, 1.8])
     hdr[0].markdown("**ランク**")
@@ -480,7 +480,7 @@ for bet in BET_TYPES:
 # 出力：分析結果
 # =========================
 with tabs[2]:
-    st.subheader("1→2 着順位分布（全体累積）｜1着が評価1〜7位のとき（欠車対応）")
+    st.subheader("1→2 着順位分布（全体累積）｜1着が順流順位1〜7位のとき（欠車対応）")
     st.caption("欠車レースでは存在しない下位順位（例：6車レースの評価7位）はNに含まれません。")
 
     df12_count, df12_pct = build_conditional_tables(pair12_total)
@@ -550,3 +550,4 @@ with tabs[2]:
 
         st.markdown(f"### {bet}")
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
