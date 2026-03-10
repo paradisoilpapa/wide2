@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 ＋ 回収 v2.2（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 ＋ 回収 v2.3（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -28,12 +28,16 @@ RANK_SYMBOLS = {
 PAIR_BETS_2F = [(1, 2), (1, 3), (1, 4), (1, 5)]
 
 TRIO_BETS_3F = {
-    "1-2345-2345": {"axis": 1, "partners": {2, 3, 4, 5}},
-    "2-1345-1345": {"axis": 2, "partners": {1, 3, 4, 5}},
-    "3-1245-1245": {"axis": 3, "partners": {1, 2, 4, 5}},
-    "4-1235-1235": {"axis": 4, "partners": {1, 2, 3, 5}},
-    "5-1234-1234": {"axis": 5, "partners": {1, 2, 3, 4}},
-    "1-3456-3456": {"axis": 1, "partners": {3, 4, 5, 6}},
+    # 軸1本型
+    "1-2345-2345": {"kind": "axis1", "axis": 1, "partners": {2, 3, 4, 5}},
+    "2-1345-1345": {"kind": "axis1", "axis": 2, "partners": {1, 3, 4, 5}},
+    "3-1245-1245": {"kind": "axis1", "axis": 3, "partners": {1, 2, 4, 5}},
+    "4-1235-1235": {"kind": "axis1", "axis": 4, "partners": {1, 2, 3, 5}},
+    "5-1234-1234": {"kind": "axis1", "axis": 5, "partners": {1, 2, 3, 4}},
+    "1-3456-3456": {"kind": "axis1", "axis": 1, "partners": {3, 4, 5, 6}},
+    # 固定2頭型
+    "1-2-4567": {"kind": "fixed2", "fixed": {1, 2}, "partners": {4, 5, 6, 7}},
+    "1-3-4567": {"kind": "fixed2", "fixed": {1, 3}, "partners": {4, 5, 6, 7}},
 }
 
 
@@ -112,12 +116,26 @@ def points_per_race_2f_single(field_n: int, a: int, b: int) -> int:
     return 1 if field_n >= max(a, b) else 0
 
 
-def points_per_race_3f_axis(field_n: int, axis_rank: int, partners: set[int]) -> int:
-    if field_n < axis_rank:
-        return 0
+def points_per_race_3f_pattern(field_n: int, cfg: dict) -> int:
+    kind = cfg.get("kind")
 
-    valid_partners = [r for r in partners if r <= field_n and r != axis_rank]
-    return comb2(len(valid_partners))
+    if kind == "axis1":
+        axis = int(cfg["axis"])
+        partners = set(cfg["partners"])
+        if field_n < axis:
+            return 0
+        valid_partners = [r for r in partners if r <= field_n and r != axis]
+        return comb2(len(valid_partners))
+
+    if kind == "fixed2":
+        fixed = set(cfg["fixed"])
+        partners = set(cfg["partners"])
+        if any(r > field_n for r in fixed):
+            return 0
+        valid_partners = [r for r in partners if r <= field_n and r not in fixed]
+        return len(valid_partners)
+
+    return 0
 
 
 def new_payout_rec():
@@ -170,7 +188,6 @@ with tabs[0]:
     cols_hdr[4].markdown("**2車複配当**")
     cols_hdr[5].markdown("**3連複配当**")
 
-    # ★ 14R に修正
     for i in range(1, 15):
         c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
 
@@ -307,8 +324,8 @@ with tabs[1]:
 
     st.divider()
 
-    st.markdown("## 3連複 回収（累積）｜軸1〜5")
-    st.caption("3連複は軸1〜5の5パターンを別々に集計します。")
+    st.markdown("## 3連複 回収（累積）｜軸別＋固定2頭流し")
+    st.caption("3連複は各買い目形を別々に集計します。")
 
     h3 = st.columns([2.6, 1, 1, 1, 1, 1.2])
     h3[0].markdown("**買い目形**")
@@ -340,7 +357,6 @@ with tabs[1]:
 # =========================
 # 集計：日次 + 前日まで累積
 # =========================
-
 rank_daily: Dict[int, Dict[str, int]] = {
     r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 8)
 }
@@ -464,21 +480,37 @@ for row in byrace_rows:
 
     for label, cfg in TRIO_BETS_3F.items():
         rec = payout_3f_daily[label]
-        axis = int(cfg["axis"])
-        partners = set(cfg["partners"])
+        kind = cfg.get("kind")
 
-        ksum = points_per_race_3f_axis(field_n, axis, partners)
+        ksum = points_per_race_3f_pattern(field_n, cfg)
         if ksum <= 0:
             continue
 
         rec["N"] += 1
         rec["KSUM"] += ksum
 
-        hit = (
-            len(finish_rank_set) == 3
-            and axis in finish_rank_set
-            and finish_rank_set.issubset(partners | {axis})
-        )
+        hit = False
+
+        if kind == "axis1":
+            axis = int(cfg["axis"])
+            partners = set(cfg["partners"])
+            hit = (
+                len(finish_rank_set) == 3
+                and axis in finish_rank_set
+                and finish_rank_set.issubset(partners | {axis})
+            )
+
+        elif kind == "fixed2":
+            fixed = set(cfg["fixed"])
+            partners = set(cfg["partners"])
+            valid_partners = {r for r in partners if r <= field_n and r not in fixed}
+            remain = finish_rank_set - fixed
+            hit = (
+                len(finish_rank_set) == 3
+                and fixed.issubset(finish_rank_set)
+                and len(remain) == 1
+                and next(iter(remain)) in valid_partners
+            )
 
         if hit:
             if pay > 0:
@@ -541,8 +573,6 @@ with tabs[2]:
     st.divider()
 
     st.subheader("2車複 回収期待値%｜1-2 / 1-3 / 1-4 / 1-5")
-    THRESH = 100.0
-
     rows_2f = []
     for a, b in PAIR_BETS_2F:
         label = f"{a}-{b}"
@@ -558,25 +588,25 @@ with tabs[2]:
         hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
         rows_2f.append(
-    {
-        "買い目": label,
-        "対象N": N,
-        "総点数KSUM": KSUM,
-        "払戻合計SUM": SUM,
-        "的中H（配当あり）": H,
-        "的中U（配当未入力）": U,
-        "的中率%（配当あり分）": hit_rate,
-        "平均配当（配当あり分）": avg_pay,
-        "回収期待値%": roi,
-        "判定": "◎" if (roi is not None and roi >= 100.0) else "",
-    }
-)
+            {
+                "買い目": label,
+                "対象N": N,
+                "総点数KSUM": KSUM,
+                "払戻合計SUM": SUM,
+                "的中H（配当あり）": H,
+                "的中U（配当未入力）": U,
+                "的中率%（配当あり分）": hit_rate,
+                "平均配当（配当あり分）": avg_pay,
+                "回収期待値%": roi,
+                "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+            }
+        )
 
     st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
     st.divider()
 
-    st.subheader("3連複 回収期待値%｜軸1〜5")
+    st.subheader("3連複 回収期待値%｜軸別＋固定2頭流し")
     rows_3f = []
     for label in TRIO_BETS_3F.keys():
         rec = payout_3f_total[label]
@@ -591,21 +621,18 @@ with tabs[2]:
         hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
         rows_3f.append(
-    {
-        "買い目形": label,
-        "対象N": N,
-        "総点数KSUM": KSUM,
-        "払戻合計SUM": SUM,
-        "的中H（配当あり）": H,
-        "的中U（配当未入力）": U,
-        "的中率%（配当あり分）": hit_rate,
-        "平均配当（配当あり分）": avg_pay,
-        "回収期待値%": roi,
-        "判定": "◎" if (roi is not None and roi >= 100.0) else "",
-    }
-)
+            {
+                "買い目形": label,
+                "対象N": N,
+                "総点数KSUM": KSUM,
+                "払戻合計SUM": SUM,
+                "的中H（配当あり）": H,
+                "的中U（配当未入力）": U,
+                "的中率%（配当あり分）": hit_rate,
+                "平均配当（配当あり分）": avg_pay,
+                "回収期待値%": roi,
+                "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+            }
+        )
 
     st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
-
-
-
