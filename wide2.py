@@ -555,19 +555,19 @@ with tabs[2]:
         hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
         rows_2f.append(
-            {
-                "買い目": label,
-                "対象N": N,
-                "総点数KSUM": KSUM,
-                "払戻合計SUM": SUM,
-                "的中H（配当あり）": H,
-                "的中U（配当未入力）": U,
-                "的中率%（配当あり分）": hit_rate,
-                "平均配当（配当あり分）": avg_pay,
-                "回収期待値%": roi,
-                "判定": "◎" if (roi is not None and roi >= THRESH) else "",
-            }
-        )
+    {
+        "買い目": label,
+        "対象N": N,
+        "総点数KSUM": KSUM,
+        "払戻合計SUM": SUM,
+        "的中H（配当あり）": H,
+        "的中U（配当未入力）": U,
+        "的中率%（配当あり分）": hit_rate,
+        "平均配当（配当あり分）": avg_pay,
+        "回収期待値%": roi,
+        "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+    }
+)
 
     st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
@@ -588,19 +588,20 @@ with tabs[2]:
         hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
         rows_3f.append(
-            {
-                "買い目形": label,
-                "対象N": N,
-                "総点数KSUM": KSUM,
-                "払戻合計SUM": SUM,
-                "的中H（配当あり）": H,
-                "的中U（配当未入力）": U,
-                "的中率%（配当あり分）": hit_rate,
-                "平均配当（配当あり分）": avg_pay,
-                "回収期待値%": roi,
-                "判定": "◎" if (roi is not None and roi >= THRESH) else "",
-            }
-        )
+    {
+        "買い目形": label,
+        "対象N": N,
+        "総点数KSUM": KSUM,
+        "払戻合計SUM": SUM,
+        "的中H（配当あり）": H,
+        "的中U（配当未入力）": U,
+        "的中率%（配当あり分）": hit_rate,
+        "平均配当（配当あり分）": avg_pay,
+        "回収期待値%": roi,
+        "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+    }
+)
 
     st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
+
 
