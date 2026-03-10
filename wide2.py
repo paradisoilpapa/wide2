@@ -7,13 +7,13 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 ＋ 回収 v2.1（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 ＋ 回収 v2.2（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
 # =========================
-FIELD_SIZE = 7  # 基本は7車立て（欠車で日次頭数は5/6/7）
-WINNER_RANKS = tuple(range(1, 8))  # 1着条件は評価1〜7位（存在しない順位はN=0のまま）
+FIELD_SIZE = 7
+WINNER_RANKS = tuple(range(1, 8))
 
 RANK_SYMBOLS = {
     1: "順流順位１位",
@@ -44,12 +44,6 @@ PairKey = Tuple[int, int]  # (winner_rank, second_rank)
 
 
 def parse_rankline(s: str, expected_len: int) -> List[str]:
-    """
-    V順位をパース（欠車対応）
-    - expected_len 桁（5/6/7）
-    - 許容文字: 1～7
-    - 重複なし
-    """
     if not s:
         return []
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
@@ -63,11 +57,6 @@ def parse_rankline(s: str, expected_len: int) -> List[str]:
 
 
 def parse_finish(s: str) -> List[str]:
-    """
-    着順（～3桁まで使用）
-    - 許容文字: 1～7
-    - 重複は先着優先で無視
-    """
     if not s:
         return []
     s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
@@ -82,13 +71,7 @@ def parse_finish(s: str) -> List[str]:
 
 
 def build_conditional_tables(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    pair_counts[(wr, rr)] = 回数
-    出力：回数ピボット、割合%ピボット
-    ※ wr==rr のセルは回数/割合ともに None（空欄）
-    ※ N は wr==rr を除外した合計
-    """
-    cols = list(range(1, FIELD_SIZE + 1))  # 1..7
+    cols = list(range(1, FIELD_SIZE + 1))
     count_rows = []
     pct_rows = []
 
@@ -101,10 +84,7 @@ def build_conditional_tables(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFr
 
         row_c = {"1着の順流順位": wr, "N": total}
         for rr in cols:
-            if rr == wr:
-                row_c[str(rr)] = None
-            else:
-                row_c[str(rr)] = int(pair_counts.get((wr, rr), 0))
+            row_c[str(rr)] = None if rr == wr else int(pair_counts.get((wr, rr), 0))
         count_rows.append(row_c)
 
         row_p = {"1着の順流順位": wr, "N": total}
@@ -128,38 +108,16 @@ def comb2(n: int) -> int:
 
 
 def points_per_race_2f_single(field_n: int, a: int, b: int) -> int:
-    """
-    2車複 1点買い（例 1-2）
-    その評価順位が両方存在するレースなら1点、存在しないなら0点
-    """
-    if field_n >= max(a, b):
-        return 1
-    return 0
+    return 1 if field_n >= max(a, b) else 0
 
 
 def points_per_race_3f_axis(field_n: int, axis_rank: int) -> int:
-    """
-    3連複
-    1-2345-2345
-    2-1345-1345
-    3-1245-1245
-    4-1235-1235
-    5-1234-1234
-    のような「軸 + 残り4頭から2頭」形式
-
-    5/6/7車では軸1〜5は必ず存在するため常に6点
-    """
     if field_n < axis_rank:
         return 0
-    return comb2(4)
+    return comb2(4)  # 6点固定
 
 
 def new_payout_rec():
-    # N: 対象レース数
-    # KSUM: 総点数
-    # H: 的中（配当あり）
-    # U: 的中（配当未入力）
-    # SUM: 払戻合計（100円あたり円）
     return {"N": 0, "KSUM": 0, "H": 0, "U": 0, "SUM": 0}
 
 
@@ -179,12 +137,12 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
 # 前日まで：1→2（順流順位）
 pair12_manual: Dict[PairKey, int] = defaultdict(int)
 
-# 前日まで：2車複 1-2 / 1-3 / 1-4 / 1-5
+# 前日まで：2車複
 agg_payout_2f_manual: Dict[str, Dict[str, int]] = {
     f"{a}-{b}": new_payout_rec() for a, b in PAIR_BETS_2F
 }
 
-# 前日まで：3連複 軸1〜5
+# 前日まで：3連複
 agg_payout_3f_manual: Dict[str, Dict[str, int]] = {
     label: new_payout_rec() for label in TRIO_BETS_3F.keys()
 }
@@ -198,7 +156,7 @@ with tabs[0]:
     st.caption(
         "各Rごとに頭数（5/6/7）を選択してください。"
         "V順位はその頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。着順は～3桁。"
-        "配当は100円あたりの払戻金（円）を入力。未入力は0のままでOK（集計上は“配当未入力”としてカウント）。"
+        "配当は100円あたりの払戻金（円）を入力。未入力は0のままでOK。"
     )
 
     cols_hdr = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
@@ -209,6 +167,7 @@ with tabs[0]:
     cols_hdr[4].markdown("**2車複配当**")
     cols_hdr[5].markdown("**3連複配当**")
 
+    # ★ 14R に修正
     for i in range(1, 15):
         c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
 
@@ -255,11 +214,10 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("前日までの集計（累積・全体）")
 
-    cols_12 = list(range(1, FIELD_SIZE + 1))  # 1..7
+    cols_12 = list(range(1, FIELD_SIZE + 1))
 
-    # ---- 1→2（累積入力）
     st.markdown("## 1→2 着順位分布（累積・回数）")
-    st.caption("1着が順流順位1〜7位のとき、2着の順流順位の回数を入力。1→1 / 2→2 / ... / 7→7 は空欄（入力不可）。")
+    st.caption("1着が順流順位1〜7位のとき、2着の順流順位の回数を入力。")
 
     h = st.columns([1.8] + [1] * len(cols_12))
     h[0].markdown("**条件：1着の順流順位**")
@@ -284,9 +242,8 @@ with tabs[1]:
 
     st.divider()
 
-    # ---- ランク別 入賞回数（累積入力）
     st.markdown("## ランク別 入賞回数（累積）")
-    st.caption("順流順位1～7位まで入力。Nは各順位が存在したレース数（欠車があると下位順位のNは減ります）。")
+    st.caption("順流順位1～7位まで入力。Nは各順位が存在したレース数。")
 
     hdr = st.columns([1.8, 1, 1, 1.8])
     hdr[0].markdown("**ランク**")
@@ -315,9 +272,8 @@ with tabs[1]:
 
     st.divider()
 
-    # ---- 2車複 回収（累積入力）
     st.markdown("## 2車複 回収（累積）｜1-2 / 1-3 / 1-4 / 1-5")
-    st.caption("2車複は4本を別々に集計します。各買い目ごとに前日までの累積を入力してください。")
+    st.caption("2車複は4本を別々に集計します。")
 
     h2 = st.columns([2.0, 1, 1, 1, 1, 1.2])
     h2[0].markdown("**買い目**")
@@ -348,9 +304,8 @@ with tabs[1]:
 
     st.divider()
 
-    # ---- 3連複 回収（累積入力）
     st.markdown("## 3連複 回収（累積）｜軸1〜5")
-    st.caption("3連複は軸1〜5の5パターンを別々に集計します。各買い目形ごとに前日までの累積を入力してください。")
+    st.caption("3連複は軸1〜5の5パターンを別々に集計します。")
 
     h3 = st.columns([2.6, 1, 1, 1, 1, 1.2])
     h3[0].markdown("**買い目形**")
@@ -380,10 +335,9 @@ with tabs[1]:
 
 
 # =========================
-# 集計：日次 + 前日まで累積 を合算
+# 集計：日次 + 前日まで累積
 # =========================
 
-# --- ランク別（日次） ---
 rank_daily: Dict[int, Dict[str, int]] = {
     r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 8)
 }
@@ -409,7 +363,6 @@ for row in byrace_rows:
         if len(finish) >= 3 and finish[2] == car:
             rank_daily[r]["C3"] += 1
 
-# --- ランク別（合算） ---
 rank_total: Dict[int, Dict[str, int]] = {
     r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 8)
 }
@@ -425,7 +378,6 @@ for r, rec in agg_rank_manual.items():
         rank_total[r]["C2"] += rec["C2"]
         rank_total[r]["C3"] += rec["C3"]
 
-# --- 1→2（日次） ---
 pair12_daily: Dict[PairKey, int] = defaultdict(int)
 
 for row in byrace_rows:
@@ -435,18 +387,14 @@ for row in byrace_rows:
         continue
 
     car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
-    win_car = finish[0]
-    sec_car = finish[1]
-
-    win_rank = car_to_rank.get(win_car)
-    sec_rank = car_to_rank.get(sec_car)
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
 
     if win_rank is None or sec_rank is None:
         continue
 
     pair12_daily[(win_rank, sec_rank)] += 1
 
-# --- 1→2（合算） ---
 pair12_total: Dict[PairKey, int] = defaultdict(int)
 for k, v in pair12_daily.items():
     pair12_total[k] += int(v)
@@ -467,7 +415,6 @@ for row in byrace_rows:
 
     car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
     finish_ranks = [car_to_rank.get(car) for car in finish[:2]]
-
     if any(r is None for r in finish_ranks):
         continue
 
@@ -485,8 +432,7 @@ for row in byrace_rows:
         rec["N"] += 1
         rec["KSUM"] += ksum
 
-        hit = (finish_rank_set == {a, b})
-        if hit:
+        if finish_rank_set == {a, b}:
             if pay > 0:
                 rec["H"] += 1
                 rec["SUM"] += pay
@@ -507,7 +453,6 @@ for row in byrace_rows:
 
     car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
     finish_ranks = [car_to_rank.get(car) for car in finish[:3]]
-
     if any(r is None for r in finish_ranks):
         continue
 
@@ -539,7 +484,6 @@ for row in byrace_rows:
             else:
                 rec["U"] += 1
 
-# --- 2車複（合算） ---
 payout_2f_total: Dict[str, Dict[str, int]] = {
     label: new_payout_rec() for label in agg_payout_2f_manual.keys()
 }
@@ -547,7 +491,6 @@ for label in payout_2f_total.keys():
     for k in ("N", "KSUM", "H", "U", "SUM"):
         payout_2f_total[label][k] = payout_2f_daily[label][k] + agg_payout_2f_manual[label][k]
 
-# --- 3連複（合算） ---
 payout_3f_total: Dict[str, Dict[str, int]] = {
     label: new_payout_rec() for label in agg_payout_3f_manual.keys()
 }
@@ -561,7 +504,7 @@ for label in payout_3f_total.keys():
 # =========================
 with tabs[2]:
     st.subheader("1→2 着順位分布（全体累積）｜1着が順流順位1〜7位のとき（欠車対応）")
-    st.caption("欠車レースでは存在しない下位順位（例：6車レースの評価7位）はNに含まれません。")
+    st.caption("欠車レースでは存在しない下位順位はNに含まれません。")
 
     df12_count, df12_pct = build_conditional_tables(pair12_total)
 
@@ -595,8 +538,6 @@ with tabs[2]:
     st.divider()
 
     st.subheader("2車複 回収期待値%｜1-2 / 1-3 / 1-4 / 1-5")
-    st.caption("回収期待値% = 払戻合計SUM ÷ 総点数KSUM。75%以上を候補として残す。")
-
     THRESH = 75.0
 
     rows_2f = []
