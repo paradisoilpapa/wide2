@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 ＋ 回収 v2.0（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2順位分布 ＋ ランク別入賞 ＋ 回収 v2.1（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -23,6 +23,16 @@ RANK_SYMBOLS = {
     5: "順流順位５位",
     6: "順流順位６位",
     7: "順流順位７位",
+}
+
+PAIR_BETS_2F = [(1, 2), (1, 3), (1, 4), (1, 5)]
+
+TRIO_BETS_3F = {
+    "1-2345-2345": {"axis": 1, "partners": {2, 3, 4, 5}},
+    "2-1345-1345": {"axis": 2, "partners": {1, 3, 4, 5}},
+    "3-1245-1245": {"axis": 3, "partners": {1, 2, 4, 5}},
+    "4-1235-1235": {"axis": 4, "partners": {1, 2, 3, 5}},
+    "5-1234-1234": {"axis": 5, "partners": {1, 2, 3, 4}},
 }
 
 
@@ -117,24 +127,31 @@ def comb2(n: int) -> int:
     return n * (n - 1) // 2 if n >= 2 else 0
 
 
-def points_per_race_2f_145(field_n: int) -> int:
+def points_per_race_2f_single(field_n: int, a: int, b: int) -> int:
     """
-    2車複「1-2345」点数
-    評価1位固定、相手は評価2～5位まで
-    5/6/7車立てでは常に4点
+    2車複 1点買い（例 1-2）
+    その評価順位が両方存在するレースなら1点、存在しないなら0点
     """
-    partner_n = min(max(field_n - 1, 0), 4)
-    return partner_n
+    if field_n >= max(a, b):
+        return 1
+    return 0
 
 
-def points_per_race_3f_145(field_n: int) -> int:
+def points_per_race_3f_axis(field_n: int, axis_rank: int) -> int:
     """
-    3連複「1-2345-2345」点数
-    評価1位固定、評価2～5位から2頭選ぶ
-    5/6/7車立てでは常に C(4,2)=6 点
+    3連複
+    1-2345-2345
+    2-1345-1345
+    3-1245-1245
+    4-1235-1235
+    5-1234-1234
+    のような「軸 + 残り4頭から2頭」形式
+
+    5/6/7車では軸1〜5は必ず存在するため常に6点
     """
-    partner_n = min(max(field_n - 1, 0), 4)
-    return comb2(partner_n)
+    if field_n < axis_rank:
+        return 0
+    return comb2(4)
 
 
 def new_payout_rec():
@@ -149,7 +166,7 @@ def new_payout_rec():
 # =========================
 # Tabs
 # =========================
-tabs = st.tabs(["日次手入力（最大12R）", "前日までの集計（累積）", "分析結果"])
+tabs = st.tabs(["日次手入力（最大14R）", "前日までの集計（累積）", "分析結果"])
 
 # 日次の入力行
 byrace_rows: List[Dict] = []
@@ -162,18 +179,22 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
 # 前日まで：1→2（順流順位）
 pair12_manual: Dict[PairKey, int] = defaultdict(int)
 
-# 前日まで：2車複 1-2345 回収
-agg_payout_2f145_manual = new_payout_rec()
+# 前日まで：2車複 1-2 / 1-3 / 1-4 / 1-5
+agg_payout_2f_manual: Dict[str, Dict[str, int]] = {
+    f"{a}-{b}": new_payout_rec() for a, b in PAIR_BETS_2F
+}
 
-# 前日まで：3連複 1-2345-2345 回収
-agg_payout_3f145_manual = new_payout_rec()
+# 前日まで：3連複 軸1〜5
+agg_payout_3f_manual: Dict[str, Dict[str, int]] = {
+    label: new_payout_rec() for label in TRIO_BETS_3F.keys()
+}
 
 
 # =========================
 # A. 日次手入力（欠車対応）
 # =========================
 with tabs[0]:
-    st.subheader("日次手入力（7車ベース・欠車対応・最大12R）")
+    st.subheader("日次手入力（7車ベース・欠車対応・最大14R）")
     st.caption(
         "各Rごとに頭数（5/6/7）を選択してください。"
         "V順位はその頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。着順は～3桁。"
@@ -188,7 +209,7 @@ with tabs[0]:
     cols_hdr[4].markdown("**2車複配当**")
     cols_hdr[5].markdown("**3連複配当**")
 
-    for i in range(1, 13):
+    for i in range(1, 15):
         c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
 
         rid = c1.text_input("", key=f"rid_{i}", value=str(i))
@@ -294,47 +315,44 @@ with tabs[1]:
 
     st.divider()
 
-    # ---- 2車複 1-2345 回収（累積入力）
-    st.markdown("## 2車複 回収（累積）｜評価1位－評価2〜5位")
-    st.caption(
-        "2車複は全流しではなく、固定で『1-2345』のみ集計します。"
-        "前日までの累積を入力してください。"
-    )
+    # ---- 2車複 回収（累積入力）
+    st.markdown("## 2車複 回収（累積）｜1-2 / 1-3 / 1-4 / 1-5")
+    st.caption("2車複は4本を別々に集計します。各買い目ごとに前日までの累積を入力してください。")
 
-    h2 = st.columns([2.2, 1, 1, 1, 1, 1.2])
-    h2[0].markdown("**買い目形**")
+    h2 = st.columns([2.0, 1, 1, 1, 1, 1.2])
+    h2[0].markdown("**買い目**")
     h2[1].markdown("**対象N**")
     h2[2].markdown("**KSUM**")
     h2[3].markdown("**SUM**")
     h2[4].markdown("**H**")
     h2[5].markdown("**U**")
 
-    c0, c1, c2, c3, c4, c5 = st.columns([2.2, 1, 1, 1, 1, 1.2])
-    c0.write("1-2345")
+    for a, b in PAIR_BETS_2F:
+        label = f"{a}-{b}"
+        c0, c1, c2, c3, c4, c5 = st.columns([2.0, 1, 1, 1, 1, 1.2])
+        c0.write(label)
 
-    N = c1.number_input("", key="pN_2f145", min_value=0, value=0)
-    KSUM = c2.number_input("", key="pKSUM_2f145", min_value=0, value=0)
-    SUM = c3.number_input("", key="pSUM_2f145", min_value=0, value=0, step=10)
-    H = c4.number_input("", key="pH_2f145", min_value=0, value=0)
-    U = c5.number_input("", key="pU_2f145", min_value=0, value=0)
+        N = c1.number_input("", key=f"pN_2f_{label}", min_value=0, value=0)
+        KSUM = c2.number_input("", key=f"pKSUM_2f_{label}", min_value=0, value=0)
+        SUM = c3.number_input("", key=f"pSUM_2f_{label}", min_value=0, value=0, step=10)
+        H = c4.number_input("", key=f"pH_2f_{label}", min_value=0, value=0)
+        U = c5.number_input("", key=f"pU_2f_{label}", min_value=0, value=0)
 
-    if any([N, KSUM, SUM, H, U]):
-        agg_payout_2f145_manual["N"] += int(N)
-        agg_payout_2f145_manual["KSUM"] += int(KSUM)
-        agg_payout_2f145_manual["SUM"] += int(SUM)
-        agg_payout_2f145_manual["H"] += int(H)
-        agg_payout_2f145_manual["U"] += int(U)
+        if any([N, KSUM, SUM, H, U]):
+            rec = agg_payout_2f_manual[label]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+            rec["U"] += int(U)
 
     st.divider()
 
-    # ---- 3連複 1-2345-2345 回収（累積入力）
-    st.markdown("## 3連複 回収（累積）｜評価1位－評価2〜5位－評価2〜5位")
-    st.caption(
-        "3連複は全流しではなく、固定で『1-2345-2345』のみ集計します。"
-        "前日までの累積を入力してください。"
-    )
+    # ---- 3連複 回収（累積入力）
+    st.markdown("## 3連複 回収（累積）｜軸1〜5")
+    st.caption("3連複は軸1〜5の5パターンを別々に集計します。各買い目形ごとに前日までの累積を入力してください。")
 
-    h3 = st.columns([2.2, 1, 1, 1, 1, 1.2])
+    h3 = st.columns([2.6, 1, 1, 1, 1, 1.2])
     h3[0].markdown("**買い目形**")
     h3[1].markdown("**対象N**")
     h3[2].markdown("**KSUM**")
@@ -342,21 +360,23 @@ with tabs[1]:
     h3[4].markdown("**H**")
     h3[5].markdown("**U**")
 
-    c0, c1, c2, c3, c4, c5 = st.columns([2.2, 1, 1, 1, 1, 1.2])
-    c0.write("1-2345-2345")
+    for label in TRIO_BETS_3F.keys():
+        c0, c1, c2, c3, c4, c5 = st.columns([2.6, 1, 1, 1, 1, 1.2])
+        c0.write(label)
 
-    N = c1.number_input("", key="pN_3f145", min_value=0, value=0)
-    KSUM = c2.number_input("", key="pKSUM_3f145", min_value=0, value=0)
-    SUM = c3.number_input("", key="pSUM_3f145", min_value=0, value=0, step=10)
-    H = c4.number_input("", key="pH_3f145", min_value=0, value=0)
-    U = c5.number_input("", key="pU_3f145", min_value=0, value=0)
+        N = c1.number_input("", key=f"pN_3f_{label}", min_value=0, value=0)
+        KSUM = c2.number_input("", key=f"pKSUM_3f_{label}", min_value=0, value=0)
+        SUM = c3.number_input("", key=f"pSUM_3f_{label}", min_value=0, value=0, step=10)
+        H = c4.number_input("", key=f"pH_3f_{label}", min_value=0, value=0)
+        U = c5.number_input("", key=f"pU_3f_{label}", min_value=0, value=0)
 
-    if any([N, KSUM, SUM, H, U]):
-        agg_payout_3f145_manual["N"] += int(N)
-        agg_payout_3f145_manual["KSUM"] += int(KSUM)
-        agg_payout_3f145_manual["SUM"] += int(SUM)
-        agg_payout_3f145_manual["H"] += int(H)
-        agg_payout_3f145_manual["U"] += int(U)
+        if any([N, KSUM, SUM, H, U]):
+            rec = agg_payout_3f_manual[label]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+            rec["U"] += int(U)
 
 
 # =========================
@@ -433,8 +453,10 @@ for k, v in pair12_daily.items():
 for k, v in pair12_manual.items():
     pair12_total[k] += int(v)
 
-# --- 2車複「1-2345」回収（日次） ---
-payout_2f145_daily = new_payout_rec()
+# --- 2車複（日次） ---
+payout_2f_daily: Dict[str, Dict[str, int]] = {
+    f"{a}-{b}": new_payout_rec() for a, b in PAIR_BETS_2F
+}
 
 for row in byrace_rows:
     vorder = row.get("vorder", [])
@@ -449,22 +471,32 @@ for row in byrace_rows:
     if any(r is None for r in finish_ranks):
         continue
 
-    payout_2f145_daily["N"] += 1
-    payout_2f145_daily["KSUM"] += points_per_race_2f_145(field_n)
-
     finish_rank_set = set(int(r) for r in finish_ranks)
-    hit = (1 in finish_rank_set) and all(r in {1, 2, 3, 4, 5} for r in finish_rank_set)
+    pay = int(row.get("pay_2f", 0))
 
-    if hit:
-        pay = int(row.get("pay_2f", 0))
-        if pay > 0:
-            payout_2f145_daily["H"] += 1
-            payout_2f145_daily["SUM"] += pay
-        else:
-            payout_2f145_daily["U"] += 1
+    for a, b in PAIR_BETS_2F:
+        label = f"{a}-{b}"
+        rec = payout_2f_daily[label]
 
-# --- 3連複「1-2345-2345」回収（日次） ---
-payout_3f145_daily = new_payout_rec()
+        ksum = points_per_race_2f_single(field_n, a, b)
+        if ksum <= 0:
+            continue
+
+        rec["N"] += 1
+        rec["KSUM"] += ksum
+
+        hit = (finish_rank_set == {a, b})
+        if hit:
+            if pay > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay
+            else:
+                rec["U"] += 1
+
+# --- 3連複（日次） ---
+payout_3f_daily: Dict[str, Dict[str, int]] = {
+    label: new_payout_rec() for label in TRIO_BETS_3F.keys()
+}
 
 for row in byrace_rows:
     vorder = row.get("vorder", [])
@@ -479,33 +511,49 @@ for row in byrace_rows:
     if any(r is None for r in finish_ranks):
         continue
 
-    payout_3f145_daily["N"] += 1
-    payout_3f145_daily["KSUM"] += points_per_race_3f_145(field_n)
-
     finish_rank_set = set(int(r) for r in finish_ranks)
-    hit = (
-        1 in finish_rank_set
-        and len(finish_rank_set) == 3
-        and all(r in {1, 2, 3, 4, 5} for r in finish_rank_set)
-    )
+    pay = int(row.get("pay_3f", 0))
 
-    if hit:
-        pay = int(row.get("pay_3f", 0))
-        if pay > 0:
-            payout_3f145_daily["H"] += 1
-            payout_3f145_daily["SUM"] += pay
-        else:
-            payout_3f145_daily["U"] += 1
+    for label, cfg in TRIO_BETS_3F.items():
+        rec = payout_3f_daily[label]
+        axis = int(cfg["axis"])
+        partners = set(cfg["partners"])
 
-# --- 2車複「1-2345」回収（合算：日次 + 前日まで） ---
-payout_2f145_total = new_payout_rec()
-for k in ("N", "KSUM", "H", "U", "SUM"):
-    payout_2f145_total[k] = payout_2f145_daily[k] + agg_payout_2f145_manual[k]
+        ksum = points_per_race_3f_axis(field_n, axis)
+        if ksum <= 0:
+            continue
 
-# --- 3連複「1-2345-2345」回収（合算：日次 + 前日まで） ---
-payout_3f145_total = new_payout_rec()
-for k in ("N", "KSUM", "H", "U", "SUM"):
-    payout_3f145_total[k] = payout_3f145_daily[k] + agg_payout_3f145_manual[k]
+        rec["N"] += 1
+        rec["KSUM"] += ksum
+
+        hit = (
+            len(finish_rank_set) == 3
+            and axis in finish_rank_set
+            and finish_rank_set.issubset(partners | {axis})
+        )
+
+        if hit:
+            if pay > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay
+            else:
+                rec["U"] += 1
+
+# --- 2車複（合算） ---
+payout_2f_total: Dict[str, Dict[str, int]] = {
+    label: new_payout_rec() for label in agg_payout_2f_manual.keys()
+}
+for label in payout_2f_total.keys():
+    for k in ("N", "KSUM", "H", "U", "SUM"):
+        payout_2f_total[label][k] = payout_2f_daily[label][k] + agg_payout_2f_manual[label][k]
+
+# --- 3連複（合算） ---
+payout_3f_total: Dict[str, Dict[str, int]] = {
+    label: new_payout_rec() for label in agg_payout_3f_manual.keys()
+}
+for label in payout_3f_total.keys():
+    for k in ("N", "KSUM", "H", "U", "SUM"):
+        payout_3f_total[label][k] = payout_3f_daily[label][k] + agg_payout_3f_manual[label][k]
 
 
 # =========================
@@ -546,26 +594,28 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("2車複 回収期待値%｜評価1位－評価2〜5位")
+    st.subheader("2車複 回収期待値%｜1-2 / 1-3 / 1-4 / 1-5")
     st.caption("回収期待値% = 払戻合計SUM ÷ 総点数KSUM。75%以上を候補として残す。")
 
     THRESH = 75.0
 
-    rec = payout_2f145_total
-    N = rec["N"]
-    KSUM = rec["KSUM"]
-    H = rec["H"]
-    U = rec["U"]
-    SUM = rec["SUM"]
+    rows_2f = []
+    for a, b in PAIR_BETS_2F:
+        label = f"{a}-{b}"
+        rec = payout_2f_total[label]
+        N = rec["N"]
+        KSUM = rec["KSUM"]
+        H = rec["H"]
+        U = rec["U"]
+        SUM = rec["SUM"]
 
-    roi = round(SUM / KSUM, 1) if KSUM > 0 else None
-    avg_pay = round(SUM / H, 1) if H > 0 else None
-    hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+        roi = round(SUM / KSUM, 1) if KSUM > 0 else None
+        avg_pay = round(SUM / H, 1) if H > 0 else None
+        hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
-    df_2f = pd.DataFrame(
-        [
+        rows_2f.append(
             {
-                "買い目形": "1-2345",
+                "買い目": label,
                 "対象N": N,
                 "総点数KSUM": KSUM,
                 "払戻合計SUM": SUM,
@@ -576,29 +626,29 @@ with tabs[2]:
                 "回収期待値%": roi,
                 "判定": "◎" if (roi is not None and roi >= THRESH) else "",
             }
-        ]
-    )
-    st.dataframe(df_2f, use_container_width=True, hide_index=True)
+        )
+
+    st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
     st.divider()
 
-    st.subheader("3連複 回収期待値%｜評価1位－評価2〜5位－評価2〜5位")
+    st.subheader("3連複 回収期待値%｜軸1〜5")
+    rows_3f = []
+    for label in TRIO_BETS_3F.keys():
+        rec = payout_3f_total[label]
+        N = rec["N"]
+        KSUM = rec["KSUM"]
+        H = rec["H"]
+        U = rec["U"]
+        SUM = rec["SUM"]
 
-    rec = payout_3f145_total
-    N = rec["N"]
-    KSUM = rec["KSUM"]
-    H = rec["H"]
-    U = rec["U"]
-    SUM = rec["SUM"]
+        roi = round(SUM / KSUM, 1) if KSUM > 0 else None
+        avg_pay = round(SUM / H, 1) if H > 0 else None
+        hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
-    roi = round(SUM / KSUM, 1) if KSUM > 0 else None
-    avg_pay = round(SUM / H, 1) if H > 0 else None
-    hit_rate = round(100.0 * H / N, 1) if N > 0 else None
-
-    df_3f = pd.DataFrame(
-        [
+        rows_3f.append(
             {
-                "買い目形": "1-2345-2345",
+                "買い目形": label,
                 "対象N": N,
                 "総点数KSUM": KSUM,
                 "払戻合計SUM": SUM,
@@ -609,6 +659,6 @@ with tabs[2]:
                 "回収期待値%": roi,
                 "判定": "◎" if (roi is not None and roi >= THRESH) else "",
             }
-        ]
-    )
-    st.dataframe(df_3f, use_container_width=True, hide_index=True)
+        )
+
+    st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
