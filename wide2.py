@@ -538,7 +538,7 @@ with tabs[2]:
     st.divider()
 
     st.subheader("2車複 回収期待値%｜1-2 / 1-3 / 1-4 / 1-5")
-    THRESH = 75.0
+    THRESH = 100.0
 
     rows_2f = []
     for a, b in PAIR_BETS_2F:
@@ -603,3 +603,4 @@ with tabs[2]:
         )
 
     st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
+
