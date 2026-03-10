@@ -33,6 +33,7 @@ TRIO_BETS_3F = {
     "3-1245-1245": {"axis": 3, "partners": {1, 2, 4, 5}},
     "4-1235-1235": {"axis": 4, "partners": {1, 2, 3, 5}},
     "5-1234-1234": {"axis": 5, "partners": {1, 2, 3, 4}},
+    "1-3456-3456": {"axis": 1, "partners": {3, 4, 5, 6}},
 }
 
 
@@ -111,10 +112,12 @@ def points_per_race_2f_single(field_n: int, a: int, b: int) -> int:
     return 1 if field_n >= max(a, b) else 0
 
 
-def points_per_race_3f_axis(field_n: int, axis_rank: int) -> int:
+def points_per_race_3f_axis(field_n: int, axis_rank: int, partners: set[int]) -> int:
     if field_n < axis_rank:
         return 0
-    return comb2(4)  # 6点固定
+
+    valid_partners = [r for r in partners if r <= field_n and r != axis_rank]
+    return comb2(len(valid_partners))
 
 
 def new_payout_rec():
@@ -464,7 +467,7 @@ for row in byrace_rows:
         axis = int(cfg["axis"])
         partners = set(cfg["partners"])
 
-        ksum = points_per_race_3f_axis(field_n, axis)
+        ksum = points_per_race_3f_axis(field_n, axis, partners)
         if ksum <= 0:
             continue
 
@@ -603,5 +606,6 @@ with tabs[2]:
 )
 
     st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
+
 
 
