@@ -1,304 +1,555 @@
-import streamlit as st
+# -*- coding: utf-8 -*-
+
+from collections import defaultdict
+from typing import List, Dict, Tuple
+
 import pandas as pd
+import streamlit as st
 
-st.title("復習ヴェロビ｜評価軸別 二車複・二車単検証")
+st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 軸別回収 v2.4（7車固定・欠車対応）")
 
-st.caption("保存なし。36Rまで入力して、評価1〜7を軸に総流しした場合の的中率・回収率を確認します。")
+# =========================
+# 基本設定（7車ベース）
+# =========================
+FIELD_SIZE = 7
+WINNER_RANKS = tuple(range(1, 8))
+EVAL_AXES = tuple(range(1, 8))
 
-# =====================================================
-# 設定
-# =====================================================
-
-MAX_RACES = 36
-EVAL_COUNT = 7
-UNIT = 100
-
-# =====================================================
-# 補助関数
-# =====================================================
-
-def to_int_or_none(x):
-    try:
-        if x is None:
-            return None
-        x = str(x).strip()
-        if x == "":
-            return None
-        return int(x)
-    except Exception:
-        return None
+RANK_SYMBOLS = {
+    1: "評価１",
+    2: "評価２",
+    3: "評価３",
+    4: "評価４",
+    5: "評価５",
+    6: "評価６",
+    7: "評価７",
+}
 
 
-def pct(n, d):
-    if d == 0:
-        return 0.0
-    return n / d * 100
+def rank_symbol(r: int) -> str:
+    return RANK_SYMBOLS.get(r, f"評価{r}")
 
 
-# =====================================================
-# 入力
-# =====================================================
+PairKey = Tuple[int, int]  # (winner_eval, second_eval)
 
-st.subheader("入力")
 
-rows = []
+def parse_rankline(s: str, expected_len: int) -> List[str]:
+    if not s:
+        return []
+    s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
+    if not s.isdigit() or len(s) != expected_len:
+        return []
+    if any(ch not in "1234567" for ch in s):
+        return []
+    if len(set(s)) != len(s):
+        return []
+    return list(s)
 
-for r in range(1, MAX_RACES + 1):
-    with st.expander(f"{r}R", expanded=(r <= 3)):
 
-        st.markdown("#### ヴェロビ評価順")
+def parse_finish(s: str) -> List[str]:
+    if not s:
+        return []
+    s = s.replace("-", "").replace(" ", "").replace("/", "").replace(",", "")
+    s = "".join(ch for ch in s if ch in "1234567")
+    out: List[str] = []
+    for ch in s:
+        if ch not in out:
+            out.append(ch)
+        if len(out) == 3:
+            break
+    return out
 
-        eval_cols = st.columns(EVAL_COUNT)
-        eval_cars = {}
 
-        for ev in range(1, EVAL_COUNT + 1):
-            with eval_cols[ev - 1]:
-                eval_cars[ev] = to_int_or_none(
-                    st.text_input(
-                        f"評価{ev}",
-                        key=f"race_{r}_eval_{ev}",
-                        placeholder=str(ev)
-                    )
+def build_conditional_tables(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    cols = list(range(1, FIELD_SIZE + 1))
+    count_rows = []
+    pct_rows = []
+
+    for wr in WINNER_RANKS:
+        total = 0
+        for rr in cols:
+            if rr == wr:
+                continue
+            total += int(pair_counts.get((wr, rr), 0))
+
+        row_c = {"1着の評価": wr, "N": total}
+        for rr in cols:
+            row_c[str(rr)] = None if rr == wr else int(pair_counts.get((wr, rr), 0))
+        count_rows.append(row_c)
+
+        row_p = {"1着の評価": wr, "N": total}
+        for rr in cols:
+            if rr == wr:
+                row_p[str(rr)] = None
+            else:
+                v = int(pair_counts.get((wr, rr), 0))
+                row_p[str(rr)] = round(100.0 * v / total, 1) if total > 0 else 0.0
+        pct_rows.append(row_p)
+
+    return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
+
+
+def rate(x: int, n: int):
+    return round(100.0 * x / n, 1) if n > 0 else None
+
+
+def points_per_race_axis_flow(field_n: int, axis: int) -> int:
+    """評価axisから総流ししたときの点数。欠車対応。"""
+    if field_n <= 1:
+        return 0
+    if axis > field_n:
+        return 0
+    return field_n - 1
+
+
+def new_payout_rec():
+    return {"N": 0, "KSUM": 0, "H": 0, "U": 0, "SUM": 0}
+
+
+# =========================
+# Tabs
+# =========================
+tabs = st.tabs(["日次手入力（最大36R）", "前日までの集計（累積）", "分析結果"])
+
+# 日次の入力行
+byrace_rows: List[Dict] = []
+
+# 前日まで：評価別（1～7）
+agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
+    lambda: {"N": 0, "C1": 0, "C2": 0, "C3": 0}
+)
+
+# 前日まで：1→2（評価）
+pair12_manual: Dict[PairKey, int] = defaultdict(int)
+
+# 前日まで：2車複・2車単 軸別総流し
+agg_payout_2f_axis_manual: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in EVAL_AXES
+}
+agg_payout_2t_axis_manual: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in EVAL_AXES
+}
+
+
+# =========================
+# A. 日次手入力（欠車対応）
+# =========================
+with tabs[0]:
+    st.subheader("日次手入力（7車ベース・欠車対応・最大36R）")
+    st.caption(
+        "各Rごとに頭数（5/6/7）を選択してください。"
+        "V評価はその頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。着順は～3桁。"
+        "配当は100円あたりの払戻金（円）を入力。未入力は0のままでOK。"
+    )
+
+    cols_hdr = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
+    cols_hdr[0].markdown("**R**")
+    cols_hdr[1].markdown("**頭数**")
+    cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
+    cols_hdr[3].markdown("**着順(～3桁)**")
+    cols_hdr[4].markdown("**2車複配当**")
+    cols_hdr[5].markdown("**2車単配当**")
+
+    for i in range(1, 37):
+        c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
+
+        rid = c1.text_input("", key=f"rid_{i}", value=str(i))
+        field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
+        vline = c3.text_input("", key=f"vline_{i}", value="")
+        fin = c4.text_input("", key=f"fin_{i}", value="")
+
+        pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
+        pay_2t = c6.number_input("", key=f"pay2t_{i}", min_value=0, value=0, step=10)
+
+        vorder = parse_rankline(vline, field_n)
+        finish = parse_finish(fin)
+
+        any_input = any([vline.strip(), fin.strip(), pay_2f > 0, pay_2t > 0])
+        if any_input:
+            if not vorder:
+                st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
+                continue
+
+            vset = set(vorder)
+            invalid_finish = [x for x in finish if x not in vset]
+            if invalid_finish:
+                st.warning(
+                    f"R{rid}: 着順 {''.join(invalid_finish)} がV評価（出走車）に含まれていません。"
+                    " 欠車/入力ミスの可能性があります。"
                 )
 
-        st.markdown("#### 結果・払戻")
-
-        result_cols = st.columns(4)
-
-        with result_cols[0]:
-            first_car = to_int_or_none(
-                st.text_input("1着", key=f"race_{r}_first")
+            byrace_rows.append(
+                {
+                    "race": rid,
+                    "field_n": field_n,
+                    "vorder": vorder,
+                    "finish": finish,
+                    "pay_2f": int(pay_2f),
+                    "pay_2t": int(pay_2t),
+                }
             )
 
-        with result_cols[1]:
-            second_car = to_int_or_none(
-                st.text_input("2着", key=f"race_{r}_second")
+
+# =========================
+# B. 前日までの集計（累積）
+# =========================
+with tabs[1]:
+    st.subheader("前日までの集計（累積・全体）")
+
+    cols_12 = list(range(1, FIELD_SIZE + 1))
+
+    st.markdown("## 1→2 着評価分布（累積・回数）")
+    st.caption("1着が評価1〜7のとき、2着の評価の回数を入力。")
+
+    h = st.columns([1.8] + [1] * len(cols_12))
+    h[0].markdown("**条件：1着の評価**")
+    for j, rr in enumerate(cols_12, start=1):
+        h[j].markdown(f"**2着={rr}**")
+
+    for wr in WINNER_RANKS:
+        row_cols = st.columns([1.8] + [1] * len(cols_12))
+        row_cols[0].write(f"評価{wr}が1着")
+        for j, rr in enumerate(cols_12, start=1):
+            if rr == wr:
+                row_cols[j].write("")
+                continue
+            v = row_cols[j].number_input(
+                "",
+                key=f"pair12_prev_wr{wr}_rr{rr}",
+                min_value=0,
+                value=0,
             )
+            if v:
+                pair12_manual[(wr, rr)] += int(v)
 
-        with result_cols[2]:
-            pair_pay = to_int_or_none(
-                st.text_input("二車複払戻", key=f"race_{r}_pair_pay", placeholder="円")
-            )
+    st.divider()
 
-        with result_cols[3]:
-            exacta_pay = to_int_or_none(
-                st.text_input("二車単払戻", key=f"race_{r}_exacta_pay", placeholder="円")
-            )
+    st.markdown("## 評価別 入賞回数（累積）")
+    st.caption("評価1～7まで入力。Nは各評価が存在したレース数。")
 
-        # 車番 → 評価番号
-        car_to_eval = {}
-        for ev, car in eval_cars.items():
-            if car is not None:
-                car_to_eval[car] = ev
+    hdr = st.columns([1.8, 1, 1, 1.8])
+    hdr[0].markdown("**評価**")
+    hdr[1].markdown("**出走数N**")
+    hdr[2].markdown("**1着回数**")
+    hdr[3].markdown("**2着回数 / 3着回数**")
 
-        first_eval = car_to_eval.get(first_car)
-        second_eval = car_to_eval.get(second_car)
+    def add_rank_rec(r: int, N: int, C1: int, C2: int, C3: int):
+        rec = agg_rank_manual[r]
+        rec["N"] += int(N)
+        rec["C1"] += int(C1)
+        rec["C2"] += int(C2)
+        rec["C3"] += int(C3)
 
-        valid = first_eval is not None and second_eval is not None
+    for r in range(1, 8):
+        c0, c1, c2, c3 = st.columns([1.8, 1, 1, 1.8])
+        c0.write(rank_symbol(r))
+        N = c1.number_input("", key=f"aggN_{r}", min_value=0, value=0)
+        C1 = c2.number_input("", key=f"aggC1_{r}", min_value=0, value=0)
+        c3_cols = c3.columns(2)
+        C2 = c3_cols[0].number_input("", key=f"aggC2_{r}", min_value=0, value=0)
+        C3 = c3_cols[1].number_input("", key=f"aggC3_{r}", min_value=0, value=0)
 
-        if valid:
-            st.info(f"結果評価：1着=評価{first_eval} ／ 2着=評価{second_eval}")
+        if any([N, C1, C2, C3]):
+            add_rank_rec(r, N, C1, C2, C3)
 
-        rows.append({
-            "R": r,
-            "評価1": eval_cars.get(1),
-            "評価2": eval_cars.get(2),
-            "評価3": eval_cars.get(3),
-            "評価4": eval_cars.get(4),
-            "評価5": eval_cars.get(5),
-            "評価6": eval_cars.get(6),
-            "評価7": eval_cars.get(7),
-            "1着車番": first_car,
-            "2着車番": second_car,
-            "1着評価": first_eval,
-            "2着評価": second_eval,
-            "二車複払戻": pair_pay,
-            "二車単払戻": exacta_pay,
-            "有効": valid,
-        })
+    st.divider()
 
-df = pd.DataFrame(rows)
-valid_df = df[df["有効"] == True].copy()
+    st.markdown("## 2車複 回収（累積）｜評価1〜7軸・総流し")
+    st.caption("各評価を軸に2車複総流しした成績を入力。KSUMは総点数です。")
 
-# =====================================================
-# 集計
-# =====================================================
+    h2 = st.columns([2.0, 1, 1, 1, 1, 1.2])
+    h2[0].markdown("**軸**")
+    h2[1].markdown("**対象N**")
+    h2[2].markdown("**KSUM**")
+    h2[3].markdown("**SUM**")
+    h2[4].markdown("**H**")
+    h2[5].markdown("**U**")
 
-st.divider()
-st.subheader("集計結果")
+    for axis in EVAL_AXES:
+        c0, c1, c2, c3, c4, c5 = st.columns([2.0, 1, 1, 1, 1, 1.2])
+        c0.write(f"評価{axis}-全")
 
-race_count = len(valid_df)
-st.write(f"有効入力レース数：**{race_count}R**")
+        N = c1.number_input("", key=f"pN_2f_axis_{axis}", min_value=0, value=0)
+        KSUM = c2.number_input("", key=f"pKSUM_2f_axis_{axis}", min_value=0, value=0)
+        SUM = c3.number_input("", key=f"pSUM_2f_axis_{axis}", min_value=0, value=0, step=10)
+        H = c4.number_input("", key=f"pH_2f_axis_{axis}", min_value=0, value=0)
+        U = c5.number_input("", key=f"pU_2f_axis_{axis}", min_value=0, value=0)
 
-if race_count == 0:
-    st.warning("評価順と1着・2着を入力すると集計されます。")
-    st.stop()
+        if any([N, KSUM, SUM, H, U]):
+            rec = agg_payout_2f_axis_manual[axis]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+            rec["U"] += int(U)
 
-# =====================================================
-# 評価別 1着・2着・2着内率
-# =====================================================
+    st.divider()
 
-rank_rows = []
+    st.markdown("## 2車単 回収（累積）｜評価1〜7軸・軸→全")
+    st.caption("各評価を軸に2車単で軸→全流しした成績を入力。折り返しではありません。")
 
-for ev in range(1, EVAL_COUNT + 1):
-    first_count = int((valid_df["1着評価"] == ev).sum())
-    second_count = int((valid_df["2着評価"] == ev).sum())
-    top2_count = first_count + second_count
+    h3 = st.columns([2.0, 1, 1, 1, 1, 1.2])
+    h3[0].markdown("**軸**")
+    h3[1].markdown("**対象N**")
+    h3[2].markdown("**KSUM**")
+    h3[3].markdown("**SUM**")
+    h3[4].markdown("**H**")
+    h3[5].markdown("**U**")
 
-    rank_rows.append({
-        "評価": f"評価{ev}",
-        "1着回数": first_count,
-        "1着率": pct(first_count, race_count),
-        "2着回数": second_count,
-        "2着率": pct(second_count, race_count),
-        "2着内回数": top2_count,
-        "2着内率": pct(top2_count, race_count),
-    })
+    for axis in EVAL_AXES:
+        c0, c1, c2, c3, c4, c5 = st.columns([2.0, 1, 1, 1, 1, 1.2])
+        c0.write(f"評価{axis}→全")
 
-rank_df = pd.DataFrame(rank_rows)
+        N = c1.number_input("", key=f"pN_2t_axis_{axis}", min_value=0, value=0)
+        KSUM = c2.number_input("", key=f"pKSUM_2t_axis_{axis}", min_value=0, value=0)
+        SUM = c3.number_input("", key=f"pSUM_2t_axis_{axis}", min_value=0, value=0, step=10)
+        H = c4.number_input("", key=f"pH_2t_axis_{axis}", min_value=0, value=0)
+        U = c5.number_input("", key=f"pU_2t_axis_{axis}", min_value=0, value=0)
 
-display_rank = rank_df.copy()
-for col in ["1着率", "2着率", "2着内率"]:
-    display_rank[col] = display_rank[col].map(lambda x: f"{x:.1f}%")
+        if any([N, KSUM, SUM, H, U]):
+            rec = agg_payout_2t_axis_manual[axis]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+            rec["U"] += int(U)
 
-st.markdown("### 評価別成績")
-st.dataframe(display_rank, use_container_width=True)
 
-# =====================================================
-# 評価軸別 二車複・二車単 総流し
-# =====================================================
+# =========================
+# 集計：日次 + 前日まで累積
+# =========================
+rank_daily: Dict[int, Dict[str, int]] = {
+    r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 8)
+}
 
-axis_rows = []
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    if not vorder:
+        continue
 
-for ev in range(1, EVAL_COUNT + 1):
+    car_by_rank = {i + 1: vorder[i] for i in range(len(vorder))}
 
-    pair_hit = 0
-    exacta_hit = 0
-
-    pair_return = 0
-    exacta_return = 0
-
-    pair_invest = 0
-    exacta_invest = 0
-
-    valid_axis_races = 0
-
-    for _, row in valid_df.iterrows():
-
-        # そのレースで入力されている評価数
-        entered_evals = []
-        for i in range(1, EVAL_COUNT + 1):
-            if pd.notna(row.get(f"評価{i}")):
-                entered_evals.append(i)
-
-        if ev not in entered_evals:
+    for r in range(1, len(vorder) + 1):
+        rank_daily[r]["N"] += 1
+        car = car_by_rank.get(r)
+        if car is None:
             continue
 
-        n_cars = len(entered_evals)
+        if len(finish) >= 1 and finish[0] == car:
+            rank_daily[r]["C1"] += 1
+        if len(finish) >= 2 and finish[1] == car:
+            rank_daily[r]["C2"] += 1
+        if len(finish) >= 3 and finish[2] == car:
+            rank_daily[r]["C3"] += 1
 
-        if n_cars <= 1:
+rank_total: Dict[int, Dict[str, int]] = {
+    r: {"N": 0, "C1": 0, "C2": 0, "C3": 0} for r in range(1, 8)
+}
+
+for r in range(1, 8):
+    for k in ("N", "C1", "C2", "C3"):
+        rank_total[r][k] += rank_daily[r][k]
+
+for r, rec in agg_rank_manual.items():
+    if r in rank_total:
+        rank_total[r]["N"] += rec["N"]
+        rank_total[r]["C1"] += rec["C1"]
+        rank_total[r]["C2"] += rec["C2"]
+        rank_total[r]["C3"] += rec["C3"]
+
+pair12_daily: Dict[PairKey, int] = defaultdict(int)
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    if len(finish) < 2 or not vorder:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+
+    if win_rank is None or sec_rank is None:
+        continue
+
+    pair12_daily[(win_rank, sec_rank)] += 1
+
+pair12_total: Dict[PairKey, int] = defaultdict(int)
+for k, v in pair12_daily.items():
+    pair12_total[k] += int(v)
+for k, v in pair12_manual.items():
+    pair12_total[k] += int(v)
+
+# --- 2車複（日次）評価軸総流し ---
+payout_2f_axis_daily: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in EVAL_AXES
+}
+
+# --- 2車単（日次）評価軸→全 ---
+payout_2t_axis_daily: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in EVAL_AXES
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+    if not vorder or field_n <= 0 or len(finish) < 2:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+    if win_rank is None or sec_rank is None:
+        continue
+
+    win_rank = int(win_rank)
+    sec_rank = int(sec_rank)
+    finish_rank_set_2 = {win_rank, sec_rank}
+
+    pay_2f = int(row.get("pay_2f", 0))
+    pay_2t = int(row.get("pay_2t", 0))
+
+    for axis in EVAL_AXES:
+        ksum = points_per_race_axis_flow(field_n, axis)
+        if ksum <= 0:
             continue
 
-        points = n_cars - 1
-        invest = points * UNIT
+        # 2車複：評価axis-全
+        rec_2f = payout_2f_axis_daily[axis]
+        rec_2f["N"] += 1
+        rec_2f["KSUM"] += ksum
+        if axis in finish_rank_set_2:
+            if pay_2f > 0:
+                rec_2f["H"] += 1
+                rec_2f["SUM"] += pay_2f
+            else:
+                rec_2f["U"] += 1
 
-        valid_axis_races += 1
+        # 2車単：評価axis→全
+        rec_2t = payout_2t_axis_daily[axis]
+        rec_2t["N"] += 1
+        rec_2t["KSUM"] += ksum
+        if axis == win_rank:
+            if pay_2t > 0:
+                rec_2t["H"] += 1
+                rec_2t["SUM"] += pay_2t
+            else:
+                rec_2t["U"] += 1
 
-        first_eval = row["1着評価"]
-        second_eval = row["2着評価"]
+payout_2f_axis_total: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in EVAL_AXES
+}
+payout_2t_axis_total: Dict[int, Dict[str, int]] = {
+    axis: new_payout_rec() for axis in EVAL_AXES
+}
 
-        pair_pay = row["二車複払戻"] if pd.notna(row["二車複払戻"]) else 0
-        exacta_pay = row["二車単払戻"] if pd.notna(row["二車単払戻"]) else 0
+for axis in EVAL_AXES:
+    for k in ("N", "KSUM", "H", "U", "SUM"):
+        payout_2f_axis_total[axis][k] = payout_2f_axis_daily[axis][k] + agg_payout_2f_axis_manual[axis][k]
+        payout_2t_axis_total[axis][k] = payout_2t_axis_daily[axis][k] + agg_payout_2t_axis_manual[axis][k]
 
-        # 二車複：評価ev - 全
-        pair_invest += invest
-        if ev == first_eval or ev == second_eval:
-            pair_hit += 1
-            pair_return += int(pair_pay)
 
-        # 二車単：評価ev → 全
-        exacta_invest += invest
-        if ev == first_eval:
-            exacta_hit += 1
-            exacta_return += int(exacta_pay)
+# =========================
+# 出力：分析結果
+# =========================
+with tabs[2]:
+    st.subheader("1→2 着評価分布（全体累積）｜1着が評価1〜7のとき（欠車対応）")
+    st.caption("欠車レースでは存在しない下位評価はNに含まれません。")
 
-    axis_rows.append({
-        "評価軸": f"評価{ev}",
-        "対象R": valid_axis_races,
+    df12_count, df12_pct = build_conditional_tables(pair12_total)
 
-        "二車複点数/R": "総流し",
-        "二車複的中": pair_hit,
-        "二車複的中率": pct(pair_hit, valid_axis_races),
-        "二車複投資": pair_invest,
-        "二車複払戻": pair_return,
-        "二車複回収率": pct(pair_return, pair_invest),
-        "二車複収支": pair_return - pair_invest,
+    st.markdown("### 回数（Nは条件付き総数）")
+    st.dataframe(df12_count, use_container_width=True, hide_index=True)
 
-        "二車単点数/R": "軸→全",
-        "二車単的中": exacta_hit,
-        "二車単的中率": pct(exacta_hit, valid_axis_races),
-        "二車単投資": exacta_invest,
-        "二車単払戻": exacta_return,
-        "二車単回収率": pct(exacta_return, exacta_invest),
-        "二車単収支": exacta_return - exacta_invest,
-    })
+    st.markdown("### 割合%（同評価セルは空欄）")
+    st.dataframe(df12_pct, use_container_width=True, hide_index=True)
 
-axis_df = pd.DataFrame(axis_rows)
+    st.divider()
 
-display_axis = axis_df.copy()
-for col in ["二車複的中率", "二車複回収率", "二車単的中率", "二車単回収率"]:
-    display_axis[col] = display_axis[col].map(lambda x: f"{x:.1f}%")
+    st.subheader("評価別 入賞テーブル（全体累積）｜欠車対応")
+    rows_out = []
+    for r in range(1, 8):
+        rec = rank_total.get(r, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+        N, C1, C2, C3 = rec["N"], rec["C1"], rec["C2"], rec["C3"]
+        rows_out.append(
+            {
+                "評価": rank_symbol(r),
+                "出走数N": N,
+                "1着回数": C1,
+                "2着回数": C2,
+                "3着回数": C3,
+                "1着率%": rate(C1, N),
+                "連対率%": rate(C1 + C2, N),
+                "3着内率%": rate(C1 + C2 + C3, N),
+            }
+        )
+    st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
 
-st.markdown("### 評価軸別｜二車複・二車単 総流し成績")
-st.dataframe(display_axis, use_container_width=True)
+    st.divider()
 
-# =====================================================
-# 1着評価 → 2着評価 分布
-# =====================================================
+    st.subheader("2車複 回収期待値%｜評価1〜7軸・総流し")
+    rows_2f = []
+    for axis in EVAL_AXES:
+        rec = payout_2f_axis_total[axis]
+        N = rec["N"]
+        KSUM = rec["KSUM"]
+        H = rec["H"]
+        U = rec["U"]
+        SUM = rec["SUM"]
 
-matrix = pd.DataFrame(
-    0,
-    index=[f"評価{i}" for i in range(1, EVAL_COUNT + 1)],
-    columns=[f"評価{i}" for i in range(1, EVAL_COUNT + 1)]
-)
+        roi = round(SUM / KSUM, 1) if KSUM > 0 else None
+        avg_pay = round(SUM / H, 1) if H > 0 else None
+        hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
-for _, row in valid_df.iterrows():
-    a = row["1着評価"]
-    b = row["2着評価"]
-    if pd.notna(a) and pd.notna(b):
-        matrix.loc[f"評価{int(a)}", f"評価{int(b)}"] += 1
+        rows_2f.append(
+            {
+                "軸": f"評価{axis}-全",
+                "対象N": N,
+                "総点数KSUM": KSUM,
+                "払戻合計SUM": SUM,
+                "的中H（配当あり）": H,
+                "的中U（配当未入力）": U,
+                "的中率%（配当あり分）": hit_rate,
+                "平均配当（配当あり分）": avg_pay,
+                "回収期待値%": roi,
+                "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+            }
+        )
 
-st.markdown("### 1着評価 → 2着評価 分布")
-st.dataframe(matrix, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
-# =====================================================
-# レース別確認
-# =====================================================
+    st.divider()
 
-st.markdown("### レース別確認")
+    st.subheader("2車単 回収期待値%｜評価1〜7軸・軸→全")
+    rows_2t = []
+    for axis in EVAL_AXES:
+        rec = payout_2t_axis_total[axis]
+        N = rec["N"]
+        KSUM = rec["KSUM"]
+        H = rec["H"]
+        U = rec["U"]
+        SUM = rec["SUM"]
 
-check_df = valid_df[[
-    "R",
-    "1着車番",
-    "2着車番",
-    "1着評価",
-    "2着評価",
-    "二車複払戻",
-    "二車単払戻",
-]].copy()
+        roi = round(SUM / KSUM, 1) if KSUM > 0 else None
+        avg_pay = round(SUM / H, 1) if H > 0 else None
+        hit_rate = round(100.0 * H / N, 1) if N > 0 else None
 
-check_df["結果評価"] = check_df.apply(
-    lambda x: f"{int(x['1着評価'])}-{int(x['2着評価'])}",
-    axis=1
-)
+        rows_2t.append(
+            {
+                "軸": f"評価{axis}→全",
+                "対象N": N,
+                "総点数KSUM": KSUM,
+                "払戻合計SUM": SUM,
+                "的中H（配当あり）": H,
+                "的中U（配当未入力）": U,
+                "的中率%（配当あり分）": hit_rate,
+                "平均配当（配当あり分）": avg_pay,
+                "回収期待値%": roi,
+                "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+            }
+        )
 
-check_df = check_df[[
-    "R",
-    "結果評価",
-    "1着車番",
-    "2着車番",
-    "二車複払戻",
-    "二車単払戻",
-]]
-
-st.dataframe(check_df, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows_2t), use_container_width=True, hide_index=True)
