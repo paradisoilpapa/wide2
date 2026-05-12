@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 新回収率 v3.4（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 新回収率 v3.5（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -15,6 +15,7 @@ st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価�
 FIELD_SIZE = 7
 WINNER_RANKS = tuple(range(1, 8))
 PATTERN_AXES = (1, 2, 3)
+AXIS1_TARGETS = (2, 3, 4, 5)
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -163,6 +164,26 @@ def pattern_label(axis: int) -> str:
     return f"2車単 評価{axis}"
 
 
+def axis1_target_label(target: int) -> str:
+    return f"2車単 1→{target}"
+
+
+def ksum_1_to_target(target: int, field_n: int) -> int:
+    """2車単：1→target の点数。存在する評価だけ1点として扱う。"""
+    if field_n < 2:
+        return 0
+    if target > field_n:
+        return 0
+    return 1
+
+
+def hit_1_to_target(target: int, win_rank: int, sec_rank: int, field_n: int) -> bool:
+    """2車単：1→target の的中判定。"""
+    if ksum_1_to_target(target, field_n) <= 0:
+        return False
+    return win_rank == 1 and sec_rank == target
+
+
 def payout_row(label: str, rec: Dict[str, int]) -> Dict:
     N = int(rec["N"])
     KSUM = int(rec["KSUM"])
@@ -210,6 +231,12 @@ pair12_manual: Dict[PairKey, int] = defaultdict(int)
 # 2車単：1→2345 / 2→13 / 3→46
 agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
     axis: new_payout_rec() for axis in PATTERN_AXES
+}
+
+# 前日まで：1軸個別回収（任意入力）
+# 1→2 / 1→3 / 1→4 / 1→5
+agg_payout_1to_target_manual: Dict[int, Dict[str, int]] = {
+    target: new_payout_rec() for target in AXIS1_TARGETS
 }
 
 
@@ -370,6 +397,30 @@ with tabs[1]:
             U = c5.number_input("", key=f"prev_2t_pat_{axis}_U", min_value=0, value=0)
             payout_inputs.append((axis, int(N), int(KSUM), int(SUM), int(H), int(U)))
 
+        st.divider()
+
+        st.markdown("## 1軸個別回収（累積・任意）")
+        st.caption("1→2345の内訳確認用です。1→2 / 1→3 / 1→4 / 1→5を個別に入力できます。不要なら0のままでOK。")
+
+        h5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+        h5[0].markdown("**型**")
+        h5[1].markdown("**対象N**")
+        h5[2].markdown("**KSUM**")
+        h5[3].markdown("**SUM**")
+        h5[4].markdown("**H**")
+        h5[5].markdown("**U**")
+
+        axis1_target_inputs = []
+        for target in AXIS1_TARGETS:
+            c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+            c0.write(axis1_target_label(target))
+            N = c1.number_input("", key=f"prev_1to_{target}_N", min_value=0, value=0)
+            KSUM = c2.number_input("", key=f"prev_1to_{target}_KSUM", min_value=0, value=0)
+            SUM = c3.number_input("", key=f"prev_1to_{target}_SUM", min_value=0, value=0, step=10)
+            H = c4.number_input("", key=f"prev_1to_{target}_H", min_value=0, value=0)
+            U = c5.number_input("", key=f"prev_1to_{target}_U", min_value=0, value=0)
+            axis1_target_inputs.append((target, int(N), int(KSUM), int(SUM), int(H), int(U)))
+
         st.form_submit_button("前日までの集計を反映")
 
     for wr, rr, v in pair_inputs:
@@ -387,6 +438,15 @@ with tabs[1]:
     for axis, N, KSUM, SUM, H, U in payout_inputs:
         if any([N, KSUM, SUM, H, U]):
             rec = agg_payout_2t_pattern_manual[axis]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+            rec["U"] += int(U)
+
+    for target, N, KSUM, SUM, H, U in axis1_target_inputs:
+        if any([N, KSUM, SUM, H, U]):
+            rec = agg_payout_1to_target_manual[target]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
             rec["SUM"] += int(SUM)
@@ -502,6 +562,49 @@ for row in byrace_rows:
             else:
                 rec["U"] += 1
 
+# --- 1軸個別（日次） ---
+# 2車単：1→2 / 1→3 / 1→4 / 1→5
+payout_1to_target_daily: Dict[int, Dict[str, int]] = {
+    target: new_payout_rec() for target in AXIS1_TARGETS
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+
+    if not vorder or field_n <= 0 or len(finish) < 2:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+
+    if win_rank is None or sec_rank is None:
+        continue
+
+    win_rank = int(win_rank)
+    sec_rank = int(sec_rank)
+    pay_2t = int(row.get("pay_2t", 0))
+
+    for target in AXIS1_TARGETS:
+        ksum = ksum_1_to_target(target, field_n)
+        if ksum <= 0:
+            continue
+
+        rec = payout_1to_target_daily[target]
+        rec["N"] += 1
+        rec["KSUM"] += ksum
+
+        if hit_1_to_target(target, win_rank, sec_rank, field_n):
+            if pay_2t > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay_2t
+            else:
+                rec["U"] += 1
+
+
 payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
     axis: new_payout_rec() for axis in PATTERN_AXES
 }
@@ -518,6 +621,14 @@ combo_all = combine_recs([
     payout_2t_pattern_total[2],
     payout_2t_pattern_total[3],
 ])
+
+payout_1to_target_total: Dict[int, Dict[str, int]] = {
+    target: new_payout_rec() for target in AXIS1_TARGETS
+}
+
+for target in AXIS1_TARGETS:
+    add_rec(payout_1to_target_total[target], payout_1to_target_daily[target])
+    add_rec(payout_1to_target_total[target], agg_payout_1to_target_manual[target])
 
 
 # =========================
@@ -573,6 +684,17 @@ with tabs[2]:
     rows_new.append(payout_row("合算：1→2345 ＋ 2→13 ＋ 3→46", combo_all))
 
     st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
+
+    st.markdown("### 1軸個別回収｜1→2 / 1→3 / 1→4 / 1→5")
+    st.caption("1→2345の内訳確認用です。実戦判断はまず6点型を基本にしつつ、1→5などが回収を支えているかを見るための表です。")
+
+    rows_axis1 = []
+    for target in AXIS1_TARGETS:
+        rows_axis1.append(
+            payout_row(axis1_target_label(target), payout_1to_target_total[target])
+        )
+
+    st.dataframe(pd.DataFrame(rows_axis1), use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
     st.write("2車単 1→2345：1→2 / 1→3 / 1→4 / 1→5")
