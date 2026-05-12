@@ -17,7 +17,7 @@ WINNER_RANKS = tuple(range(1, 8))
 EVAL_AXES = tuple(range(1, 8))
 
 # 回収率ゾーンで見る固定型
-# 1→2345 / 2→13 / 3→12
+# 1→2345 / 2→13 / 3→46
 PATTERN_AXES = (1, 2, 3)
 
 RANK_SYMBOLS = {
@@ -112,7 +112,7 @@ def targets_for_pattern(axis: int, field_n: int) -> List[int]:
     2車単固定型の相手評価を返す。
     1→2345
     2→13
-    3→12
+    3→46
     欠車対応：存在する評価だけ返す。
     """
     if axis == 1:
@@ -195,7 +195,7 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
 pair12_manual: Dict[PairKey, int] = defaultdict(int)
 
 # 前日まで：新回収率
-# 2車単：1→2345 / 2→13 / 3→12
+# 2車単：1→2345 / 2→13 / 3→46
 agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
     axis: new_payout_rec() for axis in PATTERN_AXES
 }
@@ -343,7 +343,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 新回収率（累積）")
-        st.caption("2車単固定型のみ入力します。1→2345 / 2→13 / 3→12。")
+        st.caption("2車単固定型のみ入力します。1→2345 / 2→13 / 3→46。")
 
         h4 = st.columns([2.4, 1, 1, 1, 1, 1.2])
         h4[0].markdown("**型**")
@@ -467,7 +467,7 @@ for k, v in pair12_manual.items():
     pair12_total[k] += int(v)
 
 # --- 新回収率（日次） ---
-# 2車単：1→2345 / 2→13 / 3→12
+# 2車単：1→2345 / 2→13 / 3→46
 
 payout_2t_pattern_daily: Dict[int, Dict[str, int]] = {
     axis: new_payout_rec() for axis in PATTERN_AXES
@@ -511,12 +511,28 @@ for row in byrace_rows:
 payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
     axis: new_payout_rec() for axis in PATTERN_AXES
 }
-payout_combo_total: Dict[str, int] = new_payout_rec()
 
 for axis in PATTERN_AXES:
     add_rec(payout_2t_pattern_total[axis], payout_2t_pattern_daily[axis])
     add_rec(payout_2t_pattern_total[axis], agg_payout_2t_pattern_manual[axis])
-    add_rec(payout_combo_total, payout_2t_pattern_total[axis])
+
+# --- 組み合わせ集計 ---
+payout_combo_12_total: Dict[str, int] = new_payout_rec()  # 1→2345 + 2→13
+payout_combo_13_total: Dict[str, int] = new_payout_rec()  # 1→2345 + 3→46
+payout_combo_23_total: Dict[str, int] = new_payout_rec()  # 2→13 + 3→46
+payout_combo_all_total: Dict[str, int] = new_payout_rec() # 1→2345 + 2→13 + 3→46
+
+for axis in (1, 2):
+    add_rec(payout_combo_12_total, payout_2t_pattern_total[axis])
+
+for axis in (1, 3):
+    add_rec(payout_combo_13_total, payout_2t_pattern_total[axis])
+
+for axis in (2, 3):
+    add_rec(payout_combo_23_total, payout_2t_pattern_total[axis])
+
+for axis in PATTERN_AXES:
+    add_rec(payout_combo_all_total, payout_2t_pattern_total[axis])
 
 
 # =========================
@@ -567,7 +583,16 @@ with tabs[2]:
         )
 
     rows_new.append(
-        payout_row("合算：1→2345 ＋ 2→13 ＋ 3→46", payout_combo_total)
+        payout_row("合算：1→2345 ＋ 2→13", payout_combo_12_total)
+    )
+    rows_new.append(
+        payout_row("合算：1→2345 ＋ 3→46", payout_combo_13_total)
+    )
+    rows_new.append(
+        payout_row("合算：2→13 ＋ 3→46", payout_combo_23_total)
+    )
+    rows_new.append(
+        payout_row("合算：1→2345 ＋ 2→13 ＋ 3→46", payout_combo_all_total)
     )
 
     st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
