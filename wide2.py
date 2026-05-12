@@ -245,7 +245,7 @@ agg_payout_axis_target_manual.update({
 # A. 日次手入力（欠車対応）
 # =========================
 with tabs[0]:
-    st.subheader("日次手入力（7車ベース・欠車対応・最大50R）")
+    st.subheader("日次手入力（7車ベース・欠車対応・最大60R）")
     st.caption(
         "入力中の白化を抑えるため、フォーム送信式です。"
         "V評価は頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。"
@@ -262,7 +262,7 @@ with tabs[0]:
 
         daily_inputs = []
 
-        for i in range(1, 51):
+        for i in range(1, 61):
             c1, c2, c3, c4, c5 = st.columns([1, 1.1, 2.6, 1.2, 1.2])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
