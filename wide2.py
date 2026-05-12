@@ -567,7 +567,7 @@ with tabs[2]:
         )
 
     rows_new.append(
-        payout_row("合算：1→2345 ＋ 2→13 ＋ 3→46", payout_combo_total)
+            payout_row("合算：1→2345 ＋ 2→13 ＋ 3→46", payout_combo_total)
 
     st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
 
