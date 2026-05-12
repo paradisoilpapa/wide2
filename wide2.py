@@ -569,7 +569,6 @@ with tabs[2]:
 
     st.divider()
 
-        st.divider()
 
     st.subheader("新回収率｜2車単1→2345 ＋ 3連複1-2345-2345")
     st.caption("旧式の評価1〜7軸総流しは表示しません。新フェーズの実戦買い目だけを集計します。")
