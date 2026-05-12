@@ -561,7 +561,7 @@ with tabs[2]:
     st.caption("三連複は使いません。2車単の固定型だけを集計します。")
 
         rows_new = []
-    for axis in PATTERN_AXES:
+for axis in PATTERN_AXES:
         rows_new.append(
             payout_row(pattern_label(axis), payout_2t_pattern_total[axis])
         )
