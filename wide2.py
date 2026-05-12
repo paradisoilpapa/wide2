@@ -244,137 +244,161 @@ with tabs[0]:
 
         submitted_daily = st.form_submit_button("日次入力を反映")
 
-    if submitted_daily:
-        for item in daily_tmp_rows:
-            rid = item["race"]
-            field_n = int(item["field_n"])
-            vline = item["vline"]
-            fin = item["fin"]
-            pay_2t = int(item["pay_2t"])
+    # フォーム化しても、送信後の値をそのまま集計に反映する。
+    # submitted_daily だけで判定すると、別操作で再実行された時に集計が消えるため、
+    # 保存されたウィジェット値から毎回 byrace_rows を再構成する。
+    for item in daily_tmp_rows:
+        rid = item["race"]
+        field_n = int(item["field_n"])
+        vline = item["vline"]
+        fin = item["fin"]
+        pay_2t = int(item["pay_2t"])
 
-            vorder = parse_rankline(vline, field_n)
-            finish = parse_finish(fin)
+        vorder = parse_rankline(vline, field_n)
+        finish = parse_finish(fin)
 
-            any_input = any([vline.strip(), fin.strip(), pay_2t > 0])
-            if any_input:
-                if not vorder:
-                    st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
-                    continue
+        any_input = any([vline.strip(), fin.strip(), pay_2t > 0])
+        if any_input:
+            if not vorder:
+                st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
+                continue
 
-                vset = set(vorder)
-                invalid_finish = [x for x in finish if x not in vset]
-                if invalid_finish:
-                    st.warning(
-                        f"R{rid}: 着順 {''.join(invalid_finish)} がV評価（出走車）に含まれていません。"
-                        " 欠車/入力ミスの可能性があります。"
-                    )
-
-                byrace_rows.append(
-                    {
-                        "race": rid,
-                        "field_n": field_n,
-                        "vorder": vorder,
-                        "finish": finish,
-                        "pay_2t": pay_2t,
-                    }
+            vset = set(vorder)
+            invalid_finish = [x for x in finish if x not in vset]
+            if invalid_finish:
+                st.warning(
+                    f"R{rid}: 着順 {''.join(invalid_finish)} がV評価（出走車）に含まれていません。"
+                    " 欠車/入力ミスの可能性があります。"
                 )
 
-        st.success(f"日次入力を反映しました：{len(byrace_rows)}R")
+            byrace_rows.append(
+                {
+                    "race": rid,
+                    "field_n": field_n,
+                    "vorder": vorder,
+                    "finish": finish,
+                    "pay_2t": pay_2t,
+                }
+            )
 
+    if submitted_daily:
+        st.success(f"日次入力を反映しました：{len(byrace_rows)}R")
 
 # =========================
 # B. 前日までの集計（累積）
 # =========================
 with tabs[1]:
     st.subheader("前日までの集計（累積・全体）")
+    st.info("入力中の再描画を減らすため、前日までの集計もフォーム化しています。入力後に下の「前日までの集計を反映」を押してください。")
 
     cols_12 = list(range(1, FIELD_SIZE + 1))
 
-    st.markdown("## 1→2 着評価分布（累積・回数）")
-    st.caption("1着が評価1〜7のとき、2着の評価の回数を入力。")
+    with st.form("prev_aggregate_form"):
+        st.markdown("## 1→2 着評価分布（累積・回数）")
+        st.caption("1着が評価1〜7のとき、2着の評価の回数を入力。")
 
-    h = st.columns([1.8] + [1] * len(cols_12))
-    h[0].markdown("**条件：1着の評価**")
-    for j, rr in enumerate(cols_12, start=1):
-        h[j].markdown(f"**2着={rr}**")
-
-    for wr in WINNER_RANKS:
-        row_cols = st.columns([1.8] + [1] * len(cols_12))
-        row_cols[0].write(f"評価{wr}が1着")
+        h = st.columns([1.8] + [1] * len(cols_12))
+        h[0].markdown("**条件：1着の評価**")
         for j, rr in enumerate(cols_12, start=1):
-            if rr == wr:
-                row_cols[j].write("")
-                continue
-            v = row_cols[j].number_input(
-                "",
-                key=f"pair12_prev_wr{wr}_rr{rr}",
-                min_value=0,
-                value=0,
-            )
-            if v:
-                pair12_manual[(wr, rr)] += int(v)
+            h[j].markdown(f"**2着={rr}**")
 
-    st.divider()
+        pair12_values: Dict[PairKey, int] = {}
+        for wr in WINNER_RANKS:
+            row_cols = st.columns([1.8] + [1] * len(cols_12))
+            row_cols[0].write(f"評価{wr}が1着")
+            for j, rr in enumerate(cols_12, start=1):
+                if rr == wr:
+                    row_cols[j].write("")
+                    continue
+                v = row_cols[j].number_input(
+                    "",
+                    key=f"pair12_prev_wr{wr}_rr{rr}",
+                    min_value=0,
+                    value=0,
+                )
+                pair12_values[(wr, rr)] = int(v)
 
-    st.markdown("## 評価別 入賞回数（累積）")
-    st.caption("評価1～7まで入力。Nは各評価が存在したレース数。")
+        st.divider()
 
-    hdr = st.columns([1.8, 1, 1, 1.8])
-    hdr[0].markdown("**評価**")
-    hdr[1].markdown("**出走数N**")
-    hdr[2].markdown("**1着回数**")
-    hdr[3].markdown("**2着回数 / 3着回数**")
+        st.markdown("## 評価別 入賞回数（累積）")
+        st.caption("評価1～7まで入力。Nは各評価が存在したレース数。")
 
-    def add_rank_rec(r: int, N: int, C1: int, C2: int, C3: int):
-        rec = agg_rank_manual[r]
-        rec["N"] += int(N)
-        rec["C1"] += int(C1)
-        rec["C2"] += int(C2)
-        rec["C3"] += int(C3)
+        hdr = st.columns([1.8, 1, 1, 1.8])
+        hdr[0].markdown("**評価**")
+        hdr[1].markdown("**出走数N**")
+        hdr[2].markdown("**1着回数**")
+        hdr[3].markdown("**2着回数 / 3着回数**")
 
-    for r in range(1, 8):
-        c0, c1, c2, c3 = st.columns([1.8, 1, 1, 1.8])
-        c0.write(rank_symbol(r))
-        N = c1.number_input("", key=f"aggN_{r}", min_value=0, value=0)
-        C1 = c2.number_input("", key=f"aggC1_{r}", min_value=0, value=0)
-        c3_cols = c3.columns(2)
-        C2 = c3_cols[0].number_input("", key=f"aggC2_{r}", min_value=0, value=0)
-        C3 = c3_cols[1].number_input("", key=f"aggC3_{r}", min_value=0, value=0)
+        rank_values: Dict[int, Dict[str, int]] = {}
+        for r in range(1, 8):
+            c0, c1, c2, c3 = st.columns([1.8, 1, 1, 1.8])
+            c0.write(rank_symbol(r))
+            N = c1.number_input("", key=f"aggN_{r}", min_value=0, value=0)
+            C1 = c2.number_input("", key=f"aggC1_{r}", min_value=0, value=0)
+            c3_cols = c3.columns(2)
+            C2 = c3_cols[0].number_input("", key=f"aggC2_{r}", min_value=0, value=0)
+            C3 = c3_cols[1].number_input("", key=f"aggC3_{r}", min_value=0, value=0)
+            rank_values[r] = {"N": int(N), "C1": int(C1), "C2": int(C2), "C3": int(C3)}
 
-        if any([N, C1, C2, C3]):
-            add_rank_rec(r, N, C1, C2, C3)
+        st.divider()
 
-    st.divider()
+        st.markdown("## 新回収率（累積）")
+        st.caption("2車単固定型のみ入力します。1→2345 / 2→13 / 3→12。")
 
-    st.markdown("## 新回収率（累積）")
-    st.caption("2車単固定型のみ入力します。1→2345 / 2→13 / 3→12。")
+        h4 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+        h4[0].markdown("**型**")
+        h4[1].markdown("**対象N**")
+        h4[2].markdown("**KSUM**")
+        h4[3].markdown("**SUM**")
+        h4[4].markdown("**H**")
+        h4[5].markdown("**U**")
 
-    h4 = st.columns([2.4, 1, 1, 1, 1, 1.2])
-    h4[0].markdown("**型**")
-    h4[1].markdown("**対象N**")
-    h4[2].markdown("**KSUM**")
-    h4[3].markdown("**SUM**")
-    h4[4].markdown("**H**")
-    h4[5].markdown("**U**")
+        payout_values: Dict[int, Dict[str, int]] = {}
+        for axis in PATTERN_AXES:
+            c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+            c0.write(pattern_label(axis))
 
-    for axis in PATTERN_AXES:
-        c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
-        c0.write(pattern_label(axis))
+            N = c1.number_input("", key=f"prev_2t_pat_{axis}_N", min_value=0, value=0)
+            KSUM = c2.number_input("", key=f"prev_2t_pat_{axis}_KSUM", min_value=0, value=0)
+            SUM = c3.number_input("", key=f"prev_2t_pat_{axis}_SUM", min_value=0, value=0, step=10)
+            H = c4.number_input("", key=f"prev_2t_pat_{axis}_H", min_value=0, value=0)
+            U = c5.number_input("", key=f"prev_2t_pat_{axis}_U", min_value=0, value=0)
 
-        N = c1.number_input("", key=f"prev_2t_pat_{axis}_N", min_value=0, value=0)
-        KSUM = c2.number_input("", key=f"prev_2t_pat_{axis}_KSUM", min_value=0, value=0)
-        SUM = c3.number_input("", key=f"prev_2t_pat_{axis}_SUM", min_value=0, value=0, step=10)
-        H = c4.number_input("", key=f"prev_2t_pat_{axis}_H", min_value=0, value=0)
-        U = c5.number_input("", key=f"prev_2t_pat_{axis}_U", min_value=0, value=0)
+            payout_values[axis] = {
+                "N": int(N),
+                "KSUM": int(KSUM),
+                "SUM": int(SUM),
+                "H": int(H),
+                "U": int(U),
+            }
 
-        if any([N, KSUM, SUM, H, U]):
+        submitted_prev = st.form_submit_button("前日までの集計を反映")
+
+    # submitted_prev だけで集計すると、別操作で再実行された時に累積入力が消えるため、
+    # フォーム送信後に保持されているウィジェット値から毎回、累積用辞書を再構成する。
+    for k, v in pair12_values.items():
+        if v:
+            pair12_manual[k] += int(v)
+
+    for r, rec_in in rank_values.items():
+        if any(rec_in.values()):
+            rec = agg_rank_manual[r]
+            rec["N"] += int(rec_in["N"])
+            rec["C1"] += int(rec_in["C1"])
+            rec["C2"] += int(rec_in["C2"])
+            rec["C3"] += int(rec_in["C3"])
+
+    for axis, rec_in in payout_values.items():
+        if any(rec_in.values()):
             rec = agg_payout_2t_pattern_manual[axis]
-            rec["N"] += int(N)
-            rec["KSUM"] += int(KSUM)
-            rec["SUM"] += int(SUM)
-            rec["H"] += int(H)
-            rec["U"] += int(U)
+            rec["N"] += int(rec_in["N"])
+            rec["KSUM"] += int(rec_in["KSUM"])
+            rec["SUM"] += int(rec_in["SUM"])
+            rec["H"] += int(rec_in["H"])
+            rec["U"] += int(rec_in["U"])
 
+    if submitted_prev:
+        st.success("前日までの集計を反映しました。")
 
 # =========================
 # 集計：日次 + 前日まで累積
