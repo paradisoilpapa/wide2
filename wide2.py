@@ -147,7 +147,7 @@ def pattern_label(axis: int) -> str:
     if axis == 2:
         return "2車単 2→13"
     if axis == 3:
-        return "2車単 3→12"
+        return "2車単 3→46"
     return f"2車単 評価{axis}"
 
 
