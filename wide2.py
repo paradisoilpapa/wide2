@@ -120,7 +120,7 @@ def targets_for_pattern(axis: int, field_n: int) -> List[int]:
     elif axis == 2:
         base = (1, 3)
     elif axis == 3:
-        base = (4, 5)
+        base = (5, 6)
     else:
         base = ()
 
