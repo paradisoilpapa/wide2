@@ -557,7 +557,7 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("新回収率｜2車単 1→2345 / 2→13 / 3→46")
+        st.subheader("新回収率｜2車単 1→2345 / 2→13 / 3→46")
     st.caption("三連複は使いません。2車単の固定型だけを集計します。")
 
     rows_new = []
@@ -569,8 +569,6 @@ with tabs[2]:
     rows_new.append(
         payout_row("合算：1→2345 ＋ 2→13 ＋ 3→46", payout_combo_total)
     )
-
-    st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
 
     st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
 
