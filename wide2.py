@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 軸別回収 v2.4（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 新回収率 v3.0（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -94,17 +94,86 @@ def rate(x: int, n: int):
     return round(100.0 * x / n, 1) if n > 0 else None
 
 
-def points_per_race_axis_flow(field_n: int, axis: int) -> int:
-    """評価axisから総流ししたときの点数。欠車対応。"""
-    if field_n <= 1:
-        return 0
-    if axis > field_n:
-        return 0
-    return field_n - 1
-
-
 def new_payout_rec():
     return {"N": 0, "KSUM": 0, "H": 0, "U": 0, "SUM": 0}
+
+
+def add_rec(dst: Dict[str, int], src: Dict[str, int]):
+    for k in ("N", "KSUM", "H", "U", "SUM"):
+        dst[k] += int(src.get(k, 0))
+
+
+def targets_2345(field_n: int) -> List[int]:
+    """欠車対応：存在する評価2〜5だけ返す。"""
+    return [r for r in (2, 3, 4, 5) if r <= field_n]
+
+
+def ksum_2t_1_2345(field_n: int) -> int:
+    """2車単：1→2345 の点数。"""
+    return len(targets_2345(field_n))
+
+
+def hit_2t_1_2345(win_rank: int, sec_rank: int, field_n: int) -> bool:
+    """2車単：1→2345 の的中判定。"""
+    return win_rank == 1 and sec_rank in targets_2345(field_n)
+
+
+def trios_1_2345_2345(field_n: int) -> List[Tuple[int, int, int]]:
+    """
+    3連複：1-2345-2345
+    7車なら6点：
+    1-2-3 / 1-2-4 / 1-2-5 / 1-3-4 / 1-3-5 / 1-4-5
+    """
+    t = targets_2345(field_n)
+    out: List[Tuple[int, int, int]] = []
+    for i in range(len(t)):
+        for j in range(i + 1, len(t)):
+            out.append((1, t[i], t[j]))
+    return out
+
+
+def ksum_3f_1_2345(field_n: int) -> int:
+    """3連複：1-2345-2345 の点数。"""
+    return len(trios_1_2345_2345(field_n))
+
+
+def hit_3f_1_2345(finish_ranks: List[int], field_n: int) -> bool:
+    """3連複：1-2345-2345 の的中判定。"""
+    if len(finish_ranks) < 3:
+        return False
+
+    finish_set = set(finish_ranks[:3])
+    for tri in trios_1_2345_2345(field_n):
+        if set(tri) == finish_set:
+            return True
+    return False
+
+
+def payout_row(label: str, rec: Dict[str, int]) -> Dict:
+    N = rec["N"]
+    KSUM = rec["KSUM"]
+    H = rec["H"]
+    U = rec["U"]
+    SUM = rec["SUM"]
+
+    invest = KSUM * 100
+    roi = round(100.0 * SUM / invest, 1) if invest > 0 else None
+    avg_pay = round(SUM / H, 1) if H > 0 else None
+    hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+
+    return {
+        "型": label,
+        "対象N": N,
+        "総点数KSUM": KSUM,
+        "投資額換算": invest,
+        "払戻合計SUM": SUM,
+        "的中H（配当あり）": H,
+        "的中U（配当未入力）": U,
+        "的中率%": hit_rate,
+        "平均配当": avg_pay,
+        "回収率%": roi,
+        "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+    }
 
 
 # =========================
@@ -123,13 +192,11 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
 # 前日まで：1→2（評価）
 pair12_manual: Dict[PairKey, int] = defaultdict(int)
 
-# 前日まで：2車複・2車単 軸別総流し
-agg_payout_2f_axis_manual: Dict[int, Dict[str, int]] = {
-    axis: new_payout_rec() for axis in EVAL_AXES
-}
-agg_payout_2t_axis_manual: Dict[int, Dict[str, int]] = {
-    axis: new_payout_rec() for axis in EVAL_AXES
-}
+# 前日まで：新回収率
+# 2車単：1→2345
+# 3連複：1-2345-2345
+agg_payout_2t_1_2345_manual: Dict[str, int] = new_payout_rec()
+agg_payout_3f_1_2345_manual: Dict[str, int] = new_payout_rec()
 
 
 # =========================
@@ -148,8 +215,8 @@ with tabs[0]:
     cols_hdr[1].markdown("**頭数**")
     cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
     cols_hdr[3].markdown("**着順(～3桁)**")
-    cols_hdr[4].markdown("**2車複配当**")
-    cols_hdr[5].markdown("**2車単配当**")
+    cols_hdr[4].markdown("**2車単配当**")
+    cols_hdr[5].markdown("**3連複配当**")
 
     for i in range(1, 37):
         c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
@@ -159,13 +226,13 @@ with tabs[0]:
         vline = c3.text_input("", key=f"vline_{i}", value="")
         fin = c4.text_input("", key=f"fin_{i}", value="")
 
-        pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
-        pay_2t = c6.number_input("", key=f"pay2t_{i}", min_value=0, value=0, step=10)
+        pay_2t = c5.number_input("", key=f"pay2t_{i}", min_value=0, value=0, step=10)
+        pay_3f = c6.number_input("", key=f"pay3f_{i}", min_value=0, value=0, step=10)
 
         vorder = parse_rankline(vline, field_n)
         finish = parse_finish(fin)
 
-        any_input = any([vline.strip(), fin.strip(), pay_2f > 0, pay_2t > 0])
+        any_input = any([vline.strip(), fin.strip(), pay_2t > 0, pay_3f > 0])
         if any_input:
             if not vorder:
                 st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
@@ -185,8 +252,8 @@ with tabs[0]:
                     "field_n": field_n,
                     "vorder": vorder,
                     "finish": finish,
-                    "pay_2f": int(pay_2f),
                     "pay_2t": int(pay_2t),
+                    "pay_3f": int(pay_3f),
                 }
             )
 
@@ -253,36 +320,48 @@ with tabs[1]:
         if any([N, C1, C2, C3]):
             add_rank_rec(r, N, C1, C2, C3)
 
-    st.divider()
+        st.divider()
 
-    st.markdown("## 2車複 回収（累積）｜評価1〜7軸・総流し")
-    st.caption("各評価を軸に2車複総流しした成績を入力。KSUMは総点数です。")
+    st.markdown("## 新回収率（累積）")
+    st.caption("旧式の評価1〜7軸総流しは使いません。ここでは 2車単1→2345 と 3連複1-2345-2345 だけ入力します。")
 
-    h2 = st.columns([2.0, 1, 1, 1, 1, 1.2])
-    h2[0].markdown("**軸**")
-    h2[1].markdown("**対象N**")
-    h2[2].markdown("**KSUM**")
-    h2[3].markdown("**SUM**")
-    h2[4].markdown("**H**")
-    h2[5].markdown("**U**")
+    h4 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+    h4[0].markdown("**型**")
+    h4[1].markdown("**対象N**")
+    h4[2].markdown("**KSUM**")
+    h4[3].markdown("**SUM**")
+    h4[4].markdown("**H**")
+    h4[5].markdown("**U**")
 
-    for axis in EVAL_AXES:
-        c0, c1, c2, c3, c4, c5 = st.columns([2.0, 1, 1, 1, 1, 1.2])
-        c0.write(f"評価{axis}-全")
+    c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+    c0.write("2車単 1→2345")
+    N = c1.number_input("", key="prev_2t_1_2345_N", min_value=0, value=0)
+    KSUM = c2.number_input("", key="prev_2t_1_2345_KSUM", min_value=0, value=0)
+    SUM = c3.number_input("", key="prev_2t_1_2345_SUM", min_value=0, value=0, step=10)
+    H = c4.number_input("", key="prev_2t_1_2345_H", min_value=0, value=0)
+    U = c5.number_input("", key="prev_2t_1_2345_U", min_value=0, value=0)
 
-        N = c1.number_input("", key=f"pN_2f_axis_{axis}", min_value=0, value=0)
-        KSUM = c2.number_input("", key=f"pKSUM_2f_axis_{axis}", min_value=0, value=0)
-        SUM = c3.number_input("", key=f"pSUM_2f_axis_{axis}", min_value=0, value=0, step=10)
-        H = c4.number_input("", key=f"pH_2f_axis_{axis}", min_value=0, value=0)
-        U = c5.number_input("", key=f"pU_2f_axis_{axis}", min_value=0, value=0)
+    if any([N, KSUM, SUM, H, U]):
+        agg_payout_2t_1_2345_manual["N"] += int(N)
+        agg_payout_2t_1_2345_manual["KSUM"] += int(KSUM)
+        agg_payout_2t_1_2345_manual["SUM"] += int(SUM)
+        agg_payout_2t_1_2345_manual["H"] += int(H)
+        agg_payout_2t_1_2345_manual["U"] += int(U)
 
-        if any([N, KSUM, SUM, H, U]):
-            rec = agg_payout_2f_axis_manual[axis]
-            rec["N"] += int(N)
-            rec["KSUM"] += int(KSUM)
-            rec["SUM"] += int(SUM)
-            rec["H"] += int(H)
-            rec["U"] += int(U)
+    c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+    c0.write("3連複 1-2345-2345")
+    N = c1.number_input("", key="prev_3f_1_2345_N", min_value=0, value=0)
+    KSUM = c2.number_input("", key="prev_3f_1_2345_KSUM", min_value=0, value=0)
+    SUM = c3.number_input("", key="prev_3f_1_2345_SUM", min_value=0, value=0, step=10)
+    H = c4.number_input("", key="prev_3f_1_2345_H", min_value=0, value=0)
+    U = c5.number_input("", key="prev_3f_1_2345_U", min_value=0, value=0)
+
+    if any([N, KSUM, SUM, H, U]):
+        agg_payout_3f_1_2345_manual["N"] += int(N)
+        agg_payout_3f_1_2345_manual["KSUM"] += int(KSUM)
+        agg_payout_3f_1_2345_manual["SUM"] += int(SUM)
+        agg_payout_3f_1_2345_manual["H"] += int(H)
+        agg_payout_3f_1_2345_manual["U"] += int(U)
 
     st.divider()
 
@@ -382,75 +461,75 @@ for k, v in pair12_daily.items():
 for k, v in pair12_manual.items():
     pair12_total[k] += int(v)
 
-# --- 2車複（日次）評価軸総流し ---
-payout_2f_axis_daily: Dict[int, Dict[str, int]] = {
-    axis: new_payout_rec() for axis in EVAL_AXES
-}
+# --- 新回収率（日次） ---
+# 2車単：1→2345
+# 3連複：1-2345-2345
 
-# --- 2車単（日次）評価軸→全 ---
-payout_2t_axis_daily: Dict[int, Dict[str, int]] = {
-    axis: new_payout_rec() for axis in EVAL_AXES
-}
+payout_2t_1_2345_daily: Dict[str, int] = new_payout_rec()
+payout_3f_1_2345_daily: Dict[str, int] = new_payout_rec()
 
 for row in byrace_rows:
     vorder = row.get("vorder", [])
     finish = row.get("finish", [])
     field_n = int(row.get("field_n", len(vorder) or 0))
-    if not vorder or field_n <= 0 or len(finish) < 2:
+
+    if not vorder or field_n <= 0:
         continue
 
     car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
-    win_rank = car_to_rank.get(finish[0])
-    sec_rank = car_to_rank.get(finish[1])
-    if win_rank is None or sec_rank is None:
-        continue
+    finish_ranks = []
+    for car in finish:
+        r = car_to_rank.get(car)
+        if r is not None:
+            finish_ranks.append(int(r))
 
-    win_rank = int(win_rank)
-    sec_rank = int(sec_rank)
-    finish_rank_set_2 = {win_rank, sec_rank}
-
-    pay_2f = int(row.get("pay_2f", 0))
     pay_2t = int(row.get("pay_2t", 0))
+    pay_3f = int(row.get("pay_3f", 0))
 
-    for axis in EVAL_AXES:
-        ksum = points_per_race_axis_flow(field_n, axis)
-        if ksum <= 0:
-            continue
+    # 2車単：1→2345
+    if len(finish_ranks) >= 2:
+        win_rank = finish_ranks[0]
+        sec_rank = finish_ranks[1]
 
-        # 2車複：評価axis-全
-        rec_2f = payout_2f_axis_daily[axis]
-        rec_2f["N"] += 1
-        rec_2f["KSUM"] += ksum
-        if axis in finish_rank_set_2:
-            if pay_2f > 0:
-                rec_2f["H"] += 1
-                rec_2f["SUM"] += pay_2f
-            else:
-                rec_2f["U"] += 1
+        ksum = ksum_2t_1_2345(field_n)
+        if ksum > 0:
+            payout_2t_1_2345_daily["N"] += 1
+            payout_2t_1_2345_daily["KSUM"] += ksum
 
-        # 2車単：評価axis→全
-        rec_2t = payout_2t_axis_daily[axis]
-        rec_2t["N"] += 1
-        rec_2t["KSUM"] += ksum
-        if axis == win_rank:
-            if pay_2t > 0:
-                rec_2t["H"] += 1
-                rec_2t["SUM"] += pay_2t
-            else:
-                rec_2t["U"] += 1
+            if hit_2t_1_2345(win_rank, sec_rank, field_n):
+                if pay_2t > 0:
+                    payout_2t_1_2345_daily["H"] += 1
+                    payout_2t_1_2345_daily["SUM"] += pay_2t
+                else:
+                    payout_2t_1_2345_daily["U"] += 1
 
-payout_2f_axis_total: Dict[int, Dict[str, int]] = {
-    axis: new_payout_rec() for axis in EVAL_AXES
-}
-payout_2t_axis_total: Dict[int, Dict[str, int]] = {
-    axis: new_payout_rec() for axis in EVAL_AXES
-}
+    # 3連複：1-2345-2345
+    if len(finish_ranks) >= 3:
+        ksum = ksum_3f_1_2345(field_n)
+        if ksum > 0:
+            payout_3f_1_2345_daily["N"] += 1
+            payout_3f_1_2345_daily["KSUM"] += ksum
 
-for axis in EVAL_AXES:
-    for k in ("N", "KSUM", "H", "U", "SUM"):
-        payout_2f_axis_total[axis][k] = payout_2f_axis_daily[axis][k] + agg_payout_2f_axis_manual[axis][k]
-        payout_2t_axis_total[axis][k] = payout_2t_axis_daily[axis][k] + agg_payout_2t_axis_manual[axis][k]
+            if hit_3f_1_2345(finish_ranks, field_n):
+                if pay_3f > 0:
+                    payout_3f_1_2345_daily["H"] += 1
+                    payout_3f_1_2345_daily["SUM"] += pay_3f
+                else:
+                    payout_3f_1_2345_daily["U"] += 1
 
+
+payout_2t_1_2345_total: Dict[str, int] = new_payout_rec()
+payout_3f_1_2345_total: Dict[str, int] = new_payout_rec()
+payout_combo_total: Dict[str, int] = new_payout_rec()
+
+add_rec(payout_2t_1_2345_total, payout_2t_1_2345_daily)
+add_rec(payout_2t_1_2345_total, agg_payout_2t_1_2345_manual)
+
+add_rec(payout_3f_1_2345_total, payout_3f_1_2345_daily)
+add_rec(payout_3f_1_2345_total, agg_payout_3f_1_2345_manual)
+
+add_rec(payout_combo_total, payout_2t_1_2345_total)
+add_rec(payout_combo_total, payout_3f_1_2345_total)
 
 # =========================
 # 出力：分析結果
@@ -490,66 +569,32 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("2車複 回収期待値%｜評価1〜7軸・総流し")
-    rows_2f = []
-    for axis in EVAL_AXES:
-        rec = payout_2f_axis_total[axis]
-        N = rec["N"]
-        KSUM = rec["KSUM"]
-        H = rec["H"]
-        U = rec["U"]
-        SUM = rec["SUM"]
+       st.divider()
 
-        roi = round(SUM / KSUM, 1) if KSUM > 0 else None
-        avg_pay = round(SUM / H, 1) if H > 0 else None
-        hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+    st.subheader("新回収率｜2車単1→2345 ＋ 3連複1-2345-2345")
+    st.caption("旧式の評価1〜7軸総流しは表示しません。新フェーズの実戦買い目だけを集計します。")
 
-        rows_2f.append(
-            {
-                "軸": f"評価{axis}-全",
-                "対象N": N,
-                "総点数KSUM": KSUM,
-                "払戻合計SUM": SUM,
-                "的中H（配当あり）": H,
-                "的中U（配当未入力）": U,
-                "的中率%（配当あり分）": hit_rate,
-                "平均配当（配当あり分）": avg_pay,
-                "回収期待値%": roi,
-                "判定": "◎" if (roi is not None and roi >= 100.0) else "",
-            }
-        )
+    rows_new = [
+        payout_row("2車単 1→2345", payout_2t_1_2345_total),
+        payout_row("3連複 1-2345-2345", payout_3f_1_2345_total),
+        payout_row("合算：2車単＋3連複", payout_combo_total),
+    ]
 
-    st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
 
-    st.divider()
+    st.markdown("### 日次のみ")
+    rows_daily = [
+        payout_row("2車単 1→2345（日次）", payout_2t_1_2345_daily),
+        payout_row("3連複 1-2345-2345（日次）", payout_3f_1_2345_daily),
+    ]
 
-    st.subheader("2車単 回収期待値%｜評価1〜7軸・軸→全")
-    rows_2t = []
-    for axis in EVAL_AXES:
-        rec = payout_2t_axis_total[axis]
-        N = rec["N"]
-        KSUM = rec["KSUM"]
-        H = rec["H"]
-        U = rec["U"]
-        SUM = rec["SUM"]
+    combo_daily = new_payout_rec()
+    add_rec(combo_daily, payout_2t_1_2345_daily)
+    add_rec(combo_daily, payout_3f_1_2345_daily)
+    rows_daily.append(payout_row("合算：2車単＋3連複（日次）", combo_daily))
 
-        roi = round(SUM / KSUM, 1) if KSUM > 0 else None
-        avg_pay = round(SUM / H, 1) if H > 0 else None
-        hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+    st.dataframe(pd.DataFrame(rows_daily), use_container_width=True, hide_index=True)
 
-        rows_2t.append(
-            {
-                "軸": f"評価{axis}→全",
-                "対象N": N,
-                "総点数KSUM": KSUM,
-                "払戻合計SUM": SUM,
-                "的中H（配当あり）": H,
-                "的中U（配当未入力）": U,
-                "的中率%（配当あり分）": hit_rate,
-                "平均配当（配当あり分）": avg_pay,
-                "回収期待値%": roi,
-                "判定": "◎" if (roi is not None and roi >= 100.0) else "",
-            }
-        )
-
-    st.dataframe(pd.DataFrame(rows_2t), use_container_width=True, hide_index=True)
+    st.markdown("### 買い目確認")
+    st.write("2車単：1→2 / 1→3 / 1→4 / 1→5")
+    st.write("3連複：1-2-3 / 1-2-4 / 1-2-5 / 1-3-4 / 1-3-5 / 1-4-5")
