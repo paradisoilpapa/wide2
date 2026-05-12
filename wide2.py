@@ -569,7 +569,7 @@ with tabs[2]:
 
     st.divider()
 
-    st.divider()
+        st.divider()
 
     st.subheader("新回収率｜2車単1→2345 ＋ 3連複1-2345-2345")
     st.caption("旧式の評価1〜7軸総流しは表示しません。新フェーズの実戦買い目だけを集計します。")
@@ -581,19 +581,6 @@ with tabs[2]:
     ]
 
     st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
-
-    st.markdown("### 日次のみ")
-    rows_daily = [
-        payout_row("2車単 1→2345（日次）", payout_2t_1_2345_daily),
-        payout_row("3連複 1-2345-2345（日次）", payout_3f_1_2345_daily),
-    ]
-
-    combo_daily = new_payout_rec()
-    add_rec(combo_daily, payout_2t_1_2345_daily)
-    add_rec(combo_daily, payout_3f_1_2345_daily)
-    rows_daily.append(payout_row("合算：2車単＋3連複（日次）", combo_daily))
-
-    st.dataframe(pd.DataFrame(rows_daily), use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
     st.write("2車単：1→2 / 1→3 / 1→4 / 1→5")
