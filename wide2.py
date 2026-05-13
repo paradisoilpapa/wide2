@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 新回収率 v3.7（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 新回収率 v3.7＋3→12（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -18,6 +18,7 @@ PATTERN_AXES = (1, 2)
 AXIS1_TARGETS = (2, 3, 4)
 INDIVIDUAL_AXIS1_TARGETS = (2, 3, 4, 5)
 AXIS2_TARGETS = (1, 3)
+AXIS3_TARGETS = (1, 2)
 
 # 2車複：評価1-2 / 1-3 / 2-3 / 123BOX
 NISHAFUKU_PAIRS = [(1, 2), (1, 3), (2, 3)]
@@ -265,6 +266,9 @@ agg_payout_axis_target_manual: Dict[Tuple[int, int], Dict[str, int]] = {
 agg_payout_axis_target_manual.update({
     (2, target): new_payout_rec() for target in AXIS2_TARGETS
 })
+agg_payout_axis_target_manual.update({
+    (3, target): new_payout_rec() for target in AXIS3_TARGETS
+})
 
 # 前日まで：2車複 1-2 / 1-3 / 2-3 / 123BOX
 agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
@@ -438,7 +442,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 個別回収（累積・任意）")
-        st.caption("1→234と2→13の内訳確認用です。1→5は観察用として残します。1→2 / 1→3 / 1→4 / 1→5 / 2→1 / 2→3を個別に入力できます。不要なら0のままでOK。")
+        st.caption("1→234と2→13の内訳確認用です。1→5は観察用として残します。1→2 / 1→3 / 1→4 / 1→5 / 2→1 / 2→3 / 3→1 / 3→2を個別に入力できます。不要なら0のままでOK。")
 
         h5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
         h5[0].markdown("**型**")
@@ -449,7 +453,7 @@ with tabs[1]:
         h5[5].markdown("**U**")
 
         axis_target_inputs = []
-        individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS]
+        individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS] + [(3, target) for target in AXIS3_TARGETS]
         for axis, target in individual_pairs:
             c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
             c0.write(pair_target_label(axis, target))
@@ -637,8 +641,8 @@ for row in byrace_rows:
                 rec["U"] += 1
 
 # --- 個別（日次） ---
-# 2車単：1→2 / 1→3 / 1→4 / 1→5 / 2→1 / 2→3
-INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS]
+# 2車単：1→2 / 1→3 / 1→4 / 1→5 / 2→1 / 2→3 / 3→1 / 3→2
+INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS] + [(3, target) for target in AXIS3_TARGETS]
 payout_axis_target_daily: Dict[Tuple[int, int], Dict[str, int]] = {
     pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
 }
@@ -819,8 +823,8 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
 
-    st.markdown("### 個別回収｜1→2 / 1→3 / 1→4 / 1→5 / 2→1 / 2→3")
-    st.caption("1→234と2→13の内訳確認用です。1→5は観察用として残し、どの目が回収を支えているかを見るための表です。")
+    st.markdown("### 個別回収｜1→2 / 1→3 / 1→4 / 1→5 / 2→1 / 2→3 / 3→1 / 3→2")
+    st.caption("1→234・2→13に加えて、3→12の高配当確認用です。1→5は観察用として残し、どの目が回収を支えているかを見るための表です。")
 
     rows_individual = []
     for axis, target in INDIVIDUAL_PAIRS:
@@ -844,4 +848,5 @@ with tabs[2]:
     st.markdown("### 買い目確認")
     st.write("2車単 1→234：1→2 / 1→3 / 1→4")
     st.write("2車単 2→13：2→1 / 2→3")
+    st.write("2車単 3→12：3→1 / 3→2（個別回収のみ）")
     st.write("2車複 123BOX：1-2 / 1-3 / 2-3")
