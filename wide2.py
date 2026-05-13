@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 新回収率 v3.7｜1→23＋3→12（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収 v3.7｜1→23＋3→12（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -102,11 +102,11 @@ def rate(x: int, n: int):
 
 
 def new_payout_rec() -> Dict[str, int]:
-    return {"N": 0, "KSUM": 0, "H": 0, "U": 0, "SUM": 0}
+    return {"N": 0, "KSUM": 0, "H": 0, "SUM": 0}
 
 
 def add_rec(dst: Dict[str, int], src: Dict[str, int]):
-    for k in ("N", "KSUM", "H", "U", "SUM"):
+    for k in ("N", "KSUM", "H", "SUM"):
         dst[k] += int(src.get(k, 0))
 
 
@@ -114,14 +114,13 @@ def combine_recs(recs: List[Dict[str, int]]) -> Dict[str, int]:
     """
     同じレース群に対する複数買い目の合算。
     Nは足さず、最大Nを使う。
-    KSUM/H/U/SUMは合算する。
+    KSUM/H/SUMは合算する。
     """
     out = new_payout_rec()
     out["N"] = max((int(r.get("N", 0)) for r in recs), default=0)
     for rec in recs:
         out["KSUM"] += int(rec.get("KSUM", 0))
         out["H"] += int(rec.get("H", 0))
-        out["U"] += int(rec.get("U", 0))
         out["SUM"] += int(rec.get("SUM", 0))
     return out
 
@@ -213,7 +212,6 @@ def payout_row(label: str, rec: Dict[str, int]) -> Dict:
     N = int(rec["N"])
     KSUM = int(rec["KSUM"])
     H = int(rec["H"])
-    U = int(rec["U"])
     SUM = int(rec["SUM"])
 
     invest = KSUM * 100
@@ -228,7 +226,6 @@ def payout_row(label: str, rec: Dict[str, int]) -> Dict:
         "投資額換算": invest,
         "払戻合計SUM": SUM,
         "的中H（配当あり）": H,
-        "的中U（配当未入力）": U,
         "的中率%": hit_rate,
         "平均配当": avg_pay,
         "回収率%": roi,
@@ -417,78 +414,54 @@ with tabs[1]:
 
         st.divider()
 
-        st.markdown("## 新回収率（累積）")
-        st.caption("2車単固定型だけ入力します。1→23 / 2→13。")
-
-        h4 = st.columns([2.4, 1, 1, 1, 1, 1.2])
-        h4[0].markdown("**型**")
-        h4[1].markdown("**対象N**")
-        h4[2].markdown("**KSUM**")
-        h4[3].markdown("**SUM**")
-        h4[4].markdown("**H**")
-        h4[5].markdown("**U**")
-
+        # 固定型（1→23 / 2→13）の累積入力は削除。
+        # 必要な確認は下の「個別回収」で行う。
         payout_inputs = []
-        for axis in PATTERN_AXES:
-            c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
-            c0.write(pattern_label(axis))
-            N = c1.number_input("", key=f"prev_2t_pat_{axis}_N", min_value=0, value=0)
-            KSUM = c2.number_input("", key=f"prev_2t_pat_{axis}_KSUM", min_value=0, value=0)
-            SUM = c3.number_input("", key=f"prev_2t_pat_{axis}_SUM", min_value=0, value=0, step=10)
-            H = c4.number_input("", key=f"prev_2t_pat_{axis}_H", min_value=0, value=0)
-            U = c5.number_input("", key=f"prev_2t_pat_{axis}_U", min_value=0, value=0)
-            payout_inputs.append((axis, int(N), int(KSUM), int(SUM), int(H), int(U)))
-
-        st.divider()
 
         st.markdown("## 個別回収（累積・任意）")
         st.caption("1→23・2→13・3→12の内訳確認用です。1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2を個別に入力できます。不要なら0のままでOK。")
 
-        h5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+        h5 = st.columns([2.4, 1, 1, 1, 1])
         h5[0].markdown("**型**")
         h5[1].markdown("**対象N**")
         h5[2].markdown("**KSUM**")
         h5[3].markdown("**SUM**")
         h5[4].markdown("**H**")
-        h5[5].markdown("**U**")
 
         axis_target_inputs = []
         individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS] + [(3, target) for target in AXIS3_TARGETS]
         for axis, target in individual_pairs:
-            c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+            c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
             c0.write(pair_target_label(axis, target))
             N = c1.number_input("", key=f"prev_{axis}to_{target}_N", min_value=0, value=0)
             KSUM = c2.number_input("", key=f"prev_{axis}to_{target}_KSUM", min_value=0, value=0)
             SUM = c3.number_input("", key=f"prev_{axis}to_{target}_SUM", min_value=0, value=0, step=10)
             H = c4.number_input("", key=f"prev_{axis}to_{target}_H", min_value=0, value=0)
-            U = c5.number_input("", key=f"prev_{axis}to_{target}_U", min_value=0, value=0)
-            axis_target_inputs.append((axis, target, int(N), int(KSUM), int(SUM), int(H), int(U)))
+            axis_target_inputs.append((axis, target, int(N), int(KSUM), int(SUM), int(H)))
 
         st.divider()
 
         st.markdown("## 2車複 123BOX集計（累積・任意）")
         st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 2-3 / 123BOXを入力できます。不要なら0のままでOK。")
 
-        h6 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+        h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
         h6[1].markdown("**対象N**")
         h6[2].markdown("**KSUM**")
         h6[3].markdown("**SUM**")
         h6[4].markdown("**H**")
-        h6[5].markdown("**U**")
 
         nishafuku_inputs = []
         nishafuku_labels = [nishafuku_label(a, b) for a, b in NISHAFUKU_PAIRS] + ["2車複 123BOX"]
         for label in nishafuku_labels:
             safe_key = label.replace(" ", "_").replace("-", "_")
-            c0, c1, c2, c3, c4, c5 = st.columns([2.4, 1, 1, 1, 1, 1.2])
+            c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
             c0.write(label)
             N = c1.number_input("", key=f"prev_2f_{safe_key}_N", min_value=0, value=0)
             KSUM = c2.number_input("", key=f"prev_2f_{safe_key}_KSUM", min_value=0, value=0)
             SUM = c3.number_input("", key=f"prev_2f_{safe_key}_SUM", min_value=0, value=0, step=10)
             H = c4.number_input("", key=f"prev_2f_{safe_key}_H", min_value=0, value=0)
-            U = c5.number_input("", key=f"prev_2f_{safe_key}_U", min_value=0, value=0)
-            nishafuku_inputs.append((label, int(N), int(KSUM), int(SUM), int(H), int(U)))
+            nishafuku_inputs.append((label, int(N), int(KSUM), int(SUM), int(H)))
 
         st.form_submit_button("前日までの集計を反映")
 
@@ -504,32 +477,29 @@ with tabs[1]:
             rec["C2"] += int(C2)
             rec["C3"] += int(C3)
 
-    for axis, N, KSUM, SUM, H, U in payout_inputs:
-        if any([N, KSUM, SUM, H, U]):
+    for axis, N, KSUM, SUM, H in payout_inputs:
+        if any([N, KSUM, SUM, H]):
             rec = agg_payout_2t_pattern_manual[axis]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
-            rec["U"] += int(U)
 
-    for axis, target, N, KSUM, SUM, H, U in axis_target_inputs:
-        if any([N, KSUM, SUM, H, U]):
+    for axis, target, N, KSUM, SUM, H in axis_target_inputs:
+        if any([N, KSUM, SUM, H]):
             rec = agg_payout_axis_target_manual[(axis, target)]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
-            rec["U"] += int(U)
 
-    for label, N, KSUM, SUM, H, U in nishafuku_inputs:
-        if any([N, KSUM, SUM, H, U]):
+    for label, N, KSUM, SUM, H in nishafuku_inputs:
+        if any([N, KSUM, SUM, H]):
             rec = agg_payout_nishafuku_manual[label]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
-            rec["U"] += int(U)
 
 
 # =========================
@@ -637,8 +607,6 @@ for row in byrace_rows:
             if pay_2t > 0:
                 rec["H"] += 1
                 rec["SUM"] += pay_2t
-            else:
-                rec["U"] += 1
 
 # --- 個別（日次） ---
 # 2車単：1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2 / 3→1 / 3→2
@@ -680,8 +648,6 @@ for row in byrace_rows:
             if pay_2t > 0:
                 rec["H"] += 1
                 rec["SUM"] += pay_2t
-            else:
-                rec["U"] += 1
 
 
 # --- 2車複 123BOX（日次） ---
@@ -727,8 +693,6 @@ for row in byrace_rows:
             if pay_2f > 0:
                 rec["H"] += 1
                 rec["SUM"] += pay_2f
-            else:
-                rec["U"] += 1
 
     box_ksum = sum(ksum_nishafuku_pair(a, b, field_n) for a, b in NISHAFUKU_PAIRS)
     if box_ksum > 0:
@@ -740,8 +704,6 @@ for row in byrace_rows:
             if pay_2f > 0:
                 rec["H"] += 1
                 rec["SUM"] += pay_2f
-            else:
-                rec["U"] += 1
 
 
 payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
@@ -810,19 +772,6 @@ with tabs[2]:
 
     st.divider()
 
-    st.subheader("新回収率｜2車単 1→23 / 2→13")
-    st.caption("三連複と3→46は使いません。2車単の固定型だけを集計します。合算行の対象Nは加算せず、同一レース数として表示します。")
-
-    rows_new = []
-    for axis in PATTERN_AXES:
-        rows_new.append(
-            payout_row(pattern_label(axis), payout_2t_pattern_total[axis])
-        )
-
-    rows_new.append(payout_row("合算：1→23 ＋ 2→13", combo_12))
-
-    st.dataframe(pd.DataFrame(rows_new), use_container_width=True, hide_index=True)
-
     st.markdown("### 個別回収｜1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2")
     st.caption("1→23・2→13に加えて、3→12の高配当確認用です。どの目が回収を支えているかを見るための表です。")
 
@@ -846,7 +795,5 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
-    st.write("2車単 1→23：1→2 / 1→3")
-    st.write("2車単 2→13：2→1 / 2→3")
-    st.write("2車単 3→12：3→1 / 3→2（個別回収のみ）")
+    st.write("2車単 個別回収：1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2")
     st.write("2車複 123BOX：1-2 / 1-3 / 2-3")
