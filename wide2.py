@@ -724,7 +724,6 @@ for axis in PATTERN_AXES:
     add_rec(payout_2t_pattern_total[axis], payout_2t_pattern_daily[axis])
     add_rec(payout_2t_pattern_total[axis], agg_payout_2t_pattern_manual[axis])
 
-combo_12 = combine_recs([payout_2t_pattern_total[1], payout_2t_pattern_total[2]])
 
 payout_axis_target_total: Dict[Tuple[int, int], Dict[str, int]] = {
     pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
