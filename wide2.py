@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収＋3連複＋3連単 v3.9｜1→23＋3連複比較＋3連単1-2-456系（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収＋3連複＋3連単 v3.9｜1→23＋3連複比較＋3連単4分割（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -41,14 +41,22 @@ SANRENPUKU_PATTERNS = {
 SANRENPUKU_LABELS = list(SANRENPUKU_PATTERNS.keys())
 
 # 3連単シミュレーション（評価順位ベース）
-# 1-2-456 / 2-1-456 / 1-456-2 / 2-456-1：合計12点
-SANRENTAN_LABEL = "3連単 1-2-456 / 2-1-456 / 1-456-2 / 2-456-1"
-SANRENTAN_PATTERNS = [
-    ((1,), (2,), (4, 5, 6)),
-    ((2,), (1,), (4, 5, 6)),
-    ((1,), (4, 5, 6), (2,)),
-    ((2,), (4, 5, 6), (1,)),
-]
+# 4パターンを分けて集計する
+SANRENTAN_PATTERNS = {
+    "3連単 1-2-456": [
+        ((1,), (2,), (4, 5, 6)),
+    ],
+    "3連単 2-1-456": [
+        ((2,), (1,), (4, 5, 6)),
+    ],
+    "3連単 1-456-2": [
+        ((1,), (4, 5, 6), (2,)),
+    ],
+    "3連単 2-456-1": [
+        ((2,), (4, 5, 6), (1,)),
+    ],
+}
+SANRENTAN_LABELS = list(SANRENTAN_PATTERNS.keys())
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -267,14 +275,14 @@ def hit_sanrenpuku(label: str, finish_ranks: List[int], field_n: int) -> bool:
     target = tuple(sorted(finish_ranks[:3]))
     return target in sanrenpuku_combos(label, field_n)
 
-def sanrentan_combos(field_n: int) -> List[Tuple[int, int, int]]:
+def sanrentan_combos(label: str, field_n: int) -> List[Tuple[int, int, int]]:
     """
     3連単の実買い目を重複なしで作る。
     欠車対応：存在する評価だけ採用。
     """
     combos = set()
 
-    for first_group, second_group, third_group in SANRENTAN_PATTERNS:
+    for first_group, second_group, third_group in SANRENTAN_PATTERNS[label]:
         for a in first_group:
             for b in second_group:
                 for c in third_group:
@@ -287,17 +295,17 @@ def sanrentan_combos(field_n: int) -> List[Tuple[int, int, int]]:
     return sorted(combos)
 
 
-def ksum_sanrentan(field_n: int) -> int:
+def ksum_sanrentan(label: str, field_n: int) -> int:
     """3連単の点数。"""
-    return len(sanrentan_combos(field_n))
+    return len(sanrentan_combos(label, field_n))
 
 
-def hit_sanrentan(finish_ranks: List[int], field_n: int) -> bool:
+def hit_sanrentan(label: str, finish_ranks: List[int], field_n: int) -> bool:
     """3連単：実際の1〜3着評価順位が買い目内なら的中。着順どおり。"""
     if len(finish_ranks) < 3:
         return False
     target = tuple(finish_ranks[:3])
-    return target in sanrentan_combos(field_n)
+    return target in sanrentan_combos(label, field_n)
 
 def payout_row(label: str, rec: Dict[str, int]) -> Dict:
     N = int(rec["N"])
@@ -371,7 +379,7 @@ agg_payout_sanrenpuku_manual: Dict[str, Dict[str, int]] = {
 
 # 前日まで：3連単シミュレーション
 agg_payout_sanrentan_manual: Dict[str, Dict[str, int]] = {
-    SANRENTAN_LABEL: new_payout_rec()
+    label: new_payout_rec() for label in SANRENTAN_LABELS
 }
 
 
@@ -600,7 +608,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 3連単シミュレーション集計（累積・任意）")
-        st.caption("評価順位ベースの3連単です。1-2-456 / 2-1-456 / 1-456-2 / 2-456-1の合算12点型を入力できます。不要なら0のままでOK。")
+        st.caption("評価順位ベースの3連単です。1-2-456 / 2-1-456 / 1-456-2 / 2-456-1を分けて入力できます。不要なら0のままでOK。")
 
         h8 = st.columns([2.4, 1, 1, 1, 1])
         h8[0].markdown("**型**")
@@ -610,13 +618,15 @@ with tabs[1]:
         h8[4].markdown("**H**")
 
         sanrentan_inputs = []
-        c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
-        c0.write(SANRENTAN_LABEL)
-        N = c1.number_input("", key="prev_3t_main_N", min_value=0, value=0)
-        KSUM = c2.number_input("", key="prev_3t_main_KSUM", min_value=0, value=0)
-        SUM = c3.number_input("", key="prev_3t_main_SUM", min_value=0, value=0, step=10)
-        H = c4.number_input("", key="prev_3t_main_H", min_value=0, value=0)
-        sanrentan_inputs.append((SANRENTAN_LABEL, int(N), int(KSUM), int(SUM), int(H)))
+        for label in SANRENTAN_LABELS:
+            safe_key = label.replace(" ", "_").replace("-", "_")
+            c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
+            c0.write(label)
+            N = c1.number_input("", key=f"prev_3t_{safe_key}_N", min_value=0, value=0)
+            KSUM = c2.number_input("", key=f"prev_3t_{safe_key}_KSUM", min_value=0, value=0)
+            SUM = c3.number_input("", key=f"prev_3t_{safe_key}_SUM", min_value=0, value=0, step=10)
+            H = c4.number_input("", key=f"prev_3t_{safe_key}_H", min_value=0, value=0)
+            sanrentan_inputs.append((label, int(N), int(KSUM), int(SUM), int(H)))
 
         st.form_submit_button("前日までの集計を反映")
 
@@ -916,7 +926,7 @@ for row in byrace_rows:
 
 # --- 3連単シミュレーション（日次） ---
 payout_sanrentan_daily: Dict[str, Dict[str, int]] = {
-    SANRENTAN_LABEL: new_payout_rec()
+    label: new_payout_rec() for label in SANRENTAN_LABELS
 }
 
 for row in byrace_rows:
@@ -936,13 +946,16 @@ for row in byrace_rows:
     finish_ranks = [int(r) for r in finish_ranks]
     pay_3t = int(row.get("pay_3t", 0))
 
-    ksum = ksum_sanrentan(field_n)
-    if ksum > 0:
-        rec = payout_sanrentan_daily[SANRENTAN_LABEL]
+    for label in SANRENTAN_LABELS:
+        ksum = ksum_sanrentan(label, field_n)
+        if ksum <= 0:
+            continue
+
+        rec = payout_sanrentan_daily[label]
         rec["N"] += 1
         rec["KSUM"] += ksum
 
-        if hit_sanrentan(finish_ranks, field_n):
+        if hit_sanrentan(label, finish_ranks, field_n):
             if pay_3t > 0:
                 rec["H"] += 1
                 rec["SUM"] += pay_3t
@@ -984,11 +997,12 @@ for label in SANRENPUKU_LABELS:
     add_rec(payout_sanrenpuku_total[label], agg_payout_sanrenpuku_manual[label])
 
 payout_sanrentan_total: Dict[str, Dict[str, int]] = {
-    SANRENTAN_LABEL: new_payout_rec()
+    label: new_payout_rec() for label in SANRENTAN_LABELS
 }
 
-add_rec(payout_sanrentan_total[SANRENTAN_LABEL], payout_sanrentan_daily[SANRENTAN_LABEL])
-add_rec(payout_sanrentan_total[SANRENTAN_LABEL], agg_payout_sanrentan_manual[SANRENTAN_LABEL])
+for label in SANRENTAN_LABELS:
+    add_rec(payout_sanrentan_total[label], payout_sanrentan_daily[label])
+    add_rec(payout_sanrentan_total[label], agg_payout_sanrentan_manual[label])
 
 
 # =========================
@@ -1049,9 +1063,11 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
 
     st.markdown("### 3連単シミュレーション｜1-2-456 / 2-1-456 / 1-456-2 / 2-456-1")
-    st.caption("評価順位ベースの3連単12点型です。日次入力の3連単配当を使います。")
+    st.caption("評価順位ベースの3連単です。4パターンを分けて集計します。日次入力の3連単配当を使います。")
 
-    rows_3t = [payout_row(SANRENTAN_LABEL, payout_sanrentan_total[SANRENTAN_LABEL])]
+    rows_3t = []
+    for label in SANRENTAN_LABELS:
+        rows_3t.append(payout_row(label, payout_sanrentan_total[label]))
     st.dataframe(pd.DataFrame(rows_3t), use_container_width=True, hide_index=True)
 
     st.markdown("### 2車複 123BOX集計｜1-2 / 1-3 / 2-3 / 123BOX")
@@ -1069,4 +1085,4 @@ with tabs[2]:
     st.write("2車単 個別回収：1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2")
     st.write("2車複 123BOX：1-2 / 1-3 / 2-3")
     st.write("3連複：1-25-2456（5点） / 1-2-456（3点）")
-    st.write("3連単：1-2-456 / 2-1-456 / 1-456-2 / 2-456-1（12点）")
+    st.write("3連単：1-2-456 / 2-1-456 / 1-456-2 / 2-456-1（各3点・分割集計）")
