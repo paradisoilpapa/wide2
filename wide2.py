@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収＋3連複 v3.8｜1→23＋3→12＋1-25-2456（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収＋3連複 v3.8｜1→23＋3→12＋1-25-2456＋12-125-2456（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -23,11 +23,22 @@ AXIS3_TARGETS = (1, 2)
 # 2車複：評価1-2 / 1-3 / 2-3 / 123BOX
 NISHAFUKU_PAIRS = [(1, 2), (1, 3), (2, 3)]
 
-# 3連複：1-25-2456（評価順位ベース・5点）
-SANRENPUKU_LABEL = "3連複 1-25-2456"
-SANRENPUKU_AXIS = 1
-SANRENPUKU_SECOND = (2, 5)
-SANRENPUKU_THIRD = (2, 4, 5, 6)
+# 3連複シミュレーション（評価順位ベース）
+# 1-25-2456：5点
+# 12-125-2456：7点
+SANRENPUKU_PATTERNS = {
+    "3連複 1-25-2456": {
+        "first": (1,),
+        "second": (2, 5),
+        "third": (2, 4, 5, 6),
+    },
+    "3連複 12-125-2456": {
+        "first": (1, 2),
+        "second": (1, 2, 5),
+        "third": (2, 4, 5, 6),
+    },
+}
+SANRENPUKU_LABELS = list(SANRENPUKU_PATTERNS.keys())
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -214,39 +225,37 @@ def hit_nishafuku_pair(a: int, b: int, win_rank: int, sec_rank: int, field_n: in
     return {win_rank, sec_rank} == {a, b}
 
 
-def sanrenpuku_combos(field_n: int) -> List[Tuple[int, int, int]]:
+def sanrenpuku_combos(label: str, field_n: int) -> List[Tuple[int, int, int]]:
     """
-    3連複：1-25-2456 の実買い目を重複なしで作る。
+    3連複の実買い目を重複なしで作る。
     欠車対応：存在する評価だけ採用。
     """
+    pattern = SANRENPUKU_PATTERNS[label]
     combos = set()
-    axis = SANRENPUKU_AXIS
-    if axis > field_n:
-        return []
 
-    for a in SANRENPUKU_SECOND:
-        for b in SANRENPUKU_THIRD:
-            if a > field_n or b > field_n:
-                continue
-            if len({axis, a, b}) != 3:
-                continue
-            combos.add(tuple(sorted((axis, a, b))))
+    for a in pattern["first"]:
+        for b in pattern["second"]:
+            for c in pattern["third"]:
+                if a > field_n or b > field_n or c > field_n:
+                    continue
+                if len({a, b, c}) != 3:
+                    continue
+                combos.add(tuple(sorted((a, b, c))))
 
     return sorted(combos)
 
 
-def ksum_sanrenpuku_123(field_n: int) -> int:
-    """3連複：1-25-2456 の点数。"""
-    return len(sanrenpuku_combos(field_n))
+def ksum_sanrenpuku(label: str, field_n: int) -> int:
+    """3連複の点数。"""
+    return len(sanrenpuku_combos(label, field_n))
 
 
-def hit_sanrenpuku_123(finish_ranks: List[int], field_n: int) -> bool:
+def hit_sanrenpuku(label: str, finish_ranks: List[int], field_n: int) -> bool:
     """3連複：実際の1〜3着評価順位が買い目内なら的中。順不同。"""
     if len(finish_ranks) < 3:
         return False
     target = tuple(sorted(finish_ranks[:3]))
-    return target in sanrenpuku_combos(field_n)
-
+    return target in sanrenpuku_combos(label, field_n)
 
 def payout_row(label: str, rec: Dict[str, int]) -> Dict:
     N = int(rec["N"])
@@ -313,9 +322,9 @@ agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
 }
 agg_payout_nishafuku_manual["2車複 123BOX"] = new_payout_rec()
 
-# 前日まで：3連複 1-25-2456
+# 前日まで：3連複シミュレーション
 agg_payout_sanrenpuku_manual: Dict[str, Dict[str, int]] = {
-    SANRENPUKU_LABEL: new_payout_rec()
+    label: new_payout_rec() for label in SANRENPUKU_LABELS
 }
 
 
@@ -785,9 +794,9 @@ for row in byrace_rows:
                 rec["SUM"] += pay_2f
 
 
-# --- 3連複 1-25-2456（日次） ---
+# --- 3連複シミュレーション（日次） ---
 payout_sanrenpuku_daily: Dict[str, Dict[str, int]] = {
-    SANRENPUKU_LABEL: new_payout_rec()
+    label: new_payout_rec() for label in SANRENPUKU_LABELS
 }
 
 for row in byrace_rows:
@@ -807,19 +816,19 @@ for row in byrace_rows:
     finish_ranks = [int(r) for r in finish_ranks]
     pay_3f = int(row.get("pay_3f", 0))
 
-    ksum = ksum_sanrenpuku_123(field_n)
-    if ksum <= 0:
-        continue
+    for label in SANRENPUKU_LABELS:
+        ksum = ksum_sanrenpuku(label, field_n)
+        if ksum <= 0:
+            continue
 
-    rec = payout_sanrenpuku_daily[SANRENPUKU_LABEL]
-    rec["N"] += 1
-    rec["KSUM"] += ksum
+        rec = payout_sanrenpuku_daily[label]
+        rec["N"] += 1
+        rec["KSUM"] += ksum
 
-    if hit_sanrenpuku_123(finish_ranks, field_n):
-        if pay_3f > 0:
-            rec["H"] += 1
-            rec["SUM"] += pay_3f
-
+        if hit_sanrenpuku(label, finish_ranks, field_n):
+            if pay_3f > 0:
+                rec["H"] += 1
+                rec["SUM"] += pay_3f
 
 
 payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
@@ -850,11 +859,12 @@ for label in payout_nishafuku_total.keys():
     add_rec(payout_nishafuku_total[label], agg_payout_nishafuku_manual[label])
 
 payout_sanrenpuku_total: Dict[str, Dict[str, int]] = {
-    SANRENPUKU_LABEL: new_payout_rec()
+    label: new_payout_rec() for label in SANRENPUKU_LABELS
 }
 
-add_rec(payout_sanrenpuku_total[SANRENPUKU_LABEL], payout_sanrenpuku_daily[SANRENPUKU_LABEL])
-add_rec(payout_sanrenpuku_total[SANRENPUKU_LABEL], agg_payout_sanrenpuku_manual[SANRENPUKU_LABEL])
+for label in SANRENPUKU_LABELS:
+    add_rec(payout_sanrenpuku_total[label], payout_sanrenpuku_daily[label])
+    add_rec(payout_sanrenpuku_total[label], agg_payout_sanrenpuku_manual[label])
 
 
 # =========================
@@ -906,10 +916,12 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_individual), use_container_width=True, hide_index=True)
 
-    st.markdown("### 3連複シミュレーション｜1-25-2456")
-    st.caption("評価1を軸に、相手を25・23456で見る5点型です。日次入力の3連複配当を使います。")
+    st.markdown("### 3連複シミュレーション｜1-25-2456 / 12-125-2456")
+    st.caption("評価1または評価1・2を軸にした三連複比較です。日次入力の3連複配当を使います。")
 
-    rows_3f = [payout_row(SANRENPUKU_LABEL, payout_sanrenpuku_total[SANRENPUKU_LABEL])]
+    rows_3f = []
+    for label in SANRENPUKU_LABELS:
+        rows_3f.append(payout_row(label, payout_sanrenpuku_total[label]))
     st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
 
     st.markdown("### 2車複 123BOX集計｜1-2 / 1-3 / 2-3 / 123BOX")
@@ -926,4 +938,4 @@ with tabs[2]:
     st.markdown("### 買い目確認")
     st.write("2車単 個別回収：1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2")
     st.write("2車複 123BOX：1-2 / 1-3 / 2-3")
-    st.write("3連複：1-25-2456（5点）")
+    st.write("3連複：1-25-2456（5点） / 12-125-2456（7点）")
