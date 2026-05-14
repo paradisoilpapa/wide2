@@ -7,41 +7,22 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収＋3連複＋2車複456-12分割 v3.9｜1→23＋1-2-456（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 2車単1→23 ＋ 2車複5軸抽出 v4.0｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
 # =========================
 FIELD_SIZE = 7
 WINNER_RANKS = tuple(range(1, 8))
-PATTERN_AXES = (1, 2)
+PATTERN_AXES = (1,)
 AXIS1_TARGETS = (2, 3)
 INDIVIDUAL_AXIS1_TARGETS = (2, 3)
-AXIS2_TARGETS = (1, 3)
-AXIS3_TARGETS = (1, 2)
+AXIS2_TARGETS = ()
+AXIS3_TARGETS = ()
 
-# 2車複：評価1-2 / 1-3 / 2-3 / 123BOX
-NISHAFUKU_PAIRS = [(1, 2), (1, 3), (2, 3)]
-
-# 2車複グループ：456-12を個別分割
-NISHAFUKU_EXTRA_PAIRS = [(1, 4), (1, 5), (1, 6), (2, 4), (2, 5), (2, 6)]
-
-# 3連複シミュレーション（評価順位ベース）
-# 1-25-2456：5点
-# 1-2-456：3点
-SANRENPUKU_PATTERNS = {
-    "3連複 1-25-2456": {
-        "first": (1,),
-        "second": (2, 5),
-        "third": (2, 4, 5, 6),
-    },
-    "3連複 1-2-456": {
-        "first": (1,),
-        "second": (2,),
-        "third": (4, 5, 6),
-    },
-}
-SANRENPUKU_LABELS = list(SANRENPUKU_PATTERNS.keys())
+# 2車複：1-2 / 1-3 / 5軸抽出（5-1,2,3,4,6,7）
+NISHAFUKU_PAIRS = [(1, 2), (1, 3)]
+NISHAFUKU_EXTRA_PAIRS = [(1, 5), (2, 5), (3, 5), (4, 5), (5, 6), (5, 7)]
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -228,38 +209,6 @@ def hit_nishafuku_pair(a: int, b: int, win_rank: int, sec_rank: int, field_n: in
     return {win_rank, sec_rank} == {a, b}
 
 
-def sanrenpuku_combos(label: str, field_n: int) -> List[Tuple[int, int, int]]:
-    """
-    3連複の実買い目を重複なしで作る。
-    欠車対応：存在する評価だけ採用。
-    """
-    pattern = SANRENPUKU_PATTERNS[label]
-    combos = set()
-
-    for a in pattern["first"]:
-        for b in pattern["second"]:
-            for c in pattern["third"]:
-                if a > field_n or b > field_n or c > field_n:
-                    continue
-                if len({a, b, c}) != 3:
-                    continue
-                combos.add(tuple(sorted((a, b, c))))
-
-    return sorted(combos)
-
-
-def ksum_sanrenpuku(label: str, field_n: int) -> int:
-    """3連複の点数。"""
-    return len(sanrenpuku_combos(label, field_n))
-
-
-def hit_sanrenpuku(label: str, finish_ranks: List[int], field_n: int) -> bool:
-    """3連複：実際の1〜3着評価順位が買い目内なら的中。順不同。"""
-    if len(finish_ranks) < 3:
-        return False
-    target = tuple(sorted(finish_ranks[:3]))
-    return target in sanrenpuku_combos(label, field_n)
-
 
 def payout_row(label: str, rec: Dict[str, int]) -> Dict:
     N = int(rec["N"])
@@ -303,7 +252,7 @@ agg_rank_manual: Dict[int, Dict[str, int]] = defaultdict(
 pair12_manual: Dict[PairKey, int] = defaultdict(int)
 
 # 前日まで：新回収率
-# 2車単：1→23 / 2→13
+# 2車単：1→23
 agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
     axis: new_payout_rec() for axis in PATTERN_AXES
 }
@@ -320,18 +269,13 @@ agg_payout_axis_target_manual.update({
     (3, target): new_payout_rec() for target in AXIS3_TARGETS
 })
 
-# 前日まで：2車複 1-2 / 1-3 / 2-3 / 123BOX
+# 前日まで：2車複 1-2 / 1-3 / 5軸抽出
 agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
     nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
 }
-agg_payout_nishafuku_manual["2車複 123BOX"] = new_payout_rec()
 for a, b in NISHAFUKU_EXTRA_PAIRS:
     agg_payout_nishafuku_manual[nishafuku_label(a, b)] = new_payout_rec()
 
-# 前日まで：3連複シミュレーション
-agg_payout_sanrenpuku_manual: Dict[str, Dict[str, int]] = {
-    label: new_payout_rec() for label in SANRENPUKU_LABELS
-}
 
 
 # =========================
@@ -342,23 +286,22 @@ with tabs[0]:
     st.caption(
         "入力中の白化を抑えるため、フォーム送信式です。"
         "V評価は頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。"
-        "着順は～3桁。2車複配当→2車単配当→3連複配当の順で入力。配当は100円あたりの払戻金（円）です。"
+        "着順は～3桁。2車複配当→2車単配当の順で入力。配当は100円あたりの払戻金（円）です。"
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2, 1.2])
+        cols_hdr = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
         cols_hdr[0].markdown("**R**")
         cols_hdr[1].markdown("**頭数**")
         cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
         cols_hdr[3].markdown("**着順(～3桁)**")
         cols_hdr[4].markdown("**2車複配当**")
         cols_hdr[5].markdown("**2車単配当**")
-        cols_hdr[6].markdown("**3連複配当**")
 
         daily_inputs = []
 
         for i in range(1, 37):
-            c1, c2, c3, c4, c5, c6, c7 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2, 1.2])
+            c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
@@ -366,7 +309,6 @@ with tabs[0]:
             fin = c4.text_input("", key=f"fin_{i}", value="")
             pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
             pay_2t = c6.number_input("", key=f"pay2t_{i}", min_value=0, value=0, step=10)
-            pay_3f = c7.number_input("", key=f"pay3f_{i}", min_value=0, value=0, step=10)
 
             daily_inputs.append(
                 {
@@ -376,7 +318,6 @@ with tabs[0]:
                     "fin": fin,
                     "pay_2t": pay_2t,
                     "pay_2f": pay_2f,
-                    "pay_3f": pay_3f,
                 }
             )
 
@@ -389,12 +330,11 @@ with tabs[0]:
         fin = item["fin"]
         pay_2t = int(item["pay_2t"])
         pay_2f = int(item["pay_2f"])
-        pay_3f = int(item["pay_3f"])
 
         vorder = parse_rankline(vline, field_n)
         finish = parse_finish(fin)
 
-        any_input = any([vline.strip(), fin.strip(), pay_2t > 0, pay_2f > 0, pay_3f > 0])
+        any_input = any([vline.strip(), fin.strip(), pay_2t > 0, pay_2f > 0])
         if any_input:
             if not vorder:
                 st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
@@ -416,7 +356,6 @@ with tabs[0]:
                     "finish": finish,
                     "pay_2t": pay_2t,
                     "pay_2f": pay_2f,
-                    "pay_3f": pay_3f,
                 }
             )
 
@@ -484,7 +423,7 @@ with tabs[1]:
         payout_inputs = []
 
         st.markdown("## 個別回収（累積・任意）")
-        st.caption("1→23・2→13・3→12の内訳確認用です。1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2を個別に入力できます。不要なら0のままでOK。")
+        st.caption("1→23の内訳確認用です。1→2 / 1→3だけを個別に入力できます。不要なら0のままでOK。")
 
         h5 = st.columns([2.4, 1, 1, 1, 1])
         h5[0].markdown("**型**")
@@ -494,7 +433,7 @@ with tabs[1]:
         h5[4].markdown("**H**")
 
         axis_target_inputs = []
-        individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS] + [(3, target) for target in AXIS3_TARGETS]
+        individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
         for axis, target in individual_pairs:
             c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
             c0.write(pair_target_label(axis, target))
@@ -506,8 +445,8 @@ with tabs[1]:
 
         st.divider()
 
-        st.markdown("## 2車複 123BOX集計（累積・任意）")
-        st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 2-3 / 123BOX / 456-12分割を入力できます。不要なら0のままでOK。")
+        st.markdown("## 2車複シミュレーション集計（累積・任意）")
+        st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 5-1 / 5-2 / 5-3 / 5-4 / 5-6 / 5-7を入力できます。不要なら0のままでOK。")
 
         h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
@@ -517,7 +456,7 @@ with tabs[1]:
         h6[4].markdown("**H**")
 
         nishafuku_inputs = []
-        nishafuku_labels = [nishafuku_label(a, b) for a, b in NISHAFUKU_PAIRS] + ["2車複 123BOX"] + [nishafuku_label(a, b) for a, b in NISHAFUKU_EXTRA_PAIRS]
+        nishafuku_labels = [nishafuku_label(a, b) for a, b in NISHAFUKU_PAIRS] + [nishafuku_label(a, b) for a, b in NISHAFUKU_EXTRA_PAIRS]
         for label in nishafuku_labels:
             safe_key = label.replace(" ", "_").replace("-", "_")
             c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
@@ -527,29 +466,6 @@ with tabs[1]:
             SUM = c3.number_input("", key=f"prev_2f_{safe_key}_SUM", min_value=0, value=0, step=10)
             H = c4.number_input("", key=f"prev_2f_{safe_key}_H", min_value=0, value=0)
             nishafuku_inputs.append((label, int(N), int(KSUM), int(SUM), int(H)))
-
-        st.divider()
-
-        st.markdown("## 3連複シミュレーション集計（累積・任意）")
-        st.caption("評価順位ベースの3連複です。1-25-2456 / 1-2-456を入力できます。不要なら0のままでOK。")
-
-        h7 = st.columns([2.4, 1, 1, 1, 1])
-        h7[0].markdown("**型**")
-        h7[1].markdown("**対象N**")
-        h7[2].markdown("**KSUM**")
-        h7[3].markdown("**SUM**")
-        h7[4].markdown("**H**")
-
-        sanrenpuku_inputs = []
-        for label in SANRENPUKU_LABELS:
-            safe_key = label.replace(" ", "_").replace("-", "_")
-            c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
-            c0.write(label)
-            N = c1.number_input("", key=f"prev_3f_{safe_key}_N", min_value=0, value=0)
-            KSUM = c2.number_input("", key=f"prev_3f_{safe_key}_KSUM", min_value=0, value=0)
-            SUM = c3.number_input("", key=f"prev_3f_{safe_key}_SUM", min_value=0, value=0, step=10)
-            H = c4.number_input("", key=f"prev_3f_{safe_key}_H", min_value=0, value=0)
-            sanrenpuku_inputs.append((label, int(N), int(KSUM), int(SUM), int(H)))
 
         st.form_submit_button("前日までの集計を反映")
 
@@ -584,14 +500,6 @@ with tabs[1]:
     for label, N, KSUM, SUM, H in nishafuku_inputs:
         if any([N, KSUM, SUM, H]):
             rec = agg_payout_nishafuku_manual[label]
-            rec["N"] += int(N)
-            rec["KSUM"] += int(KSUM)
-            rec["SUM"] += int(SUM)
-            rec["H"] += int(H)
-
-    for label, N, KSUM, SUM, H in sanrenpuku_inputs:
-        if any([N, KSUM, SUM, H]):
-            rec = agg_payout_sanrenpuku_manual[label]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
             rec["SUM"] += int(SUM)
@@ -665,7 +573,7 @@ for k, v in pair12_manual.items():
     pair12_total[k] += int(v)
 
 # --- 新回収率（日次） ---
-# 2車単：1→23 / 2→13
+# 2車単：1→23
 payout_2t_pattern_daily: Dict[int, Dict[str, int]] = {
     axis: new_payout_rec() for axis in PATTERN_AXES
 }
@@ -706,7 +614,7 @@ for row in byrace_rows:
 
 # --- 個別（日次） ---
 # 2車単：1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2 / 3→1 / 3→2
-INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS] + [(3, target) for target in AXIS3_TARGETS]
+INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
 payout_axis_target_daily: Dict[Tuple[int, int], Dict[str, int]] = {
     pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
 }
@@ -746,11 +654,10 @@ for row in byrace_rows:
                 rec["SUM"] += pay_2t
 
 
-# --- 2車複 123BOX（日次） ---
+# --- 2車複シミュレーション（日次） ---
 payout_nishafuku_daily: Dict[str, Dict[str, int]] = {
     nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
 }
-payout_nishafuku_daily["2車複 123BOX"] = new_payout_rec()
 for a, b in NISHAFUKU_EXTRA_PAIRS:
     payout_nishafuku_daily[nishafuku_label(a, b)] = new_payout_rec()
 
@@ -774,7 +681,6 @@ for row in byrace_rows:
     sec_rank = int(sec_rank)
     pay_2f = int(row.get("pay_2f", 0))
 
-    box_hit = False
 
     for a, b in NISHAFUKU_PAIRS:
         label = nishafuku_label(a, b)
@@ -787,21 +693,10 @@ for row in byrace_rows:
         rec["KSUM"] += ksum
 
         if hit_nishafuku_pair(a, b, win_rank, sec_rank, field_n):
-            box_hit = True
             if pay_2f > 0:
                 rec["H"] += 1
                 rec["SUM"] += pay_2f
 
-    box_ksum = sum(ksum_nishafuku_pair(a, b, field_n) for a, b in NISHAFUKU_PAIRS)
-    if box_ksum > 0:
-        rec = payout_nishafuku_daily["2車複 123BOX"]
-        rec["N"] += 1
-        rec["KSUM"] += box_ksum
-
-        if box_hit:
-            if pay_2f > 0:
-                rec["H"] += 1
-                rec["SUM"] += pay_2f
 
     for a, b in NISHAFUKU_EXTRA_PAIRS:
         label = nishafuku_label(a, b)
@@ -819,41 +714,6 @@ for row in byrace_rows:
                 rec["SUM"] += pay_2f
 
 
-# --- 3連複シミュレーション（日次） ---
-payout_sanrenpuku_daily: Dict[str, Dict[str, int]] = {
-    label: new_payout_rec() for label in SANRENPUKU_LABELS
-}
-
-for row in byrace_rows:
-    vorder = row.get("vorder", [])
-    finish = row.get("finish", [])
-    field_n = int(row.get("field_n", len(vorder) or 0))
-
-    if not vorder or field_n <= 0 or len(finish) < 3:
-        continue
-
-    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
-    finish_ranks = [car_to_rank.get(car) for car in finish[:3]]
-
-    if any(r is None for r in finish_ranks):
-        continue
-
-    finish_ranks = [int(r) for r in finish_ranks]
-    pay_3f = int(row.get("pay_3f", 0))
-
-    for label in SANRENPUKU_LABELS:
-        ksum = ksum_sanrenpuku(label, field_n)
-        if ksum <= 0:
-            continue
-
-        rec = payout_sanrenpuku_daily[label]
-        rec["N"] += 1
-        rec["KSUM"] += ksum
-
-        if hit_sanrenpuku(label, finish_ranks, field_n):
-            if pay_3f > 0:
-                rec["H"] += 1
-                rec["SUM"] += pay_3f
 
 
 payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
@@ -877,7 +737,6 @@ for pair in INDIVIDUAL_PAIRS:
 payout_nishafuku_total: Dict[str, Dict[str, int]] = {
     nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
 }
-payout_nishafuku_total["2車複 123BOX"] = new_payout_rec()
 for a, b in NISHAFUKU_EXTRA_PAIRS:
     payout_nishafuku_total[nishafuku_label(a, b)] = new_payout_rec()
 
@@ -885,13 +744,6 @@ for label in payout_nishafuku_total.keys():
     add_rec(payout_nishafuku_total[label], payout_nishafuku_daily[label])
     add_rec(payout_nishafuku_total[label], agg_payout_nishafuku_manual[label])
 
-payout_sanrenpuku_total: Dict[str, Dict[str, int]] = {
-    label: new_payout_rec() for label in SANRENPUKU_LABELS
-}
-
-for label in SANRENPUKU_LABELS:
-    add_rec(payout_sanrenpuku_total[label], payout_sanrenpuku_daily[label])
-    add_rec(payout_sanrenpuku_total[label], agg_payout_sanrenpuku_manual[label])
 
 
 # =========================
@@ -932,8 +784,8 @@ with tabs[2]:
 
     st.divider()
 
-    st.markdown("### 個別回収｜1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2")
-    st.caption("1→23・2→13に加えて、3→12の高配当確認用です。どの目が回収を支えているかを見るための表です。")
+    st.markdown("### 個別回収｜2車単 1→2 / 1→3")
+    st.caption("2車単1→23だけを表示します。どの目が回収を支えているかを見るための表です。")
 
     rows_individual = []
     for axis, target in INDIVIDUAL_PAIRS:
@@ -943,22 +795,13 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_individual), use_container_width=True, hide_index=True)
 
-    st.markdown("### 3連複シミュレーション｜1-25-2456 / 1-2-456")
-    st.caption("評価1軸の三連複比較です。1-2-456は評価1・2固定寄りの3点型です。日次入力の3連複配当を使います。")
-
-    rows_3f = []
-    for label in SANRENPUKU_LABELS:
-        rows_3f.append(payout_row(label, payout_sanrenpuku_total[label]))
-    st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
-
-    st.markdown("### 2車複シミュレーション｜1-2 / 1-3 / 2-3 / 123BOX / 456-12分割")
-    st.caption("評価順位ベースの2車複です。456-12を1-4 / 1-5 / 1-6 / 2-4 / 2-5 / 2-6に分けて集計します。日次入力の2車複配当を使います。")
+    st.markdown("### 2車複シミュレーション｜1-2 / 1-3 / 5-1 / 5-2 / 5-3 / 5-4 / 5-6 / 5-7")
+    st.caption("評価順位ベースの2車複です。1-2・1-3と、評価5から1/2/3/4/6/7への絡みを分けて集計します。日次入力の2車複配当を使います。")
 
     rows_2f = []
     for a, b in NISHAFUKU_PAIRS:
         label = nishafuku_label(a, b)
         rows_2f.append(payout_row(label, payout_nishafuku_total[label]))
-    rows_2f.append(payout_row("2車複 123BOX", payout_nishafuku_total["2車複 123BOX"]))
     for a, b in NISHAFUKU_EXTRA_PAIRS:
         label = nishafuku_label(a, b)
         rows_2f.append(payout_row(label, payout_nishafuku_total[label]))
@@ -966,7 +809,5 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
-    st.write("2車単 個別回収：1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2")
-    st.write("2車複 123BOX：1-2 / 1-3 / 2-3")
-    st.write("2車複 456-12分割：1-4 / 1-5 / 1-6 / 2-4 / 2-5 / 2-6")
-    st.write("3連複：1-25-2456（5点） / 1-2-456（3点）")
+    st.write("2車単 個別回収：1→2 / 1→3")
+    st.write("2車複：1-2 / 1-3 / 1-5 / 2-5 / 3-5 / 4-5 / 5-6 / 5-7")
