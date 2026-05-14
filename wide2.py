@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車単1→23 ＋ 2車複5軸抽出 ＋ 3連複1235個別 v4.1｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車単1→23 ＋ 2車複5軸抽出 ＋ 3連複1235個別 ＋ 軸別3着分布 v4.2｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -96,6 +96,73 @@ def build_conditional_tables(pair_counts: Dict[PairKey, int]) -> tuple[pd.DataFr
             else:
                 v = int(pair_counts.get((wr, rr), 0))
                 row_p[str(rr)] = round(100.0 * v / total, 1) if total > 0 else 0.0
+        pct_rows.append(row_p)
+
+    return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
+
+
+def build_third_distribution_tables(
+    row_label: str,
+    counts: Dict[int, Dict[int, int]],
+    totals: Dict[int, int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    軸評価別・1着評価別などの3着評価分布テーブルを作る。
+    counts[row_key][third_rank] = count
+    totals[row_key] = denominator
+    """
+    cols = list(range(1, FIELD_SIZE + 1))
+    count_rows = []
+    pct_rows = []
+
+    for key in WINNER_RANKS:
+        total = int(totals.get(key, 0))
+
+        row_c = {row_label: key, "N": total}
+        row_p = {row_label: key, "N": total}
+
+        for rr in cols:
+            v = int(counts.get(key, {}).get(rr, 0))
+            row_c[str(rr)] = v
+            row_p[str(rr)] = round(100.0 * v / total, 1) if total > 0 else 0.0
+
+        count_rows.append(row_c)
+        pct_rows.append(row_p)
+
+    return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
+
+
+def build_pair_third_distribution_tables(
+    pairs: List[Tuple[int, int]],
+    counts: Dict[str, Dict[int, int]],
+    totals: Dict[str, int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    連対ペア別の3着評価分布テーブルを作る。
+    pairsは評価順位ベースの2車複ペア。
+    """
+    cols = list(range(1, FIELD_SIZE + 1))
+    count_rows = []
+    pct_rows = []
+
+    for a, b in pairs:
+        label = nishafuku_label(a, b)
+        total = int(totals.get(label, 0))
+
+        row_c = {"連対ペア": label, "N": total}
+        row_p = {"連対ペア": label, "N": total}
+
+        for rr in cols:
+            if rr in (a, b):
+                row_c[str(rr)] = None
+                row_p[str(rr)] = None
+                continue
+
+            v = int(counts.get(label, {}).get(rr, 0))
+            row_c[str(rr)] = v
+            row_p[str(rr)] = round(100.0 * v / total, 1) if total > 0 else 0.0
+
+        count_rows.append(row_c)
         pct_rows.append(row_p)
 
     return pd.DataFrame(count_rows), pd.DataFrame(pct_rows)
@@ -641,6 +708,52 @@ for k, v in pair12_daily.items():
 for k, v in pair12_manual.items():
     pair12_total[k] += int(v)
 
+# --- 3着分布（日次入力ベース） ---
+# 注：3着分布はレースごとの着順が必要なため、前日までの累積手入力は含めず、日次入力分だけで集計する。
+axis_third_counts_daily: Dict[int, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
+axis_third_totals_daily: Dict[int, int] = defaultdict(int)
+
+winner_third_counts_daily: Dict[int, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
+winner_third_totals_daily: Dict[int, int] = defaultdict(int)
+
+third_pairs = NISHAFUKU_PAIRS + NISHAFUKU_EXTRA_PAIRS
+pair_third_counts_daily: Dict[str, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
+pair_third_totals_daily: Dict[str, int] = defaultdict(int)
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    if len(finish) < 3 or not vorder:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+
+    r1 = car_to_rank.get(finish[0])
+    r2 = car_to_rank.get(finish[1])
+    r3 = car_to_rank.get(finish[2])
+
+    if r1 is None or r2 is None or r3 is None:
+        continue
+
+    r1, r2, r3 = int(r1), int(r2), int(r3)
+
+    # 1着評価別：3着分布
+    winner_third_totals_daily[r1] += 1
+    winner_third_counts_daily[r1][r3] += 1
+
+    # 軸評価別：軸が1〜2着に入った時の3着分布
+    for axis_rank in (r1, r2):
+        axis_third_totals_daily[axis_rank] += 1
+        axis_third_counts_daily[axis_rank][r3] += 1
+
+    # 連対ペア別：対象ペアが1〜2着に来た時の3着分布
+    pair_set = {r1, r2}
+    for a, b in third_pairs:
+        if pair_set == {a, b}:
+            label = nishafuku_label(a, b)
+            pair_third_totals_daily[label] += 1
+            pair_third_counts_daily[label][r3] += 1
+
 # --- 新回収率（日次） ---
 # 2車単：1→23
 payout_2t_pattern_daily: Dict[int, Dict[str, int]] = {
@@ -877,6 +990,38 @@ with tabs[2]:
 
     st.divider()
 
+    st.subheader("3着分布（日次入力ベース）｜軸・連対ペア別")
+    st.caption("3着分布はレースごとの1〜3着が必要なため、前日までの累積手入力は含めず、日次入力分だけで集計します。")
+
+    st.markdown("### 軸評価別 3着分布｜軸が1〜2着に入った時")
+    df_axis3_count, df_axis3_pct = build_third_distribution_tables(
+        "軸評価", axis_third_counts_daily, axis_third_totals_daily
+    )
+    st.markdown("#### 回数")
+    st.dataframe(df_axis3_count, use_container_width=True, hide_index=True)
+    st.markdown("#### 割合%")
+    st.dataframe(df_axis3_pct, use_container_width=True, hide_index=True)
+
+    st.markdown("### 1着評価別 3着分布")
+    df_winner3_count, df_winner3_pct = build_third_distribution_tables(
+        "1着の評価", winner_third_counts_daily, winner_third_totals_daily
+    )
+    st.markdown("#### 回数")
+    st.dataframe(df_winner3_count, use_container_width=True, hide_index=True)
+    st.markdown("#### 割合%")
+    st.dataframe(df_winner3_pct, use_container_width=True, hide_index=True)
+
+    st.markdown("### 連対ペア別 3着分布｜現2車複シミュレーション対象")
+    df_pair3_count, df_pair3_pct = build_pair_third_distribution_tables(
+        third_pairs, pair_third_counts_daily, pair_third_totals_daily
+    )
+    st.markdown("#### 回数")
+    st.dataframe(df_pair3_count, use_container_width=True, hide_index=True)
+    st.markdown("#### 割合%")
+    st.dataframe(df_pair3_pct, use_container_width=True, hide_index=True)
+
+    st.divider()
+
     st.subheader("評価別 入賞テーブル（全体累積）｜欠車対応")
     rows_out = []
     for r in range(1, 8):
@@ -935,3 +1080,4 @@ with tabs[2]:
     st.write("2車単 個別回収：1→2 / 1→3")
     st.write("2車複：1-2 / 1-3 / 1-5 / 2-5 / 3-5 / 4-5 / 5-6 / 5-7")
     st.write("3連複1235個別：1-2-3 / 1-2-5 / 1-3-5 / 2-3-5")
+    st.write("3着分布：軸評価別 / 1着評価別 / 連対ペア別（日次入力ベース）")
