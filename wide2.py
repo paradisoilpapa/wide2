@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収＋3連複 v3.8｜1→23＋3→12＋1-25-23456（7車固定・欠車対応）")
+st.title("ヴェロビ 復習（全体累積）｜1→2評価分布 ＋ 評価別入賞 ＋ 個別回収＋3連複 v3.8｜1→23＋3→12＋1-25-2456（7車固定・欠車対応）")
 
 # =========================
 # 基本設定（7車ベース）
@@ -23,11 +23,11 @@ AXIS3_TARGETS = (1, 2)
 # 2車複：評価1-2 / 1-3 / 2-3 / 123BOX
 NISHAFUKU_PAIRS = [(1, 2), (1, 3), (2, 3)]
 
-# 3連複：1-25-23456（評価順位ベース・7点）
-SANRENPUKU_LABEL = "3連複 1-25-23456"
+# 3連複：1-25-2456（評価順位ベース・5点）
+SANRENPUKU_LABEL = "3連複 1-25-2456"
 SANRENPUKU_AXIS = 1
 SANRENPUKU_SECOND = (2, 5)
-SANRENPUKU_THIRD = (2, 3, 4, 5, 6)
+SANRENPUKU_THIRD = (2, 4, 5, 6)
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -216,7 +216,7 @@ def hit_nishafuku_pair(a: int, b: int, win_rank: int, sec_rank: int, field_n: in
 
 def sanrenpuku_combos(field_n: int) -> List[Tuple[int, int, int]]:
     """
-    3連複：1-25-23456 の実買い目を重複なしで作る。
+    3連複：1-25-2456 の実買い目を重複なしで作る。
     欠車対応：存在する評価だけ採用。
     """
     combos = set()
@@ -236,7 +236,7 @@ def sanrenpuku_combos(field_n: int) -> List[Tuple[int, int, int]]:
 
 
 def ksum_sanrenpuku_123(field_n: int) -> int:
-    """3連複：1-25-23456 の点数。"""
+    """3連複：1-25-2456 の点数。"""
     return len(sanrenpuku_combos(field_n))
 
 
@@ -313,7 +313,7 @@ agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
 }
 agg_payout_nishafuku_manual["2車複 123BOX"] = new_payout_rec()
 
-# 前日まで：3連複 1-25-23456
+# 前日まで：3連複 1-25-2456
 agg_payout_sanrenpuku_manual: Dict[str, Dict[str, int]] = {
     SANRENPUKU_LABEL: new_payout_rec()
 }
@@ -515,8 +515,8 @@ with tabs[1]:
 
         st.divider()
 
-        st.markdown("## 3連複 1-25-23456 集計（累積・任意）")
-        st.caption("評価順位ベースの3連複です。1-25-23456だけを入力できます。不要なら0のままでOK。")
+        st.markdown("## 3連複 1-25-2456 集計（累積・任意）")
+        st.caption("評価順位ベースの3連複です。1-25-2456だけを入力できます。不要なら0のままでOK。")
 
         h7 = st.columns([2.4, 1, 1, 1, 1])
         h7[0].markdown("**型**")
@@ -785,7 +785,7 @@ for row in byrace_rows:
                 rec["SUM"] += pay_2f
 
 
-# --- 3連複 1-25-23456（日次） ---
+# --- 3連複 1-25-2456（日次） ---
 payout_sanrenpuku_daily: Dict[str, Dict[str, int]] = {
     SANRENPUKU_LABEL: new_payout_rec()
 }
@@ -906,8 +906,8 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_individual), use_container_width=True, hide_index=True)
 
-    st.markdown("### 3連複シミュレーション｜1-25-23456")
-    st.caption("評価1を軸に、相手を25・23456で見る7点型です。日次入力の3連複配当を使います。")
+    st.markdown("### 3連複シミュレーション｜1-25-2456")
+    st.caption("評価1を軸に、相手を25・23456で見る5点型です。日次入力の3連複配当を使います。")
 
     rows_3f = [payout_row(SANRENPUKU_LABEL, payout_sanrenpuku_total[SANRENPUKU_LABEL])]
     st.dataframe(pd.DataFrame(rows_3f), use_container_width=True, hide_index=True)
@@ -926,4 +926,4 @@ with tabs[2]:
     st.markdown("### 買い目確認")
     st.write("2車単 個別回収：1→2 / 1→3 / 2→1 / 2→3 / 3→1 / 3→2")
     st.write("2車複 123BOX：1-2 / 1-3 / 2-3")
-    st.write("3連複：1-25-23456（7点）")
+    st.write("3連複：1-25-2456（5点）")
