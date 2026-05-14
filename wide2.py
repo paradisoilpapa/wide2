@@ -228,6 +228,39 @@ def hit_nishafuku_pair(a: int, b: int, win_rank: int, sec_rank: int, field_n: in
     return {win_rank, sec_rank} == {a, b}
 
 
+def sanrenpuku_combos(label: str, field_n: int) -> List[Tuple[int, int, int]]:
+    """
+    3連複の実買い目を重複なしで作る。
+    欠車対応：存在する評価だけ採用。
+    """
+    pattern = SANRENPUKU_PATTERNS[label]
+    combos = set()
+
+    for a in pattern["first"]:
+        for b in pattern["second"]:
+            for c in pattern["third"]:
+                if a > field_n or b > field_n or c > field_n:
+                    continue
+                if len({a, b, c}) != 3:
+                    continue
+                combos.add(tuple(sorted((a, b, c))))
+
+    return sorted(combos)
+
+
+def ksum_sanrenpuku(label: str, field_n: int) -> int:
+    """3連複の点数。"""
+    return len(sanrenpuku_combos(label, field_n))
+
+
+def hit_sanrenpuku(label: str, finish_ranks: List[int], field_n: int) -> bool:
+    """3連複：実際の1〜3着評価順位が買い目内なら的中。順不同。"""
+    if len(finish_ranks) < 3:
+        return False
+    target = tuple(sorted(finish_ranks[:3]))
+    return target in sanrenpuku_combos(label, field_n)
+
+
 def payout_row(label: str, rec: Dict[str, int]) -> Dict:
     N = int(rec["N"])
     KSUM = int(rec["KSUM"])
