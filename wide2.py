@@ -524,8 +524,8 @@ with tabs[1]:
 
         st.divider()
 
-        st.markdown("## 3連複 1-25-2456 集計（累積・任意）")
-        st.caption("評価順位ベースの3連複です。1-25-2456だけを入力できます。不要なら0のままでOK。")
+        st.markdown("## 3連複シミュレーション集計（累積・任意）")
+        st.caption("評価順位ベースの3連複です。1-25-2456 / 12-125-2456を入力できます。不要なら0のままでOK。")
 
         h7 = st.columns([2.4, 1, 1, 1, 1])
         h7[0].markdown("**型**")
@@ -535,13 +535,15 @@ with tabs[1]:
         h7[4].markdown("**H**")
 
         sanrenpuku_inputs = []
-        c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
-        c0.write(SANRENPUKU_LABEL)
-        N = c1.number_input("", key="prev_3f_123_N", min_value=0, value=0)
-        KSUM = c2.number_input("", key="prev_3f_123_KSUM", min_value=0, value=0)
-        SUM = c3.number_input("", key="prev_3f_123_SUM", min_value=0, value=0, step=10)
-        H = c4.number_input("", key="prev_3f_123_H", min_value=0, value=0)
-        sanrenpuku_inputs.append((SANRENPUKU_LABEL, int(N), int(KSUM), int(SUM), int(H)))
+        for label in SANRENPUKU_LABELS:
+            safe_key = label.replace(" ", "_").replace("-", "_")
+            c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
+            c0.write(label)
+            N = c1.number_input("", key=f"prev_3f_{safe_key}_N", min_value=0, value=0)
+            KSUM = c2.number_input("", key=f"prev_3f_{safe_key}_KSUM", min_value=0, value=0)
+            SUM = c3.number_input("", key=f"prev_3f_{safe_key}_SUM", min_value=0, value=0, step=10)
+            H = c4.number_input("", key=f"prev_3f_{safe_key}_H", min_value=0, value=0)
+            sanrenpuku_inputs.append((label, int(N), int(KSUM), int(SUM), int(H)))
 
         st.form_submit_button("前日までの集計を反映")
 
