@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 標準棚/穴棚 グループ別☆候補 v5.6｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜標準棚/穴棚＋最終軸候補 v5.7｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -313,6 +313,27 @@ def payout_row_with_expected_set_hit(label: str, rec: Dict[str, int], labels: Li
         row["想定との差"] = None
 
     return row
+
+
+def expected_pair_hit_rate_from_pair12(a: int, b: int, pair12_counts: Dict[PairKey, int]) -> float | None:
+    """1→2着評価分布から、評価a-bの2車複想定的中率を出す。順不同。"""
+    total = sum(int(v) for v in pair12_counts.values())
+    if total <= 0:
+        return None
+    hit = int(pair12_counts.get((a, b), 0)) + int(pair12_counts.get((b, a), 0))
+    return round(100.0 * hit / total, 1)
+
+
+def diff_status(diff) -> str:
+    """想定との差の状態をざっくり表示。"""
+    if diff is None:
+        return ""
+    if diff >= 10:
+        return "当たりすぎ"
+    if diff <= -10:
+        return "当たらなすぎ"
+    return "中庸"
+
 
 
 # =========================
@@ -887,6 +908,123 @@ with tabs[2]:
     ]
     df_sim = df_sim[[c for c in preferred_cols if c in df_sim.columns]]
     st.dataframe(df_sim, use_container_width=True, hide_index=True)
+
+    st.markdown("### 最終軸候補｜標準棚＋穴棚 合成")
+    st.caption("同じ軸の標準棚と穴棚を合成し、ズレが一番小さい軸を☆候補にします。軸別安定度＝|標準差|＋|穴差|。")
+
+    # 軸ごとに標準棚・穴棚をまとめる
+    axis_defs = {
+        1: ("標準 1-234", "穴 1-567"),
+        2: ("標準 2-134", "穴 2-567"),
+        3: ("標準 3-124", "穴 3-567"),
+    }
+
+    axis_rows = []
+    for axis, (std_label, hole_label) in axis_defs.items():
+        std_row = df_sim[df_sim["型"] == std_label]
+        hole_row = df_sim[df_sim["型"] == hole_label]
+
+        std_diff = None
+        hole_diff = None
+        std_roi = None
+        hole_roi = None
+
+        if not std_row.empty:
+            std_diff = std_row.iloc[0].get("想定との差")
+            std_roi = std_row.iloc[0].get("回収率%")
+        if not hole_row.empty:
+            hole_diff = hole_row.iloc[0].get("想定との差")
+            hole_roi = hole_row.iloc[0].get("回収率%")
+
+        if pd.notna(std_diff) and pd.notna(hole_diff):
+            stability = round(abs(float(std_diff)) + abs(float(hole_diff)), 1)
+        else:
+            stability = None
+
+        axis_rows.append(
+            {
+                "軸": f"評価{axis}",
+                "標準型": std_label,
+                "標準差": std_diff,
+                "標準回収率%": std_roi,
+                "穴型": hole_label,
+                "穴差": hole_diff,
+                "穴回収率%": hole_roi,
+                "軸別安定度": stability,
+                "最終軸候補": "",
+            }
+        )
+
+    df_axis = pd.DataFrame(axis_rows)
+
+    final_axis = None
+    if not df_axis.empty and df_axis["軸別安定度"].notna().any():
+        idx_final = df_axis["軸別安定度"].idxmin()
+        df_axis.loc[idx_final, "最終軸候補"] = "☆"
+        final_axis = int(str(df_axis.loc[idx_final, "軸"]).replace("評価", ""))
+
+    st.dataframe(df_axis, use_container_width=True, hide_index=True)
+
+    if final_axis is not None:
+        st.markdown("### 最終相手候補｜軸別ペア比較")
+        st.caption("最終軸と各評価の2車複を比較し、想定との差が0に近い相手3車を候補にします。")
+
+        pair_rows = []
+        for opp in range(1, 8):
+            if opp == final_axis:
+                continue
+
+            a, b = sorted((final_axis, opp))
+            label = nishafuku_label(a, b)
+            rec = payout_nishafuku_total.get(label, new_payout_rec())
+            row = payout_row(label, rec)
+
+            expected_pair = expected_pair_hit_rate_from_pair12(final_axis, opp, pair12_total)
+            row["軸"] = f"評価{final_axis}"
+            row["相手"] = opp
+            row["想定ペア的中率%"] = expected_pair
+
+            if row["的中率%"] is not None and expected_pair is not None:
+                diff = round(row["的中率%"] - expected_pair, 1)
+            else:
+                diff = None
+
+            row["想定との差"] = diff
+            row["状態"] = diff_status(diff)
+            row["相手候補"] = ""
+            pair_rows.append(row)
+
+        df_pairs = pd.DataFrame(pair_rows)
+
+        # 相手候補：想定との差が0に近い3車
+        if not df_pairs.empty and df_pairs["想定との差"].notna().any():
+            df_pairs["_absdiff"] = df_pairs["想定との差"].abs()
+            df_pairs = df_pairs.sort_values(["_absdiff", "想定ペア的中率%", "相手"], ascending=[True, False, True])
+            candidate_idx = df_pairs.head(3).index
+            df_pairs.loc[candidate_idx, "相手候補"] = "☆"
+            recommended_opps = sorted([int(x) for x in df_pairs.loc[candidate_idx, "相手"].tolist()])
+            recommended_text = "".join(str(x) for x in recommended_opps)
+            st.success(f"本日の推奨セット候補：評価{final_axis}-{recommended_text}")
+            df_pairs = df_pairs.drop(columns=["_absdiff"])
+        else:
+            st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
+
+        preferred_pair_cols = [
+            "相手候補",
+            "軸",
+            "相手",
+            "型",
+            "対象N",
+            "的中H（配当あり）",
+            "的中率%",
+            "想定ペア的中率%",
+            "想定との差",
+            "状態",
+            "平均配当",
+            "回収率%",
+        ]
+        df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
+        st.dataframe(df_pairs, use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
     st.write("今日入力の個別2車複：標準棚＋穴棚に必要なペアを自動集計")
