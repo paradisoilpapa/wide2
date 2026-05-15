@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.0｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.1｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -442,31 +442,11 @@ with tabs[1]:
         # 必要な確認は下の「個別回収」で行う。
         payout_inputs = []
 
-        st.markdown("## 個別回収（累積・任意）")
-        st.caption("1→23の内訳確認用です。1→2 / 1→3だけを個別に入力できます。不要なら0のままでOK。")
-
-        h5 = st.columns([2.4, 1, 1, 1, 1])
-        h5[0].markdown("**型**")
-        h5[1].markdown("**対象N**")
-        h5[2].markdown("**KSUM**")
-        h5[3].markdown("**SUM**")
-        h5[4].markdown("**H**")
-
-        axis_target_inputs = []
-        individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
-        for axis, target in individual_pairs:
-            c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
-            c0.write(pair_target_label(axis, target))
-            N = c1.number_input("", key=f"prev_{axis}to_{target}_N", min_value=0, value=0)
-            KSUM = c2.number_input("", key=f"prev_{axis}to_{target}_KSUM", min_value=0, value=0)
-            SUM = c3.number_input("", key=f"prev_{axis}to_{target}_SUM", min_value=0, value=0, step=10)
-            H = c4.number_input("", key=f"prev_{axis}to_{target}_H", min_value=0, value=0)
-            axis_target_inputs.append((axis, target, int(N), int(KSUM), int(SUM), int(H)))
 
         st.divider()
 
-        st.markdown("## 2車複シミュレーション集計（累積・任意）")
-        st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4を入力できます。不要なら0のままでOK。")
+        st.markdown("## 2車複シミュレーター用 前日集計（累積・任意）")
+        st.caption("1-234 / 2-134 / 3-124 の判定に使う6本だけ入力します。1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4。不要なら0のままでOK。")
 
         h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
