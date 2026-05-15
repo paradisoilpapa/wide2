@@ -260,15 +260,15 @@ agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
 
 # 前日まで：個別回収（任意入力）
 # 1→2 / 1→3 / 1→5 / 2→5 / 5→1 / 5→2
+MANUAL_AXIS_TARGET_PAIRS = (
+    [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
+    + [(2, target) for target in AXIS2_TARGETS]
+    + [(5, target) for target in AXIS5_TARGETS]
+)
+
 agg_payout_axis_target_manual: Dict[Tuple[int, int], Dict[str, int]] = {
-    (1, target): new_payout_rec() for target in INDIVIDUAL_AXIS1_TARGETS
+    pair: new_payout_rec() for pair in MANUAL_AXIS_TARGET_PAIRS
 }
-agg_payout_axis_target_manual.update({
-    (2, target): new_payout_rec() for target in AXIS2_TARGETS
-})
-agg_payout_axis_target_manual.update({
-    (3, target): new_payout_rec() for target in AXIS3_TARGETS
-})
 
 # 前日まで：2車複 1-23 + 5-12
 agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
@@ -435,7 +435,7 @@ with tabs[1]:
         h5[4].markdown("**H**")
 
         axis_target_inputs = []
-        individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS] + [(5, target) for target in AXIS5_TARGETS]
+        individual_pairs = MANUAL_AXIS_TARGET_PAIRS
         for axis, target in individual_pairs:
             c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
             c0.write(pair_target_label(axis, target))
@@ -616,7 +616,7 @@ for row in byrace_rows:
 
 # --- 個別（日次） ---
 # 2車単：1→2 / 1→3 / 1→5 / 2→5 / 5→1 / 5→2
-INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS] + [(2, target) for target in AXIS2_TARGETS] + [(5, target) for target in AXIS5_TARGETS]
+INDIVIDUAL_PAIRS = MANUAL_AXIS_TARGET_PAIRS
 payout_axis_target_daily: Dict[Tuple[int, int], Dict[str, int]] = {
     pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
 }
