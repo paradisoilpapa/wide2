@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜標準棚/穴棚＋最終軸候補 v5.7｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜標準棚/穴棚＋最終軸候補 v5.8｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -324,8 +324,10 @@ def expected_pair_hit_rate_from_pair12(a: int, b: int, pair12_counts: Dict[PairK
     return round(100.0 * hit / total, 1)
 
 
-def diff_status(diff) -> str:
-    """想定との差の状態をざっくり表示。"""
+def diff_status(diff, expected=None) -> str:
+    """想定との差の状態をざっくり表示。想定0%は候補対象外。"""
+    if expected is not None and expected == 0:
+        return "対象外"
     if diff is None:
         return ""
     if diff >= 10:
@@ -990,21 +992,37 @@ with tabs[2]:
                 diff = None
 
             row["想定との差"] = diff
-            row["状態"] = diff_status(diff)
+            row["状態"] = diff_status(diff, expected_pair)
             row["相手候補"] = ""
             pair_rows.append(row)
 
         df_pairs = pd.DataFrame(pair_rows)
 
-        # 相手候補：想定との差が0に近い3車
+        # 相手候補：
+        # 想定ペア的中率0%は候補対象外。
+        # そのうえで、想定との差が0に近い3車を候補にする。
         if not df_pairs.empty and df_pairs["想定との差"].notna().any():
             df_pairs["_absdiff"] = df_pairs["想定との差"].abs()
-            df_pairs = df_pairs.sort_values(["_absdiff", "想定ペア的中率%", "相手"], ascending=[True, False, True])
-            candidate_idx = df_pairs.head(3).index
-            df_pairs.loc[candidate_idx, "相手候補"] = "☆"
-            recommended_opps = sorted([int(x) for x in df_pairs.loc[candidate_idx, "相手"].tolist()])
-            recommended_text = "".join(str(x) for x in recommended_opps)
-            st.success(f"本日の推奨セット候補：評価{final_axis}-{recommended_text}")
+
+            candidate_mask = (
+                df_pairs["想定との差"].notna()
+                & df_pairs["想定ペア的中率%"].notna()
+                & (df_pairs["想定ペア的中率%"] > 0)
+            )
+
+            if candidate_mask.any():
+                candidate_df = df_pairs.loc[candidate_mask].sort_values(
+                    ["_absdiff", "想定ペア的中率%", "相手"],
+                    ascending=[True, False, True],
+                )
+                candidate_idx = candidate_df.head(3).index
+                df_pairs.loc[candidate_idx, "相手候補"] = "☆"
+                recommended_opps = sorted([int(x) for x in df_pairs.loc[candidate_idx, "相手"].tolist()])
+                recommended_text = "".join(str(x) for x in recommended_opps)
+                st.success(f"本日の推奨セット候補：評価{final_axis}-{recommended_text}")
+            else:
+                st.info("候補対象となる相手がありません。想定ペア的中率0%の組み合わせは除外しています。")
+
             df_pairs = df_pairs.drop(columns=["_absdiff"])
         else:
             st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
