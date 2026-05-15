@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車単1→23 ＋ 2車複 1-234/2-134/3-124 v4.8｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.0｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -239,6 +239,25 @@ def payout_row(label: str, rec: Dict[str, int]) -> Dict:
 def rec_for_labels(source: Dict[str, Dict[str, int]], labels: List[str]) -> Dict[str, int]:
     """指定ラベル群の合算レコード。Nは最大N、KSUM/H/SUMは合算。"""
     return combine_recs([source[label] for label in labels if label in source])
+
+
+def payout_row_with_axis_rentai(label: str, rec: Dict[str, int], axis_rank: int, rank_total_map: Dict[int, Dict[str, int]]) -> Dict:
+    """軸評価の連対率と、セット実的中率との差を併記した行。"""
+    row = payout_row(label, rec)
+
+    axis_rec = rank_total_map.get(axis_rank, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+    axis_n = int(axis_rec.get("N", 0))
+    axis_rentai = rate(int(axis_rec.get("C1", 0)) + int(axis_rec.get("C2", 0)), axis_n)
+
+    row["軸評価"] = f"評価{axis_rank}"
+    row["軸連対率%"] = axis_rentai
+
+    if row["的中率%"] is not None and axis_rentai is not None:
+        row["軸連対率との差"] = round(row["的中率%"] - axis_rentai, 1)
+    else:
+        row["軸連対率との差"] = None
+
+    return row
 
 
 # =========================
@@ -787,33 +806,8 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
 
     st.divider()
-
-    st.markdown("### 個別回収｜2車単 1→2 / 1→3")
-    st.caption("2車単1→23だけを表示します。どの目が回収を支えているかを見るための表です。")
-
-    rows_individual = []
-    for axis, target in INDIVIDUAL_PAIRS:
-        rows_individual.append(
-            payout_row(pair_target_label(axis, target), payout_axis_target_total[(axis, target)])
-        )
-
-    st.dataframe(pd.DataFrame(rows_individual), use_container_width=True, hide_index=True)
-
-    st.markdown("### 2車複シミュレーション｜1-234 / 2-134 / 3-124")
-    st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4を個別に集計します。日次入力の2車複配当を使います。")
-
-    rows_2f = []
-    for a, b in NISHAFUKU_PAIRS:
-        label = nishafuku_label(a, b)
-        rows_2f.append(payout_row(label, payout_nishafuku_total[label]))
-    for a, b in NISHAFUKU_EXTRA_PAIRS:
-        label = nishafuku_label(a, b)
-        rows_2f.append(payout_row(label, payout_nishafuku_total[label]))
-
-    st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
-
     st.markdown("### 2車複シミュレーター｜1-234 / 2-134 / 3-124")
-    st.caption("個別2車複を3本セットで合算します。Nは最大N、KSUM/H/SUMは合算です。")
+    st.caption("個別2車複を3本セットで合算し、軸評価1/2/3の連対率との差を表示します。差がマイナスに大きい軸ほど、軸連対率に対して下振れしている候補として見ます。")
 
     sim_sets_2f = {
         "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
@@ -821,12 +815,45 @@ with tabs[2]:
         "2車複 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
     }
 
+    axis_map_2f = {
+        "2車複 1-234": 1,
+        "2車複 2-134": 2,
+        "2車複 3-124": 3,
+    }
+
     rows_2f_sim = []
     for set_label, labels in sim_sets_2f.items():
-        rows_2f_sim.append(payout_row(set_label, rec_for_labels(payout_nishafuku_total, labels)))
-    st.dataframe(pd.DataFrame(rows_2f_sim), use_container_width=True, hide_index=True)
+        axis_rank = axis_map_2f[set_label]
+        rows_2f_sim.append(
+            payout_row_with_axis_rentai(
+                set_label,
+                rec_for_labels(payout_nishafuku_total, labels),
+                axis_rank,
+                rank_total,
+            )
+        )
+
+    df_sim = pd.DataFrame(rows_2f_sim)
+
+    # 見やすい列順に整理
+    preferred_cols = [
+        "型",
+        "軸評価",
+        "対象N",
+        "総点数KSUM",
+        "投資額換算",
+        "払戻合計SUM",
+        "的中H（配当あり）",
+        "的中率%",
+        "軸連対率%",
+        "軸連対率との差",
+        "平均配当",
+        "回収率%",
+        "判定",
+    ]
+    df_sim = df_sim[[c for c in preferred_cols if c in df_sim.columns]]
+    st.dataframe(df_sim, use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
-    st.write("2車単 個別回収：1→2 / 1→3")
     st.write("2車複 個別：1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4")
-    st.write("2車複シミュレーター：1-234 / 2-134 / 3-124")
+    st.write("2車複シミュレーター：1-234 / 2-134 / 3-124（軸連対率との差つき）")
