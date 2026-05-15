@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複1-全＋1-23＋5-12 ＋ 2車単5絡み v4.5｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車単1→23 ＋ 2車複1-23/12-5 ＋ 2車複セットTOTAL v4.6｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -16,14 +16,12 @@ FIELD_SIZE = 7
 WINNER_RANKS = tuple(range(1, 8))
 PATTERN_AXES = (1,)
 AXIS1_TARGETS = (2, 3)
-INDIVIDUAL_AXIS1_TARGETS = (2, 3, 5)
-AXIS2_TARGETS = (5,)
+INDIVIDUAL_AXIS1_TARGETS = (2, 3)
+AXIS2_TARGETS = ()
 AXIS3_TARGETS = ()
-AXIS5_TARGETS = (1, 2)
 
-# 2車複：1-全 + 5-12
-# 個別表示：1-2 / 1-3 / 1-4 / 1-5 / 1-6 / 1-7 / 2-5
-NISHAFUKU_PAIRS = [(1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (2, 5)]
+# 2車複：1-23 + 5-12（1-2 / 1-3 / 1-5 / 2-5）
+NISHAFUKU_PAIRS = [(1, 2), (1, 3), (1, 5), (2, 5)]
 NISHAFUKU_EXTRA_PAIRS = []
 
 RANK_SYMBOLS = {
@@ -265,18 +263,12 @@ agg_payout_2t_pattern_manual: Dict[int, Dict[str, int]] = {
 }
 
 # 前日まで：個別回収（任意入力）
-# 1→2 / 1→3 / 1→5 / 2→5 / 5→1 / 5→2
-MANUAL_AXIS_TARGET_PAIRS = (
-    [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
-    + [(2, target) for target in AXIS2_TARGETS]
-    + [(5, target) for target in AXIS5_TARGETS]
-)
-
+# 1→2 / 1→3
 agg_payout_axis_target_manual: Dict[Tuple[int, int], Dict[str, int]] = {
-    pair: new_payout_rec() for pair in MANUAL_AXIS_TARGET_PAIRS
+    (1, target): new_payout_rec() for target in INDIVIDUAL_AXIS1_TARGETS
 }
 
-# 前日まで：2車複 1-全 + 5-12
+# 前日まで：2車複 1-23 + 5-12
 agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
     nishafuku_label(a, b): new_payout_rec() for a, b in NISHAFUKU_PAIRS
 }
@@ -431,7 +423,7 @@ with tabs[1]:
         payout_inputs = []
 
         st.markdown("## 個別回収（累積・任意）")
-        st.caption("1→23に加えて、1→5 / 2→5 / 5→1 / 5→2を個別に入力できます。不要なら0のままでOK。")
+        st.caption("1→23の内訳確認用です。1→2 / 1→3だけを個別に入力できます。不要なら0のままでOK。")
 
         h5 = st.columns([2.4, 1, 1, 1, 1])
         h5[0].markdown("**型**")
@@ -441,7 +433,7 @@ with tabs[1]:
         h5[4].markdown("**H**")
 
         axis_target_inputs = []
-        individual_pairs = MANUAL_AXIS_TARGET_PAIRS
+        individual_pairs = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
         for axis, target in individual_pairs:
             c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
             c0.write(pair_target_label(axis, target))
@@ -454,7 +446,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 2車複シミュレーション集計（累積・任意）")
-        st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-4 / 1-5 / 1-6 / 1-7 / 2-5を入力できます。不要なら0のままでOK。")
+        st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-5 / 2-5を入力できます。不要なら0のままでOK。")
 
         h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
@@ -621,8 +613,8 @@ for row in byrace_rows:
                 rec["SUM"] += pay_2t
 
 # --- 個別（日次） ---
-# 2車単：1→2 / 1→3 / 1→5 / 2→5 / 5→1 / 5→2
-INDIVIDUAL_PAIRS = MANUAL_AXIS_TARGET_PAIRS
+# 2車単：1→2 / 1→3
+INDIVIDUAL_PAIRS = [(1, target) for target in INDIVIDUAL_AXIS1_TARGETS]
 payout_axis_target_daily: Dict[Tuple[int, int], Dict[str, int]] = {
     pair: new_payout_rec() for pair in INDIVIDUAL_PAIRS
 }
@@ -757,20 +749,12 @@ for label in payout_nishafuku_total.keys():
 
 
 # =========================
-# セットTOTAL定義
+# 2車複セットTOTAL定義
 # =========================
-NISHA_TAN_SET_LABELS = {
-    "2車単 TOTAL": [(1, 2), (1, 3), (1, 5), (2, 5), (5, 1), (5, 2)],
-    "2車単 1→23set": [(1, 2), (1, 3)],
-    "2車単 12→5set": [(1, 5), (2, 5)],
-    "2車単 5→12set": [(5, 1), (5, 2)],
-}
-
 NISHA_FUKU_SET_LABELS = {
-    "2車複 TOTAL": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4), nishafuku_label(1, 5), nishafuku_label(1, 6), nishafuku_label(1, 7), nishafuku_label(2, 5)],
-    "2車複 1-全set": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4), nishafuku_label(1, 5), nishafuku_label(1, 6), nishafuku_label(1, 7)],
+    "2車複 TOTAL": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 5), nishafuku_label(2, 5)],
     "2車複 1-23set": [nishafuku_label(1, 2), nishafuku_label(1, 3)],
-    "2車複 5-12set": [nishafuku_label(1, 5), nishafuku_label(2, 5)],
+    "2車複 12-5set": [nishafuku_label(1, 5), nishafuku_label(2, 5)],
 }
 
 
@@ -812,8 +796,8 @@ with tabs[2]:
 
     st.divider()
 
-    st.markdown("### 個別回収｜2車単 1→2 / 1→3 / 1→5 / 2→5 / 5→1 / 5→2")
-    st.caption("2車単1→23に、1→5 / 2→5 / 5→1 / 5→2を加えて表示します。どの目が回収を支えているかを見るための表です。")
+    st.markdown("### 個別回収｜2車単 1→2 / 1→3")
+    st.caption("2車単1→23だけを表示します。どの目が回収を支えているかを見るための表です。")
 
     rows_individual = []
     for axis, target in INDIVIDUAL_PAIRS:
@@ -823,22 +807,8 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_individual), use_container_width=True, hide_index=True)
 
-    st.markdown("### 2車単セットTOTAL｜TOTAL / 1→23set / 12→5set / 5→12set")
-    st.caption("個別2車単をセット別に合算します。Nは最大N、KSUM/H/SUMは合算です。")
-
-    source_2t = {
-        pair_target_label(axis, target): payout_axis_target_total[(axis, target)]
-        for axis, target in payout_axis_target_total.keys()
-    }
-
-    rows_2t_sets = []
-    for set_label, pairs in NISHA_TAN_SET_LABELS.items():
-        labels = [pair_target_label(axis, target) for axis, target in pairs]
-        rows_2t_sets.append(payout_row(set_label, rec_for_labels(source_2t, labels)))
-    st.dataframe(pd.DataFrame(rows_2t_sets), use_container_width=True, hide_index=True)
-
-    st.markdown("### 2車複シミュレーション｜1-全 ＋ 5-12")
-    st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-4 / 1-5 / 1-6 / 1-7 / 2-5を分けて集計します。日次入力の2車複配当を使います。")
+    st.markdown("### 2車複シミュレーション｜1-23 ＋ 5-12")
+    st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-5 / 2-5を分けて集計します。日次入力の2車複配当を使います。")
 
     rows_2f = []
     for a, b in NISHAFUKU_PAIRS:
@@ -850,7 +820,7 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
-    st.markdown("### 2車複セットTOTAL｜TOTAL / 1-全set / 1-23set / 5-12set")
+    st.markdown("### 2車複セットTOTAL｜TOTAL / 1-23set / 12-5set")
     st.caption("個別2車複をセット別に合算します。Nは最大N、KSUM/H/SUMは合算です。")
 
     rows_2f_sets = []
@@ -859,7 +829,6 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_2f_sets), use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
-    st.write("2車単 個別回収：1→2 / 1→3 / 1→5 / 2→5 / 5→1 / 5→2")
-    st.write("2車単セットTOTAL：TOTAL / 1→23set / 12→5set / 5→12set")
-    st.write("2車複：1-2 / 1-3 / 1-4 / 1-5 / 1-6 / 1-7 / 2-5")
-    st.write("2車複セットTOTAL：TOTAL / 1-全set / 1-23set / 5-12set")
+    st.write("2車単 個別回収：1→2 / 1→3")
+    st.write("2車複：1-2 / 1-3 / 1-5 / 2-5")
+    st.write("2車複セットTOTAL：TOTAL / 1-23set / 12-5set")
