@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 標準棚/穴棚 想定セット的中率差 v5.4｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 標準棚/穴棚 想定セット的中率差 v5.5｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -262,7 +262,7 @@ def payout_row(label: str, rec: Dict[str, int]) -> Dict:
         "的中率%": hit_rate,
         "平均配当": avg_pay,
         "回収率%": roi,
-        "判定": "◎" if (roi is not None and roi >= 100.0) else "",
+        "判定": "",
     }
 
 
@@ -832,7 +832,7 @@ with tabs[2]:
 
     st.divider()
     st.markdown("### 2車複シミュレーター｜標準棚 / 穴棚")
-    st.caption("前日までのセット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。標準棚と穴棚は別商品として見ます。")
+    st.caption("前日までのセット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。判定☆は、想定との差が最も0に近い候補です。")
 
     sim_sets_2f = NISHAFUKU_SET_DEFS
 
@@ -850,6 +850,16 @@ with tabs[2]:
         rows_2f_sim.append(row)
 
     df_sim = pd.DataFrame(rows_2f_sim)
+
+    # 候補判定：
+    # 回収率100%以上ではなく、想定との差が0に一番近い行を☆候補にする。
+    # サンプルがない行、想定との差がNoneの行は対象外。
+    if not df_sim.empty and "想定との差" in df_sim.columns:
+        df_sim["判定"] = ""
+        valid_mask = df_sim["想定との差"].notna()
+        if valid_mask.any():
+            idx_star = df_sim.loc[valid_mask, "想定との差"].abs().idxmin()
+            df_sim.loc[idx_star, "判定"] = "☆"
 
     # 見やすい列順に整理
     preferred_cols = [
