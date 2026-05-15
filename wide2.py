@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 想定セット的中率差 v5.3｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 標準棚/穴棚 想定セット的中率差 v5.4｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -20,9 +20,21 @@ INDIVIDUAL_AXIS1_TARGETS = (2, 3)
 AXIS2_TARGETS = ()
 AXIS3_TARGETS = ()
 
-# 2車複：1-234 / 2-134 / 3-124 検証
-# 個別表示：1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4
-NISHAFUKU_PAIRS = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]
+# 2車複：標準棚 + 穴棚
+# 標準棚：1-234 / 2-134 / 3-124
+# 穴棚：  1-567 / 2-567 / 3-567
+# 日次入力ではここに定義した個別ペアを自動集計します。
+NISHAFUKU_PAIRS = [
+    # 標準棚に必要なペア
+    (1, 2), (1, 3), (1, 4),
+    (2, 3), (2, 4),
+    (3, 4),
+
+    # 穴棚に必要なペア
+    (1, 5), (1, 6), (1, 7),
+    (2, 5), (2, 6), (2, 7),
+    (3, 5), (3, 6), (3, 7),
+]
 NISHAFUKU_EXTRA_PAIRS = []
 
 
@@ -194,9 +206,15 @@ def nishafuku_label(a: int, b: int) -> str:
 
 
 NISHAFUKU_SET_DEFS = {
-    "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
-    "2車複 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
-    "2車複 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
+    # 標準棚
+    "標準 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
+    "標準 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
+    "標準 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
+
+    # 穴棚
+    "穴 1-567": [nishafuku_label(1, 5), nishafuku_label(1, 6), nishafuku_label(1, 7)],
+    "穴 2-567": [nishafuku_label(2, 5), nishafuku_label(2, 6), nishafuku_label(2, 7)],
+    "穴 3-567": [nishafuku_label(3, 5), nishafuku_label(3, 6), nishafuku_label(3, 7)],
 }
 
 agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
@@ -482,7 +500,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 2車複シミュレーター用 前日集計（累積・任意）")
-        st.caption("出力シミュレーターと同じ3セットだけ入力します。1-234 / 2-134 / 3-124。不要なら0のままでOK。")
+        st.caption("出力シミュレーターと同じセットを入力します。標準棚：1-234 / 2-134 / 3-124、穴棚：1-567 / 2-567 / 3-567。不要なら0のままでOK。")
 
         h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
@@ -813,32 +831,29 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
 
     st.divider()
-    st.markdown("### 2車複シミュレーター｜1-234 / 2-134 / 3-124")
-    st.caption("前日までの3セット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。")
+    st.markdown("### 2車複シミュレーター｜標準棚 / 穴棚")
+    st.caption("前日までのセット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。標準棚と穴棚は別商品として見ます。")
 
-    sim_sets_2f = {
-        "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
-        "2車複 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
-        "2車複 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
-    }
+    sim_sets_2f = NISHAFUKU_SET_DEFS
 
     rows_2f_sim = []
     for set_label, labels in sim_sets_2f.items():
         today_set_rec = rec_for_labels(payout_nishafuku_total, labels)
         total_set_rec = combine_recs([agg_payout_nishafuku_set_manual[set_label], today_set_rec])
-        rows_2f_sim.append(
-            payout_row_with_expected_set_hit(
-                set_label,
-                total_set_rec,
-                labels,
-                pair12_total,
-            )
+        row = payout_row_with_expected_set_hit(
+            set_label,
+            total_set_rec,
+            labels,
+            pair12_total,
         )
+        row["棚"] = "穴" if set_label.startswith("穴") else "標準"
+        rows_2f_sim.append(row)
 
     df_sim = pd.DataFrame(rows_2f_sim)
 
     # 見やすい列順に整理
     preferred_cols = [
+        "棚",
         "型",
         "対象N",
         "総点数KSUM",
@@ -856,5 +871,5 @@ with tabs[2]:
     st.dataframe(df_sim, use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
-    st.write("今日入力の個別2車複：1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4")
-    st.write("前日集計入力・出力シミュレーター：1-234 / 2-134 / 3-124")
+    st.write("今日入力の個別2車複：標準棚＋穴棚に必要なペアを自動集計")
+    st.write("前日集計入力・出力シミュレーター：標準 1-234 / 2-134 / 3-124、穴 1-567 / 2-567 / 3-567")
