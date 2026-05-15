@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.1｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.2｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -24,6 +24,17 @@ AXIS3_TARGETS = ()
 # 個別表示：1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4
 NISHAFUKU_PAIRS = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]
 NISHAFUKU_EXTRA_PAIRS = []
+
+NISHAFUKU_SET_DEFS = {
+    "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
+    "2車複 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
+    "2車複 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
+}
+
+agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
+    set_label: new_payout_rec() for set_label in NISHAFUKU_SET_DEFS
+}
+
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -446,7 +457,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 2車複シミュレーター用 前日集計（累積・任意）")
-        st.caption("1-234 / 2-134 / 3-124 の判定に使う6本だけ入力します。1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4。不要なら0のままでOK。")
+        st.caption("出力シミュレーターと同じ3セットだけ入力します。1-234 / 2-134 / 3-124。不要なら0のままでOK。")
 
         h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
@@ -455,17 +466,16 @@ with tabs[1]:
         h6[3].markdown("**SUM**")
         h6[4].markdown("**H**")
 
-        nishafuku_inputs = []
-        nishafuku_labels = [nishafuku_label(a, b) for a, b in NISHAFUKU_PAIRS] + [nishafuku_label(a, b) for a, b in NISHAFUKU_EXTRA_PAIRS]
-        for label in nishafuku_labels:
-            safe_key = label.replace(" ", "_").replace("-", "_")
+        nishafuku_set_inputs = []
+        for set_label in NISHAFUKU_SET_DEFS.keys():
+            safe_key = set_label.replace(" ", "_").replace("-", "_")
             c0, c1, c2, c3, c4 = st.columns([2.4, 1, 1, 1, 1])
-            c0.write(label)
-            N = c1.number_input("", key=f"prev_2f_{safe_key}_N", min_value=0, value=0)
-            KSUM = c2.number_input("", key=f"prev_2f_{safe_key}_KSUM", min_value=0, value=0)
-            SUM = c3.number_input("", key=f"prev_2f_{safe_key}_SUM", min_value=0, value=0, step=10)
-            H = c4.number_input("", key=f"prev_2f_{safe_key}_H", min_value=0, value=0)
-            nishafuku_inputs.append((label, int(N), int(KSUM), int(SUM), int(H)))
+            c0.write(set_label)
+            N = c1.number_input("", key=f"prev_2fset_{safe_key}_N", min_value=0, value=0)
+            KSUM = c2.number_input("", key=f"prev_2fset_{safe_key}_KSUM", min_value=0, value=0)
+            SUM = c3.number_input("", key=f"prev_2fset_{safe_key}_SUM", min_value=0, value=0, step=10)
+            H = c4.number_input("", key=f"prev_2fset_{safe_key}_H", min_value=0, value=0)
+            nishafuku_set_inputs.append((set_label, int(N), int(KSUM), int(SUM), int(H)))
 
         st.form_submit_button("前日までの集計を反映")
 
@@ -489,9 +499,9 @@ with tabs[1]:
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
 
-    for label, N, KSUM, SUM, H in nishafuku_inputs:
+    for set_label, N, KSUM, SUM, H in nishafuku_set_inputs:
         if any([N, KSUM, SUM, H]):
-            rec = agg_payout_nishafuku_manual[label]
+            rec = agg_payout_nishafuku_set_manual[set_label]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
             rec["SUM"] += int(SUM)
@@ -779,7 +789,7 @@ with tabs[2]:
 
     st.divider()
     st.markdown("### 2車複シミュレーター｜1-234 / 2-134 / 3-124")
-    st.caption("個別2車複を3本セットで合算し、軸評価1/2/3の連対率との差を表示します。差がマイナスに大きい軸ほど、軸連対率に対して下振れしている候補として見ます。")
+    st.caption("前日までの3セット入力と、今日入力した個別2車複を合算し、軸評価1/2/3の連対率との差を表示します。")
 
     sim_sets_2f = {
         "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
@@ -796,10 +806,12 @@ with tabs[2]:
     rows_2f_sim = []
     for set_label, labels in sim_sets_2f.items():
         axis_rank = axis_map_2f[set_label]
+        today_set_rec = rec_for_labels(payout_nishafuku_total, labels)
+        total_set_rec = combine_recs([agg_payout_nishafuku_set_manual[set_label], today_set_rec])
         rows_2f_sim.append(
             payout_row_with_axis_rentai(
                 set_label,
-                rec_for_labels(payout_nishafuku_total, labels),
+                total_set_rec,
                 axis_rank,
                 rank_total,
             )
@@ -827,5 +839,5 @@ with tabs[2]:
     st.dataframe(df_sim, use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
-    st.write("2車複 個別：1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4")
-    st.write("2車複シミュレーター：1-234 / 2-134 / 3-124（軸連対率との差つき）")
+    st.write("今日入力の個別2車複：1-2 / 1-3 / 1-4 / 2-3 / 2-4 / 3-4")
+    st.write("前日集計入力・出力シミュレーター：1-234 / 2-134 / 3-124")
