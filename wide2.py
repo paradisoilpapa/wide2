@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車単1→23 ＋ 2車複1-23/12-5 ＋ 2車複セットTOTAL v4.6｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車単1→23 ＋ 2車複1-2345/23-45/23-456 v4.7｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -20,8 +20,9 @@ INDIVIDUAL_AXIS1_TARGETS = (2, 3)
 AXIS2_TARGETS = ()
 AXIS3_TARGETS = ()
 
-# 2車複：1-23 + 5-12（1-2 / 1-3 / 1-5 / 2-5）
-NISHAFUKU_PAIRS = [(1, 2), (1, 3), (1, 5), (2, 5)]
+# 2車複：1-2345 + 23-45/456検証
+# 個別表示：1-2 / 1-3 / 1-4 / 1-5 / 2-4 / 2-5 / 2-6 / 3-4 / 3-5 / 3-6
+NISHAFUKU_PAIRS = [(1, 2), (1, 3), (1, 4), (1, 5), (2, 4), (2, 5), (2, 6), (3, 4), (3, 5), (3, 6)]
 NISHAFUKU_EXTRA_PAIRS = []
 
 RANK_SYMBOLS = {
@@ -446,7 +447,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 2車複シミュレーション集計（累積・任意）")
-        st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-5 / 2-5を入力できます。不要なら0のままでOK。")
+        st.caption("評価順位ベースの2車複です。1-2345と、2・3軸×4・5・6を個別に入力できます。不要なら0のままでOK。")
 
         h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
@@ -752,9 +753,27 @@ for label in payout_nishafuku_total.keys():
 # 2車複セットTOTAL定義
 # =========================
 NISHA_FUKU_SET_LABELS = {
-    "2車複 TOTAL": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 5), nishafuku_label(2, 5)],
-    "2車複 1-23set": [nishafuku_label(1, 2), nishafuku_label(1, 3)],
-    "2車複 12-5set": [nishafuku_label(1, 5), nishafuku_label(2, 5)],
+    "2車複 TOTAL": [
+        nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4), nishafuku_label(1, 5),
+        nishafuku_label(2, 4), nishafuku_label(2, 5), nishafuku_label(2, 6),
+        nishafuku_label(3, 4), nishafuku_label(3, 5), nishafuku_label(3, 6),
+    ],
+    "2車複 1-2345set": [
+        nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4), nishafuku_label(1, 5),
+    ],
+    "2車複 23-45set": [
+        nishafuku_label(2, 4), nishafuku_label(2, 5),
+        nishafuku_label(3, 4), nishafuku_label(3, 5),
+    ],
+    "2車複 23-456set": [
+        nishafuku_label(2, 4), nishafuku_label(2, 5), nishafuku_label(2, 6),
+        nishafuku_label(3, 4), nishafuku_label(3, 5), nishafuku_label(3, 6),
+    ],
+    "2車複 1-2345+23-45 TOTAL": [
+        nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4), nishafuku_label(1, 5),
+        nishafuku_label(2, 4), nishafuku_label(2, 5),
+        nishafuku_label(3, 4), nishafuku_label(3, 5),
+    ],
 }
 
 
@@ -807,8 +826,8 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_individual), use_container_width=True, hide_index=True)
 
-    st.markdown("### 2車複シミュレーション｜1-23 ＋ 5-12")
-    st.caption("評価順位ベースの2車複です。1-2 / 1-3 / 1-5 / 2-5を分けて集計します。日次入力の2車複配当を使います。")
+    st.markdown("### 2車複シミュレーション｜1-2345 ＋ 23-45/456")
+    st.caption("評価順位ベースの2車複です。1-2345と、2-4/2-5/2-6/3-4/3-5/3-6を分けて集計します。日次入力の2車複配当を使います。")
 
     rows_2f = []
     for a, b in NISHAFUKU_PAIRS:
@@ -820,7 +839,7 @@ with tabs[2]:
 
     st.dataframe(pd.DataFrame(rows_2f), use_container_width=True, hide_index=True)
 
-    st.markdown("### 2車複セットTOTAL｜TOTAL / 1-23set / 12-5set")
+    st.markdown("### 2車複セットTOTAL｜TOTAL / 1-2345set / 23-45set / 23-456set / 1-2345+23-45 TOTAL")
     st.caption("個別2車複をセット別に合算します。Nは最大N、KSUM/H/SUMは合算です。")
 
     rows_2f_sets = []
@@ -830,5 +849,5 @@ with tabs[2]:
 
     st.markdown("### 買い目確認")
     st.write("2車単 個別回収：1→2 / 1→3")
-    st.write("2車複：1-2 / 1-3 / 1-5 / 2-5")
-    st.write("2車複セットTOTAL：TOTAL / 1-23set / 12-5set")
+    st.write("2車複：1-2 / 1-3 / 1-4 / 1-5 / 2-4 / 2-5 / 2-6 / 3-4 / 3-5 / 3-6")
+    st.write("2車複セットTOTAL：TOTAL / 1-2345set / 23-45set / 23-456set / 1-2345+23-45 TOTAL")
