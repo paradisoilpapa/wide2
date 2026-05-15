@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 標準棚/穴棚 想定セット的中率差 v5.5｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 標準棚/穴棚 グループ別☆候補 v5.6｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -832,7 +832,7 @@ with tabs[2]:
 
     st.divider()
     st.markdown("### 2車複シミュレーター｜標準棚 / 穴棚")
-    st.caption("前日までのセット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。判定☆は、想定との差が最も0に近い候補です。")
+    st.caption("前日までのセット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。判定☆は、標準棚・穴棚それぞれで想定との差が最も0に近い候補です。")
 
     sim_sets_2f = NISHAFUKU_SET_DEFS
 
@@ -853,13 +853,21 @@ with tabs[2]:
 
     # 候補判定：
     # 回収率100%以上ではなく、想定との差が0に一番近い行を☆候補にする。
+    # 標準棚と穴棚は別グループとして扱い、それぞれ1つずつ☆を出す。
     # サンプルがない行、想定との差がNoneの行は対象外。
     if not df_sim.empty and "想定との差" in df_sim.columns:
         df_sim["判定"] = ""
-        valid_mask = df_sim["想定との差"].notna()
-        if valid_mask.any():
-            idx_star = df_sim.loc[valid_mask, "想定との差"].abs().idxmin()
-            df_sim.loc[idx_star, "判定"] = "☆"
+        if "棚" in df_sim.columns:
+            for shelf_name in ["標準", "穴"]:
+                shelf_mask = (df_sim["棚"] == shelf_name) & df_sim["想定との差"].notna()
+                if shelf_mask.any():
+                    idx_star = df_sim.loc[shelf_mask, "想定との差"].abs().idxmin()
+                    df_sim.loc[idx_star, "判定"] = "☆"
+        else:
+            valid_mask = df_sim["想定との差"].notna()
+            if valid_mask.any():
+                idx_star = df_sim.loc[valid_mask, "想定との差"].abs().idxmin()
+                df_sim.loc[idx_star, "判定"] = "☆"
 
     # 見やすい列順に整理
     preferred_cols = [
