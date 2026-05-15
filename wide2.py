@@ -25,16 +25,6 @@ AXIS3_TARGETS = ()
 NISHAFUKU_PAIRS = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)]
 NISHAFUKU_EXTRA_PAIRS = []
 
-NISHAFUKU_SET_DEFS = {
-    "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
-    "2車複 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
-    "2車複 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
-}
-
-agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
-    set_label: new_payout_rec() for set_label in NISHAFUKU_SET_DEFS
-}
-
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -201,6 +191,17 @@ def hit_axis_to_target(axis: int, target: int, win_rank: int, sec_rank: int, fie
 
 def nishafuku_label(a: int, b: int) -> str:
     return f"2車複 {a}-{b}"
+
+
+NISHAFUKU_SET_DEFS = {
+    "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
+    "2車複 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
+    "2車複 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
+}
+
+agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
+    set_label: new_payout_rec() for set_label in NISHAFUKU_SET_DEFS
+}
 
 
 def ksum_nishafuku_pair(a: int, b: int, field_n: int) -> int:
