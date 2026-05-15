@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.2_no2t｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 想定セット的中率差 v5.3｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -253,21 +253,46 @@ def rec_for_labels(source: Dict[str, Dict[str, int]], labels: List[str]) -> Dict
     return combine_recs([source[label] for label in labels if label in source])
 
 
-def payout_row_with_axis_rentai(label: str, rec: Dict[str, int], axis_rank: int, rank_total_map: Dict[int, Dict[str, int]]) -> Dict:
-    """軸評価の連対率と、セット実的中率との差を併記した行。"""
+def expected_set_hit_rate_from_pair12(labels: List[str], pair12_counts: Dict[PairKey, int]) -> float | None:
+    """
+    1→2着評価分布から、2車複セットの想定的中率を出す。
+    2車複なので順不同で集計する。
+
+    例：
+      1-234 = 1-2 / 1-3 / 1-4
+      → (1,2)+(2,1)+(1,3)+(3,1)+(1,4)+(4,1)
+    """
+    total = sum(int(v) for v in pair12_counts.values())
+    if total <= 0:
+        return None
+
+    hit = 0
+    for label in labels:
+        # label例: "2車複 1-4"
+        try:
+            pair_part = label.replace("2車複", "").strip()
+            a_str, b_str = pair_part.split("-")
+            a, b = int(a_str), int(b_str)
+        except Exception:
+            continue
+
+        hit += int(pair12_counts.get((a, b), 0))
+        hit += int(pair12_counts.get((b, a), 0))
+
+    return round(100.0 * hit / total, 1)
+
+
+def payout_row_with_expected_set_hit(label: str, rec: Dict[str, int], labels: List[str], pair12_counts: Dict[PairKey, int]) -> Dict:
+    """想定セット的中率と、実的中率との差を併記した行。"""
     row = payout_row(label, rec)
 
-    axis_rec = rank_total_map.get(axis_rank, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-    axis_n = int(axis_rec.get("N", 0))
-    axis_rentai = rate(int(axis_rec.get("C1", 0)) + int(axis_rec.get("C2", 0)), axis_n)
+    expected_hit = expected_set_hit_rate_from_pair12(labels, pair12_counts)
+    row["想定セット的中率%"] = expected_hit
 
-    row["軸評価"] = f"評価{axis_rank}"
-    row["軸連対率%"] = axis_rentai
-
-    if row["的中率%"] is not None and axis_rentai is not None:
-        row["軸連対率との差"] = round(row["的中率%"] - axis_rentai, 1)
+    if row["的中率%"] is not None and expected_hit is not None:
+        row["想定との差"] = round(row["的中率%"] - expected_hit, 1)
     else:
-        row["軸連対率との差"] = None
+        row["想定との差"] = None
 
     return row
 
@@ -789,7 +814,7 @@ with tabs[2]:
 
     st.divider()
     st.markdown("### 2車複シミュレーター｜1-234 / 2-134 / 3-124")
-    st.caption("前日までの3セット入力と、今日入力した個別2車複を合算し、軸評価1/2/3の連対率との差を表示します。")
+    st.caption("前日までの3セット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。")
 
     sim_sets_2f = {
         "2車複 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
@@ -797,23 +822,16 @@ with tabs[2]:
         "2車複 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
     }
 
-    axis_map_2f = {
-        "2車複 1-234": 1,
-        "2車複 2-134": 2,
-        "2車複 3-124": 3,
-    }
-
     rows_2f_sim = []
     for set_label, labels in sim_sets_2f.items():
-        axis_rank = axis_map_2f[set_label]
         today_set_rec = rec_for_labels(payout_nishafuku_total, labels)
         total_set_rec = combine_recs([agg_payout_nishafuku_set_manual[set_label], today_set_rec])
         rows_2f_sim.append(
-            payout_row_with_axis_rentai(
+            payout_row_with_expected_set_hit(
                 set_label,
                 total_set_rec,
-                axis_rank,
-                rank_total,
+                labels,
+                pair12_total,
             )
         )
 
@@ -822,15 +840,14 @@ with tabs[2]:
     # 見やすい列順に整理
     preferred_cols = [
         "型",
-        "軸評価",
         "対象N",
         "総点数KSUM",
         "投資額換算",
         "払戻合計SUM",
         "的中H（配当あり）",
         "的中率%",
-        "軸連対率%",
-        "軸連対率との差",
+        "想定セット的中率%",
+        "想定との差",
         "平均配当",
         "回収率%",
         "判定",
