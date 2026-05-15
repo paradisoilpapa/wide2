@@ -489,14 +489,6 @@ with tabs[1]:
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
 
-    for axis, target, N, KSUM, SUM, H in axis_target_inputs:
-        if any([N, KSUM, SUM, H]):
-            rec = agg_payout_axis_target_manual[(axis, target)]
-            rec["N"] += int(N)
-            rec["KSUM"] += int(KSUM)
-            rec["SUM"] += int(SUM)
-            rec["H"] += int(H)
-
     for label, N, KSUM, SUM, H in nishafuku_inputs:
         if any([N, KSUM, SUM, H]):
             rec = agg_payout_nishafuku_manual[label]
