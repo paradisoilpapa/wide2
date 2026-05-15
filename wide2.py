@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.2｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.2_no2t｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -318,29 +318,28 @@ with tabs[0]:
     st.caption(
         "入力中の白化を抑えるため、フォーム送信式です。"
         "V評価は頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。"
-        "着順は～3桁。2車複配当→2車単配当の順で入力。配当は100円あたりの払戻金（円）です。"
+        "着順は～3桁。2車複配当を入力。配当は100円あたりの払戻金（円）です。"
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
+        cols_hdr = st.columns([1, 1.1, 2.9, 1.2, 1.2])
         cols_hdr[0].markdown("**R**")
         cols_hdr[1].markdown("**頭数**")
         cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
         cols_hdr[3].markdown("**着順(～3桁)**")
         cols_hdr[4].markdown("**2車複配当**")
-        cols_hdr[5].markdown("**2車単配当**")
 
         daily_inputs = []
 
         for i in range(1, 37):
-            c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
+            c1, c2, c3, c4, c5 = st.columns([1, 1.1, 2.9, 1.2, 1.2])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
             vline = c3.text_input("", key=f"vline_{i}", value="")
             fin = c4.text_input("", key=f"fin_{i}", value="")
             pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
-            pay_2t = c6.number_input("", key=f"pay2t_{i}", min_value=0, value=0, step=10)
+            pay_2t = 0
 
             daily_inputs.append(
                 {
@@ -366,7 +365,7 @@ with tabs[0]:
         vorder = parse_rankline(vline, field_n)
         finish = parse_finish(fin)
 
-        any_input = any([vline.strip(), fin.strip(), pay_2t > 0, pay_2f > 0])
+        any_input = any([vline.strip(), fin.strip(), pay_2f > 0])
         if any_input:
             if not vorder:
                 st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
