@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.4｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.5｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -322,7 +322,7 @@ with tabs[0]:
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
+        cols_hdr = st.columns([0.55, 0.85, 1.05, 2.45, 1.1, 1.1, 1.1])
         cols_hdr[0].markdown("**R**")
         cols_hdr[1].markdown("**頭数**")
         cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
@@ -333,7 +333,7 @@ with tabs[0]:
         daily_inputs = []
 
         for i in range(1, 37):
-            c1, c2, c3, c4, c5, c6 = st.columns([1, 1.1, 2.6, 1.2, 1.2, 1.2])
+            c1, cvenue, c2, c3, c4, c5, c6 = st.columns([0.55, 0.85, 1.05, 2.45, 1.1, 1.1, 1.1])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
