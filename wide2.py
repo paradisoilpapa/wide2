@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.8｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜2車複 1-234/2-134/3-124 軸連対率差 v5.9｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
