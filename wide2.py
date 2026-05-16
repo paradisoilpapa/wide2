@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜標準棚/穴棚＋最終軸候補 v5.8｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 標準棚/穴棚 v5.9｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -20,20 +20,18 @@ INDIVIDUAL_AXIS1_TARGETS = (2, 3)
 AXIS2_TARGETS = ()
 AXIS3_TARGETS = ()
 
-# 2車複：標準棚 + 穴棚
-# 標準棚：1-234 / 2-134 / 3-124
-# 穴棚：  1-567 / 2-567 / 3-567
-# 日次入力ではここに定義した個別ペアを自動集計します。
+# 2車複：軸1・2限定の標準棚 + 穴棚
+# 標準棚：1-234 / 2-134
+# 穴棚：  1-567 / 2-567
+# 評価3は軸ではなく相手候補として扱います。
 NISHAFUKU_PAIRS = [
-    # 標準棚に必要なペア
+    # 軸1に必要なペア
     (1, 2), (1, 3), (1, 4),
-    (2, 3), (2, 4),
-    (3, 4),
-
-    # 穴棚に必要なペア
     (1, 5), (1, 6), (1, 7),
+
+    # 軸2に必要なペア
+    (2, 3), (2, 4),
     (2, 5), (2, 6), (2, 7),
-    (3, 5), (3, 6), (3, 7),
 ]
 NISHAFUKU_EXTRA_PAIRS = []
 
@@ -206,15 +204,13 @@ def nishafuku_label(a: int, b: int) -> str:
 
 
 NISHAFUKU_SET_DEFS = {
-    # 標準棚
+    # 標準棚：軸1・2のみ
     "標準 1-234": [nishafuku_label(1, 2), nishafuku_label(1, 3), nishafuku_label(1, 4)],
     "標準 2-134": [nishafuku_label(1, 2), nishafuku_label(2, 3), nishafuku_label(2, 4)],
-    "標準 3-124": [nishafuku_label(1, 3), nishafuku_label(2, 3), nishafuku_label(3, 4)],
 
-    # 穴棚
+    # 穴棚：軸1・2のみ
     "穴 1-567": [nishafuku_label(1, 5), nishafuku_label(1, 6), nishafuku_label(1, 7)],
     "穴 2-567": [nishafuku_label(2, 5), nishafuku_label(2, 6), nishafuku_label(2, 7)],
-    "穴 3-567": [nishafuku_label(3, 5), nishafuku_label(3, 6), nishafuku_label(3, 7)],
 }
 
 agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
@@ -523,7 +519,7 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 2車複シミュレーター用 前日集計（累積・任意）")
-        st.caption("出力シミュレーターと同じセットを入力します。標準棚：1-234 / 2-134 / 3-124、穴棚：1-567 / 2-567 / 3-567。不要なら0のままでOK。")
+        st.caption("出力シミュレーターと同じセットを入力します。標準棚：1-234 / 2-134、穴棚：1-567 / 2-567。不要なら0のままでOK。")
 
         h6 = st.columns([2.4, 1, 1, 1, 1])
         h6[0].markdown("**型**")
@@ -854,8 +850,8 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
 
     st.divider()
-    st.markdown("### 2車複シミュレーター｜標準棚 / 穴棚")
-    st.caption("前日までのセット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。判定☆は、標準棚・穴棚それぞれで想定との差が最も0に近い候補です。")
+    st.markdown("### 2車複シミュレーター｜軸1・2限定 標準棚 / 穴棚")
+    st.caption("前日までのセット入力と、今日入力した個別2車複を合算し、1→2着評価分布から算出した想定セット的中率との差を表示します。軸は評価1・評価2のみ。判定☆は、標準棚・穴棚それぞれで想定との差が最も0に近い候補です。")
 
     sim_sets_2f = NISHAFUKU_SET_DEFS
 
@@ -911,14 +907,13 @@ with tabs[2]:
     df_sim = df_sim[[c for c in preferred_cols if c in df_sim.columns]]
     st.dataframe(df_sim, use_container_width=True, hide_index=True)
 
-    st.markdown("### 最終軸候補｜標準棚＋穴棚 合成")
-    st.caption("同じ軸の標準棚と穴棚を合成し、ズレが一番小さい軸を☆候補にします。軸別安定度＝|標準差|＋|穴差|。")
+    st.markdown("### 最終軸候補｜軸1・2限定 標準棚＋穴棚 合成")
+    st.caption("評価1・評価2のみを軸候補にし、同じ軸の標準棚と穴棚を合成します。軸別安定度＝|標準差|＋|穴差|。")
 
     # 軸ごとに標準棚・穴棚をまとめる
     axis_defs = {
         1: ("標準 1-234", "穴 1-567"),
         2: ("標準 2-134", "穴 2-567"),
-        3: ("標準 3-124", "穴 3-567"),
     }
 
     axis_rows = []
@@ -1046,4 +1041,4 @@ with tabs[2]:
 
     st.markdown("### 買い目確認")
     st.write("今日入力の個別2車複：標準棚＋穴棚に必要なペアを自動集計")
-    st.write("前日集計入力・出力シミュレーター：標準 1-234 / 2-134 / 3-124、穴 1-567 / 2-567 / 3-567")
+    st.write("前日集計入力・出力シミュレーター：標準 1-234 / 2-134、穴 1-567 / 2-567")
