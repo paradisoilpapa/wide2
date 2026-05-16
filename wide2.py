@@ -320,9 +320,9 @@ def payout_row_with_expected_set_hit(label: str, rec: Dict[str, int], labels: Li
     row["想定セット的中率%"] = expected_hit
 
     if row["的中率%"] is not None and expected_hit is not None:
-        row["想定との差"] = round(row["的中率%"] - expected_hit, 1)
+        row["想定差"] = round(row["的中率%"] - expected_hit, 1)
     else:
-        row["想定との差"] = None
+        row["想定差"] = None
 
     return row
 
@@ -337,7 +337,7 @@ def expected_pair_hit_rate_from_pair12(a: int, b: int, pair12_counts: Dict[PairK
 
 
 def diff_status(diff, expected=None) -> str:
-    """想定との差の状態をざっくり表示。想定0%は候補対象外。"""
+    """想定差の状態をざっくり表示。想定0%は候補対象外。"""
     if expected is not None and expected == 0:
         return "対象外"
     if diff is None:
@@ -372,17 +372,17 @@ def _median(values):
 
 
 def _deviation_stats(value, values):
-    """平均との差・中央値差・偏差値・基準位置を返す。少数候補でも落ちない軽量版。"""
+    """平均差・中央値差・偏差値・基準位置を返す。少数候補でも落ちない軽量版。"""
     try:
         if value is None or pd.isna(value):
-            return {"平均との差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+            return {"平均差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
         x = float(value)
     except Exception:
-        return {"平均との差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+        return {"平均差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
 
     vals = _clean_num_list(values)
     if not vals:
-        return {"平均との差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+        return {"平均差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
 
     mean = sum(vals) / len(vals)
     med = _median(vals)
@@ -408,7 +408,7 @@ def _deviation_stats(value, values):
         pos = "中庸"
 
     return {
-        "平均との差": mean_diff,
+        "平均差": mean_diff,
         "中央値差": med_diff,
         "偏差値": dev,
         "基準位置": pos,
@@ -1037,7 +1037,7 @@ with tabs[2]:
             else:
                 diff = None
 
-            row["想定との差"] = diff
+            row["想定差"] = diff
             row["状態"] = diff_status(diff, expected_pair)
 
             pair_base_pay = int(pair_base_avg_pay.get(f"{a}-{b}", PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 1200)))
@@ -1059,20 +1059,20 @@ with tabs[2]:
 
     df_pairs = pd.DataFrame(pair_rows)
 
-    if not df_pairs.empty and df_pairs["想定との差"].notna().any():
+    if not df_pairs.empty and df_pairs["想定差"].notna().any():
         candidate_mask = (
-            df_pairs["想定との差"].notna()
+            df_pairs["想定差"].notna()
             & df_pairs["想定ペア的%"].notna()
             & (df_pairs["想定ペア的%"] > float(MIN_EXPECTED_PAIR_RATE))
         )
 
-        # 評価1・2の全候補を同一母集団として、平均との差・中央値差・偏差値を出す。
-        diff_values = df_pairs.loc[candidate_mask, "想定との差"].tolist() if candidate_mask.any() else []
+        # 評価1・2の全候補を同一母集団として、平均差・中央値差・偏差値を出す。
+        diff_values = df_pairs.loc[candidate_mask, "想定差"].tolist() if candidate_mask.any() else []
         pay_values = df_pairs.loc[candidate_mask & df_pairs["平均配当"].notna(), "平均配当"].tolist() if candidate_mask.any() else []
 
         for idx in df_pairs.index:
-            stats = _deviation_stats(df_pairs.loc[idx, "想定との差"], diff_values)
-            df_pairs.loc[idx, "平均との差"] = stats.get("平均との差")
+            stats = _deviation_stats(df_pairs.loc[idx, "想定差"], diff_values)
+            df_pairs.loc[idx, "平均差"] = stats.get("平均差")
             df_pairs.loc[idx, "中央値差"] = stats.get("中央値差")
             df_pairs.loc[idx, "偏差値"] = stats.get("偏差値")
             df_pairs.loc[idx, "基準位置"] = stats.get("基準位置")
@@ -1286,8 +1286,8 @@ with tabs[2]:
         "的中H",
         "的中率%",
         "想定ペア的%",
-        "想定との差",
-        "平均との差",
+        "想定差",
+        "平均差",
         "中央値差",
         "偏差値",
         "基準位置",
