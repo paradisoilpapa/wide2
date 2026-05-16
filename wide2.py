@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 標準棚/穴棚 v6.2｜配当係数つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 標準棚/穴棚 v6.5｜未回収除外・配当戻り優先｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1281,7 +1281,13 @@ with tabs[2]:
         step=0.5,
         format="%.1f",
     )
-    c_final3.write("評価1・評価2を両方候補化し、偏差値60以上の過熱・配当高すぎを避けつつ、下振れ/配当戻り候補を優先します。")
+    PAY_RETURN_ONLY = c_final3.checkbox(
+        "未回収除外＋配当戻り優先",
+        key="pay_return_only_axis12",
+        value=True,
+        help="ONの場合、未回収ペアを除外し、配当安すぎを最優先。不足分は基準付近の配当実績ありペアで補完します。",
+    )
+    c_final4.write("評価1・評価2を両方候補化。初期設定では『未回収除外＋配当戻り優先、不足分は基準付近で補完』にします。")
 
     pair_rows = []
     for axis in [1, 2]:
@@ -1372,59 +1378,69 @@ with tabs[2]:
             df_pairs["_pay_near"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] >= 0.80) & (df_pairs["配当係数"] <= 1.30)
             df_pairs["_pay_high"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] > 1.30)
 
+            # 最終候補対象：
+            # スロットの未回収台と同じ扱いで、H=0（未回収）は原則除外。
+            # まず「配当安すぎ＝配当戻り余地あり」を優先し、点数が不足する場合だけ
+            # 「基準付近」の配当実績ありペアで補完する。
+            df_pairs["_has_hit"] = df_pairs["的中H（配当あり）"].fillna(0).astype(float) > 0
+            final_candidate_mask = candidate_mask & df_pairs["_has_hit"]
+            if PAY_RETURN_ONLY:
+                final_candidate_mask = final_candidate_mask & (df_pairs["_pay_low"] | df_pairs["_pay_near"])
+
             # 優先順：
-            # 1) 基準下＋想定率中央値以上＋配当安すぎ/基準付近
-            # 2) 基準下＋想定率中央値以上
-            # 3) 中央以上だが配当安すぎ（的中はあるが払い戻しが戻る余地）
-            # 4) 基準下
-            # 5) 中央付近かつ過熱していない
-            # 6) その他候補
-            # 偏差値60以上は過熱、配当高すぎは上振れ警戒として後ろへ回す。
+            # 1) 配当安すぎ・実績あり（配当戻り狙い）
+            # 2) 配当安すぎ＋基準下（的中率も下振れ）
+            # 3) 基準付近・回収率あり（不足分補完）
+            # 4) 基準付近＋基準下
+            # 5) その他の実績あり候補
+            # 未回収と配当高すぎは後ろ。偏差値60以上は警戒だが、配当安すぎなら除外せず減点に留める。
             df_pairs["_候補優先"] = 9
             df_pairs.loc[
-                candidate_mask & ~df_pairs["_overhit"] & df_pairs["_below_base"] & df_pairs["_expected_ok"] & (df_pairs["_pay_low"] | df_pairs["_pay_near"]),
+                final_candidate_mask & df_pairs["_pay_low"] & ~df_pairs["_below_base"],
                 "_候補優先",
             ] = 1
             df_pairs.loc[
-                candidate_mask & ~df_pairs["_overhit"] & df_pairs["_below_base"] & df_pairs["_expected_ok"],
+                final_candidate_mask & df_pairs["_pay_low"] & df_pairs["_below_base"],
                 "_候補優先",
             ] = 2
             df_pairs.loc[
-                candidate_mask & ~df_pairs["_overhit"] & ~df_pairs["_below_base"] & df_pairs["_pay_low"],
+                final_candidate_mask & df_pairs["_pay_near"] & ~df_pairs["_overhit"],
                 "_候補優先",
             ] = 3
             df_pairs.loc[
-                candidate_mask & ~df_pairs["_overhit"] & df_pairs["_below_base"],
+                final_candidate_mask & df_pairs["_pay_near"] & df_pairs["_below_base"],
                 "_候補優先",
             ] = 4
             df_pairs.loc[
-                candidate_mask
-                & ~df_pairs["_overhit"]
-                & ~df_pairs["_pay_high"]
-                & df_pairs["中央値差"].notna()
-                & (df_pairs["中央値差"].abs() <= 3.0),
+                final_candidate_mask & ~df_pairs["_pay_high"],
                 "_候補優先",
-            ] = 5
-            df_pairs.loc[candidate_mask & df_pairs["_pay_high"], "_候補優先"] = 8
-            df_pairs.loc[candidate_mask & df_pairs["_overhit"], "_候補優先"] = 9
+            ] = df_pairs.loc[final_candidate_mask & ~df_pairs["_pay_high"], "_候補優先"].clip(upper=5)
+            df_pairs.loc[final_candidate_mask & df_pairs["_pay_high"], "_候補優先"] = 8
+            df_pairs.loc[candidate_mask & ~df_pairs["_has_hit"], "_候補優先"] = 9
 
             df_pairs.loc[df_pairs["_pay_low"], "配当戻り余地"] = "あり"
             df_pairs.loc[df_pairs["_pay_near"], "配当戻り余地"] = "中庸"
             df_pairs.loc[df_pairs["_pay_high"], "配当戻り余地"] = "上振れ警戒"
-            df_pairs.loc[df_pairs["_overhit"], "総合候補理由"] = "的中率過熱"
-            df_pairs.loc[df_pairs["_below_base"] & df_pairs["_pay_low"], "総合候補理由"] = "下振れ＋配当安"
-            df_pairs.loc[df_pairs["_below_base"] & df_pairs["_pay_near"], "総合候補理由"] = "下振れ＋配当中庸"
-            df_pairs.loc[(~df_pairs["_below_base"]) & df_pairs["_pay_low"], "総合候補理由"] = "配当戻り狙い"
-            df_pairs.loc[(df_pairs["_below_base"]) & (df_pairs["配当位置"] == "未回収"), "総合候補理由"] = "下振れ＋未回収"
+            df_pairs.loc[~df_pairs["_has_hit"], "総合候補理由"] = "未回収除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"], "総合候補理由"] = "的中率過熱"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_below_base"] & df_pairs["_pay_low"], "総合候補理由"] = "下振れ＋配当安"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_below_base"] & df_pairs["_pay_near"], "総合候補理由"] = "下振れ＋配当中庸"
+            df_pairs.loc[df_pairs["_has_hit"] & (~df_pairs["_below_base"]) & df_pairs["_pay_low"], "総合候補理由"] = "配当戻り狙い"
+            df_pairs.loc[df_pairs["_has_hit"] & (~df_pairs["_below_base"]) & df_pairs["_pay_near"] & (df_pairs["総合候補理由"] == ""), "総合候補理由"] = "基準付近補完"
 
             # 重複する2車複ペアは1つにまとめる。
             # 例：評価1-2は評価1軸でも評価2軸でも同一券なので、優先順位が高い方だけ採用。
-            candidate_df = df_pairs.loc[candidate_mask].sort_values(
-                ["_候補優先", "配当係数", "偏差値", "想定ペア的中率%", "軸番号", "相手"],
-                ascending=[True, True, True, False, True, True],
+            candidate_df = df_pairs.loc[final_candidate_mask].sort_values(
+                ["_候補優先", "回収率%", "想定ペア的中率%", "配当係数", "偏差値", "軸番号", "相手"],
+                ascending=[True, False, False, True, True, True, True],
             )
-            candidate_unique = candidate_df.drop_duplicates(subset=["ペアキー"], keep="first")
-            candidate_idx = candidate_unique.head(int(FINAL_POINT_N)).index
+            if candidate_df.empty:
+                if PAY_RETURN_ONLY:
+                    st.warning("未回収除外＋配当戻り優先では候補がありません。必要ならチェックを外して広め候補を確認してください。")
+                candidate_idx = []
+            else:
+                candidate_unique = candidate_df.drop_duplicates(subset=["ペアキー"], keep="first")
+                candidate_idx = candidate_unique.head(int(FINAL_POINT_N)).index
 
             df_pairs.loc[candidate_idx, "相手候補"] = "☆"
             df_pairs.loc[candidate_idx, "最終買い目"] = "☆"
@@ -1435,11 +1451,12 @@ with tabs[2]:
                 recommended_pairs.append(pair_key)
             recommended_pairs = sorted(recommended_pairs, key=lambda x: tuple(int(v) for v in x.split("-")))
             recommended_text = " / ".join(recommended_pairs)
-            st.success(f"本日の推奨2車複候補：{recommended_text}")
+            if recommended_text:
+                st.success(f"本日の推奨2車複候補：{recommended_text}")
 
             drop_cols = [
                 "_expected_ok", "_below_base", "_overhit", "_cold",
-                "_pay_low", "_pay_near", "_pay_high", "_候補優先",
+                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_候補優先",
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
         else:
