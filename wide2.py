@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.3｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.5｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1006,7 +1006,7 @@ with tabs[2]:
                 )
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
-    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。歪み枠は本線に入れず、注として監視表示します。")
+    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。的中率の平均差・中央値差・偏差値で位置を見ます。歪み枠は本線に入れず、注として監視表示します。")
 
     c_final1, c_final2, c_final3, c_final4 = st.columns([1, 1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
@@ -1101,19 +1101,29 @@ with tabs[2]:
             & (df_pairs["想定ペア的%"] > float(MIN_EXPECTED_PAIR_RATE))
         )
 
-        # 評価1・2の全候補を同一母集団として、平均差・中央値差・偏差値を出す。
-        diff_values = df_pairs.loc[candidate_mask, "想定差"].tolist() if candidate_mask.any() else []
+        # 評価1・2の全候補を同一母集団として、的中率%の平均差・中央値差・偏差値を出す。
+        # 注意：1→2着分布と個別2車複を同じ累積母集団で管理すると、想定差は定義上0に寄ります。
+        # そのため候補判定の位置取りは「想定差」ではなく「的中率%」で行います。
+        diff_values = df_pairs.loc[candidate_mask, "的中率%"].tolist() if candidate_mask.any() else []
         # 配当偏差値は「平均配当そのもの」ではなく、
         # ペア基準配当との差（配当差）を母集団にして計算する。
         # 例：1-2の平均348円・基準271円なら配当差+77円。
         pay_values = df_pairs.loc[candidate_mask & df_pairs["配当差"].notna(), "配当差"].tolist() if candidate_mask.any() else []
 
         for idx in df_pairs.index:
-            stats = _deviation_stats(df_pairs.loc[idx, "想定差"], diff_values)
+            stats = _deviation_stats(df_pairs.loc[idx, "的中率%"], diff_values)
             df_pairs.loc[idx, "平均差"] = stats.get("平均差")
             df_pairs.loc[idx, "中央値差"] = stats.get("中央値差")
             df_pairs.loc[idx, "偏差値"] = stats.get("偏差値")
             df_pairs.loc[idx, "基準位置"] = stats.get("基準位置")
+            dev_tmp = stats.get("偏差値")
+            if dev_tmp is not None and pd.notna(dev_tmp):
+                if float(dev_tmp) >= float(OVERHEAT_Z):
+                    df_pairs.loc[idx, "状態"] = "当たりすぎ"
+                elif float(dev_tmp) <= 40.0:
+                    df_pairs.loc[idx, "状態"] = "当たらなすぎ"
+                else:
+                    df_pairs.loc[idx, "状態"] = "中庸"
 
             pay_stats = _deviation_stats(df_pairs.loc[idx, "配当差"], pay_values)
             df_pairs.loc[idx, "配当偏差値"] = pay_stats.get("偏差値")
@@ -1130,6 +1140,7 @@ with tabs[2]:
 
         if candidate_mask.any():
             expected_median = _median(df_pairs.loc[candidate_mask, "想定ペア的%"].tolist())
+            hitrate_median = _median(df_pairs.loc[candidate_mask, "的中率%"].tolist())
             df_pairs["_expected_ok"] = df_pairs["想定ペア的%"].apply(
                 lambda x: bool(pd.notna(x) and expected_median is not None and float(x) >= float(expected_median))
             )
