@@ -1127,33 +1127,64 @@ with tabs[2]:
     else:
         st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
 
-    preferred_pair_cols = [
-        "最終買い目",
-        "相手候補",
-        "軸",
-        "相手",
-        "型",
-        "対象N",
-        "的中H（配当あり）",
-        "的中率%",
-        "想定ペア的中率%",
-        "想定との差",
-        "平均との差",
-        "中央値差",
-        "偏差値",
-        "基準位置",
-        "状態",
-        "平均配当",
-        "配当係数",
-        "配当差",
-        "配当偏差値",
-        "配当位置",
-        "配当戻り余地",
-        "総合候補理由",
-        "回収率%",
-    ]
-    df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
-    st.dataframe(df_pairs, use_container_width=True, hide_index=True)
+    # =========================
+    # 最終買い目：スクロールなしの簡易表
+    # =========================
+    st.markdown("### 最終買い目表")
+    st.caption("実戦で見る用。横スクロールしないよう、必要列だけに絞っています。")
+
+    if "最終買い目" in df_pairs.columns:
+        df_final = df_pairs[df_pairs["最終買い目"] == "☆"].copy()
+    else:
+        df_final = pd.DataFrame()
+
+    if not df_final.empty:
+        df_final["買い目"] = df_final["ペアキー"].astype(str)
+        final_view_cols = [
+            "買い目",
+            "型",
+            "的中H（配当あり）",
+            "的中率%",
+            "想定ペア的中率%",
+            "偏差値",
+            "平均配当",
+            "配当係数",
+            "配当位置",
+            "総合候補理由",
+        ]
+        df_final_view = df_final[[c for c in final_view_cols if c in df_final.columns]].copy()
+        st.table(df_final_view.reset_index(drop=True))
+    else:
+        st.info("最終買い目候補はありません。条件を緩めるか、日次入力を確認してください。")
+
+    with st.expander("詳細ペア比較表を開く", expanded=False):
+        preferred_pair_cols = [
+            "最終買い目",
+            "相手候補",
+            "軸",
+            "相手",
+            "型",
+            "対象N",
+            "的中H（配当あり）",
+            "的中率%",
+            "想定ペア的中率%",
+            "想定との差",
+            "平均との差",
+            "中央値差",
+            "偏差値",
+            "基準位置",
+            "状態",
+            "平均配当",
+            "配当係数",
+            "配当差",
+            "配当偏差値",
+            "配当位置",
+            "配当戻り余地",
+            "総合候補理由",
+            "回収率%",
+        ]
+        df_pairs_detail = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
+        st.dataframe(df_pairs_detail, use_container_width=True, hide_index=True, height=420)
 
     st.markdown("### 買い目確認")
     st.write("今日入力の個別2車複：評価1・評価2軸に必要なペアを自動集計")
