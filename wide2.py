@@ -254,7 +254,7 @@ def payout_row(label: str, rec: Dict[str, int]) -> Dict:
         "総点数KSUM": KSUM,
         "投資額換算": invest,
         "払戻合計SUM": SUM,
-        "的中H（配当あり）": H,
+        "的中H": H,
         "的中率%": hit_rate,
         "平均配当": avg_pay,
         "回収率%": roi,
@@ -989,7 +989,6 @@ with tabs[2]:
             row["配当位置"] = ""
             row["配当戻り余地"] = ""
             row["総合候補理由"] = ""
-            row["相手候補"] = ""
             row["最終買い目"] = ""
             pair_rows.append(row)
 
@@ -1045,7 +1044,7 @@ with tabs[2]:
             # スロットの未回収台と同じ扱いで、H=0（未回収）は原則除外。
             # まず「配当安すぎ＝配当戻り余地あり」を優先し、点数が不足する場合だけ
             # 「基準付近」の配当実績ありペアで補完する。
-            df_pairs["_has_hit"] = df_pairs["的中H（配当あり）"].fillna(0).astype(float) > 0
+            df_pairs["_has_hit"] = df_pairs["的中H"].fillna(0).astype(float) > 0
             final_candidate_mask = candidate_mask & df_pairs["_has_hit"]
             if PAY_RETURN_ONLY:
                 final_candidate_mask = final_candidate_mask & (df_pairs["_pay_low"] | df_pairs["_pay_near"])
@@ -1105,7 +1104,6 @@ with tabs[2]:
                 candidate_unique = candidate_df.drop_duplicates(subset=["ペアキー"], keep="first")
                 candidate_idx = candidate_unique.head(int(FINAL_POINT_N)).index
 
-            df_pairs.loc[candidate_idx, "相手候補"] = "☆"
             df_pairs.loc[candidate_idx, "最終買い目"] = "☆"
 
             recommended_pairs = []
@@ -1129,12 +1127,11 @@ with tabs[2]:
 
     preferred_pair_cols = [
         "最終買い目",
-        "相手候補",
         "軸",
         "相手",
         "型",
         "対象N",
-        "的中H（配当あり）",
+        "的中H",
         "的中率%",
         "想定ペア的中率%",
         "想定との差",
