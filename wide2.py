@@ -949,9 +949,9 @@ with tabs[2]:
 
     st.markdown("#### 配当収束シミュレーション設定")
     st.caption("平均配当の基準は、固定1200円ではなくペア別基準配当で判定します。初期値は小倉ミッドナイトA級7車・直近2年の平均配当です。")
-    c_pay1, c_pay2 = st.columns([1, 3])
+    c_pay1, c_pay2, c_pay3 = st.columns([1, 1, 3])
     OVERHEAT_Z = c_pay1.number_input(
-        "過熱偏差値ライン",
+        "的中過熱偏差値",
         key="overheat_z_line",
         min_value=50.0,
         max_value=80.0,
@@ -959,7 +959,16 @@ with tabs[2]:
         step=1.0,
         format="%.1f",
     )
-    c_pay2.write("ペアごとに基準配当を変えるため、1-2の安さと2-7の安さを同じ1200円基準で誤判定しません。")
+    PAY_OVERHEAT_Z = c_pay2.number_input(
+        "配当過熱偏差値",
+        key="pay_overheat_z_line",
+        min_value=50.0,
+        max_value=90.0,
+        value=60.0,
+        step=1.0,
+        format="%.1f",
+    )
+    c_pay3.write("ペアごとに基準配当を変え、さらに配当偏差値が高すぎるペアは過熱として候補から外します。")
 
     with st.expander("ペア別基準配当を確認・調整", expanded=False):
         st.caption("初期値：小倉ミッドナイトA級7車・直近2年。会場や条件を変える場合はここを上書きしてください。")
@@ -1006,7 +1015,7 @@ with tabs[2]:
         "未回収除外＋配当戻り優先",
         key="pay_return_only_axis12",
         value=True,
-        help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値60以上は過熱として除外します。",
+        help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値/配当偏差値が過熱ライン以上は除外します。",
     )
     st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、安定枠→中庸枠→歪み枠の順で候補化します。中庸枠が2点以上ある場合は歪み枠より中庸枠を優先します。")
 
@@ -1100,6 +1109,7 @@ with tabs[2]:
                 | (df_pairs["偏差値"].notna() & (df_pairs["偏差値"] < 50))
             )
             df_pairs["_overhit"] = df_pairs["偏差値"].notna() & (df_pairs["偏差値"] >= float(OVERHEAT_Z))
+            df_pairs["_pay_dev_overheat"] = df_pairs["配当偏差値"].notna() & (df_pairs["配当偏差値"] >= float(PAY_OVERHEAT_Z))
             df_pairs["_cold"] = df_pairs["偏差値"].notna() & (df_pairs["偏差値"] <= 40)
             df_pairs["_pay_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] < 0.80)
             df_pairs["_pay_near"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] >= 0.80) & (df_pairs["配当係数"] <= 1.30)
@@ -1107,11 +1117,11 @@ with tabs[2]:
 
             # 最終候補対象：
             # H=0（未回収）は反発点が読めないため除外。
-            # 回収率180%以上、的中率偏差値60以上は過熱として原則除外。
+            # 回収率180%以上、的中率偏差値・配当偏差値が過熱ライン以上なら過熱として原則除外。
             # その上で、買い目を「安定枠／中庸枠／歪み枠」に分けて選ぶ。
             df_pairs["_has_hit"] = df_pairs["的中H"].fillna(0).astype(float) > 0
             df_pairs["_roi_overheat"] = df_pairs["回収率%"].notna() & (df_pairs["回収率%"].astype(float) >= 180.0)
-            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"]
+            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_pay_dev_overheat"]
             df_pairs["_coef_core"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) >= 0.50) & (df_pairs["配当係数"].astype(float) <= 1.20)
             df_pairs["_coef_too_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) < 0.50)
 
@@ -1181,6 +1191,7 @@ with tabs[2]:
             df_pairs.loc[~df_pairs["_has_hit"], "総合候補理由"] = "未回収除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_overheat"], "総合候補理由"] = "回収率過熱除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"] & ~df_pairs["_roi_overheat"], "総合候補理由"] = "的中率過熱除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_pay_dev_overheat"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_overhit"], "総合候補理由"] = "配当過熱除外"
             df_pairs.loc[df_pairs["_stable_lowpay_12"], "総合候補理由"] = "安定枠"
             df_pairs.loc[df_pairs["_middle_core"], "総合候補理由"] = "中庸枠"
             df_pairs.loc[df_pairs["_distortion_core"], "総合候補理由"] = "歪み枠"
@@ -1261,14 +1272,14 @@ with tabs[2]:
                 st.success(f"本日の推奨2車複候補：{recommended_text}")
 
             drop_cols = [
-                "_expected_ok", "_below_base", "_overhit", "_cold",
+                "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
                 "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_coef_core", "_coef_too_low", "_not_overheated",
                 "_stable_lowpay_12", "_middle_core", "_distortion_core", "_枠内順位",
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
 
             drop_cols = [
-                "_expected_ok", "_below_base", "_overhit", "_cold",
+                "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
                 "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_coef_core", "_coef_too_low", "_not_overheated", "_候補優先",
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
