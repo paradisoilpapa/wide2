@@ -982,7 +982,7 @@ with tabs[2]:
                 )
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
-    st.caption("評価1軸・評価2軸の個別2車複を同時に比較し、未回収除外＋配当戻り優先。ただし回収率・的中率が過熱しているペアは除外して3〜4点に絞ります。")
+    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。1R3点前提で、安定1点＋中庸優先＋不足分だけ歪みを採用します。")
 
     c_final1, c_final2, c_final3 = st.columns([1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
@@ -1008,7 +1008,7 @@ with tabs[2]:
         value=True,
         help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値60以上は過熱として除外します。",
     )
-    st.caption("評価1・評価2を両方候補化。初期設定では『未回収除外＋配当戻り優先＋過熱除外』にします。回収率180%以上・的中偏差値60以上は原則候補から外します。")
+    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、安定枠→中庸枠→歪み枠の順で候補化します。中庸枠が2点以上ある場合は歪み枠より中庸枠を優先します。")
 
     pair_rows = []
     for axis in [1, 2]:
@@ -1107,17 +1107,16 @@ with tabs[2]:
 
             # 最終候補対象：
             # H=0（未回収）は反発点が読めないため除外。
-            # さらに「配当が安い」だけでは買わず、回収率・的中率が上振れ済みのペアも除外する。
-            # 目安：回収率180%以上、的中率偏差値60以上は過熱扱い。
+            # 回収率180%以上、的中率偏差値60以上は過熱として原則除外。
+            # その上で、買い目を「安定枠／中庸枠／歪み枠」に分けて選ぶ。
             df_pairs["_has_hit"] = df_pairs["的中H"].fillna(0).astype(float) > 0
             df_pairs["_roi_overheat"] = df_pairs["回収率%"].notna() & (df_pairs["回収率%"].astype(float) >= 180.0)
+            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"]
             df_pairs["_coef_core"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) >= 0.50) & (df_pairs["配当係数"].astype(float) <= 1.20)
             df_pairs["_coef_too_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) < 0.50)
-            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"]
 
-            # 1-2はペア基準配当が極端に低い本線枠なので、配当係数だけで「高すぎ」扱いにしない。
-            # 条件：的中実績あり／偏差値45〜55／回収率70〜130／平均配当300〜700／配当係数1.0〜1.8。
-            # これは主砲ではなく「低配当安定枠」として候補に残すための特例。
+            # 安定枠：1-2のような低配当・安定ペアを土台にする。
+            # ペア基準比では多少高くても、絶対配当が安く、偏差値・回収率が過熱していなければ候補に残す。
             df_pairs["_stable_lowpay_12"] = (
                 (df_pairs["ペアキー"] == "1-2")
                 & df_pairs["_has_hit"]
@@ -1130,83 +1129,143 @@ with tabs[2]:
                 & df_pairs["平均配当"].notna()
                 & (df_pairs["平均配当"].astype(float) >= 300.0)
                 & (df_pairs["平均配当"].astype(float) <= 700.0)
+            )
+
+            # 中庸枠：主力株枠。候補が2点以上あるなら歪み枠より優先する。
+            # 条件は「過熱なし・的中実績あり・配当係数が基準付近・偏差値が中庸〜やや高め・回収率が暴れていない」。
+            df_pairs["_middle_core"] = (
+                candidate_mask
+                & df_pairs["_has_hit"]
+                & df_pairs["_not_overheated"]
                 & df_pairs["配当係数"].notna()
-                & (df_pairs["配当係数"].astype(float) >= 1.0)
-                & (df_pairs["配当係数"].astype(float) <= 1.8)
+                & (df_pairs["配当係数"].astype(float) >= 0.80)
+                & (df_pairs["配当係数"].astype(float) <= 1.30)
+                & df_pairs["偏差値"].notna()
+                & (df_pairs["偏差値"].astype(float) >= 45.0)
+                & (df_pairs["偏差値"].astype(float) <= 58.0)
+                & df_pairs["回収率%"].notna()
+                & (df_pairs["回収率%"].astype(float) >= 60.0)
+                & (df_pairs["回収率%"].astype(float) <= 160.0)
+            )
+
+            # 歪み枠：評価番号では固定しない。条件だけで選ぶ。
+            # 配当係数が低く、下振れ〜中庸で、未回収でも過熱でもないペア。
+            df_pairs["_distortion_core"] = (
+                candidate_mask
+                & df_pairs["_has_hit"]
+                & df_pairs["_not_overheated"]
+                & df_pairs["配当係数"].notna()
+                & (df_pairs["配当係数"].astype(float) >= 0.50)
+                & (df_pairs["配当係数"].astype(float) < 0.80)
+                & df_pairs["偏差値"].notna()
+                & (df_pairs["偏差値"].astype(float) >= 40.0)
+                & (df_pairs["偏差値"].astype(float) <= 58.0)
             )
 
             final_candidate_mask = candidate_mask & df_pairs["_has_hit"] & df_pairs["_not_overheated"]
             if PAY_RETURN_ONLY:
-                final_candidate_mask = final_candidate_mask & (df_pairs["_pay_low"] | df_pairs["_pay_near"] | df_pairs["_stable_lowpay_12"])
+                final_candidate_mask = final_candidate_mask & (
+                    df_pairs["_stable_lowpay_12"] | df_pairs["_middle_core"] | df_pairs["_distortion_core"]
+                )
 
-            # 優先順：
-            # 0) 1-2低配当安定枠（ペア基準比では高くても絶対配当が安く、過熱していない）
-            # 1) 配当係数0.50〜1.20・下振れ（戻り余地があり、過熱していない）
-            # 2) 配当係数0.50〜1.20・中庸（自然な補完候補）
-            # 3) 配当係数0.50未満（安すぎるがスパン長期化注意）
-            # 4) その他の未過熱・実績あり
-            # 除外：未回収、回収率180%以上、的中率偏差値60以上、配当高すぎ。
-            df_pairs["_候補優先"] = 9
-            df_pairs.loc[
-                final_candidate_mask & df_pairs["_stable_lowpay_12"],
-                "_候補優先",
-            ] = 0
-            df_pairs.loc[
-                final_candidate_mask & df_pairs["_coef_core"] & df_pairs["_below_base"],
-                "_候補優先",
-            ] = 1
-            df_pairs.loc[
-                final_candidate_mask & df_pairs["_coef_core"] & ~df_pairs["_below_base"],
-                "_候補優先",
-            ] = 2
-            df_pairs.loc[
-                final_candidate_mask & df_pairs["_coef_too_low"],
-                "_候補優先",
-            ] = 3
-            df_pairs.loc[
-                final_candidate_mask & ~df_pairs["_pay_high"],
-                "_候補優先",
-            ] = df_pairs.loc[final_candidate_mask & ~df_pairs["_pay_high"], "_候補優先"].clip(upper=4)
-            df_pairs.loc[final_candidate_mask & df_pairs["_pay_high"] & ~df_pairs["_stable_lowpay_12"], "_候補優先"] = 8
-            df_pairs.loc[candidate_mask & ~df_pairs["_has_hit"], "_候補優先"] = 9
-            df_pairs.loc[df_pairs["_roi_overheat"] | df_pairs["_overhit"], "_候補優先"] = 9
+            df_pairs["資産枠"] = ""
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "資産枠"] = "安定"
+            df_pairs.loc[df_pairs["_middle_core"], "資産枠"] = "中庸"
+            df_pairs.loc[df_pairs["_distortion_core"], "資産枠"] = "歪み"
 
             df_pairs.loc[df_pairs["_pay_low"], "配当戻り余地"] = "あり"
             df_pairs.loc[df_pairs["_pay_near"], "配当戻り余地"] = "中庸"
             df_pairs.loc[df_pairs["_pay_high"], "配当戻り余地"] = "上振れ警戒"
             df_pairs.loc[df_pairs["_stable_lowpay_12"], "配当戻り余地"] = "低配当安定"
+
             df_pairs.loc[~df_pairs["_has_hit"], "総合候補理由"] = "未回収除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_overheat"], "総合候補理由"] = "回収率過熱除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"] & ~df_pairs["_roi_overheat"], "総合候補理由"] = "的中率過熱除外"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_core"] & df_pairs["_below_base"], "総合候補理由"] = "未過熱＋下振れ"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_core"] & ~df_pairs["_below_base"], "総合候補理由"] = "未過熱＋基準帯"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_too_low"], "総合候補理由"] = "安すぎ注意枠"
-            df_pairs.loc[df_pairs["_stable_lowpay_12"], "総合候補理由"] = "低配当安定枠"
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "総合候補理由"] = "安定枠"
+            df_pairs.loc[df_pairs["_middle_core"], "総合候補理由"] = "中庸枠"
+            df_pairs.loc[df_pairs["_distortion_core"], "総合候補理由"] = "歪み枠"
 
-            # 重複する2車複ペアは1つにまとめる。
-            # 例：評価1-2は評価1軸でも評価2軸でも同一券なので、優先順位が高い方だけ採用。
-            candidate_df = df_pairs.loc[final_candidate_mask].sort_values(
-                ["_候補優先", "配当係数", "偏差値", "回収率%", "想定ペア的%", "軸番号", "相手"],
-                ascending=[True, True, True, True, False, True, True],
+            # 枠別の優先順位。
+            # 1R3点前提：安定1点＋中庸優先＋不足分だけ歪み。
+            # 中庸枠が2点以上ある場合は、歪み枠より中庸枠を優先する。
+            df_pairs["_枠内順位"] = 999.0
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "_枠内順位"] = (
+                (df_pairs["偏差値"].astype(float) - 50.0).abs()
+                + (df_pairs["回収率%"].astype(float) - 100.0).abs() / 20.0
             )
-            if candidate_df.empty:
-                if PAY_RETURN_ONLY:
-                    st.warning("未回収除外＋配当戻り優先では候補がありません。必要ならチェックを外して広め候補を確認してください。")
-                candidate_idx = []
-            else:
-                candidate_unique = candidate_df.drop_duplicates(subset=["ペアキー"], keep="first")
-                candidate_idx = candidate_unique.head(int(FINAL_POINT_N)).index
+            df_pairs.loc[df_pairs["_middle_core"], "_枠内順位"] = (
+                (df_pairs["偏差値"].astype(float) - 52.0).abs()
+                + (df_pairs["配当係数"].astype(float) - 1.0).abs() * 10.0
+                + (df_pairs["回収率%"].astype(float) - 100.0).abs() / 35.0
+            )
+            df_pairs.loc[df_pairs["_distortion_core"], "_枠内順位"] = (
+                (df_pairs["配当係数"].astype(float) - 0.70).abs() * 10.0
+                + (df_pairs["偏差値"].astype(float) - 50.0).abs() / 2.0
+                + (df_pairs["回収率%"].astype(float) - 100.0).abs() / 50.0
+            )
 
-            df_pairs.loc[candidate_idx, "候補"] = "☆"
+            def _pick_unique(source_df: pd.DataFrame, limit: int, already: set) -> list:
+                if limit <= 0 or source_df.empty:
+                    return []
+                picked = []
+                for idx, r in source_df.sort_values(["_枠内順位", "配当係数", "偏差値", "回収率%", "軸番号", "相手"]).iterrows():
+                    key = str(r.get("ペアキー"))
+                    if key in already:
+                        continue
+                    picked.append(idx)
+                    already.add(key)
+                    if len(picked) >= limit:
+                        break
+                return picked
+
+            selected_idx = []
+            used_pairs = set()
+            target_n = int(FINAL_POINT_N)
+
+            stable_df = df_pairs.loc[final_candidate_mask & df_pairs["_stable_lowpay_12"]]
+            middle_df = df_pairs.loc[final_candidate_mask & df_pairs["_middle_core"]]
+            distortion_df = df_pairs.loc[final_candidate_mask & df_pairs["_distortion_core"]]
+
+            # まず安定枠を最大1点。
+            selected_idx += _pick_unique(stable_df, 1, used_pairs)
+
+            # 次に中庸枠。中庸が2点以上あるなら、歪みより中庸を優先して2点まで採用。
+            middle_limit = max(0, target_n - len(selected_idx))
+            if len(middle_df.drop_duplicates(subset=["ペアキー"])) >= 2:
+                middle_limit = min(middle_limit, 2)
+            else:
+                middle_limit = min(middle_limit, 1)
+            selected_idx += _pick_unique(middle_df, middle_limit, used_pairs)
+
+            # まだ足りない時だけ歪み枠を追加。
+            selected_idx += _pick_unique(distortion_df, target_n - len(selected_idx), used_pairs)
+
+            # それでも足りない場合だけ、未過熱・実績ありの広め候補で補完。
+            if len(selected_idx) < target_n:
+                fallback_df = df_pairs.loc[final_candidate_mask & ~df_pairs.index.isin(selected_idx)].copy()
+                fallback_df["_枠内順位"] = fallback_df["_枠内順位"].fillna(999.0)
+                selected_idx += _pick_unique(fallback_df, target_n - len(selected_idx), used_pairs)
+
+            if not selected_idx and PAY_RETURN_ONLY:
+                st.warning("未回収除外＋配当戻り優先では候補がありません。必要ならチェックを外して広め候補を確認してください。")
+
+            df_pairs.loc[selected_idx, "候補"] = "☆"
 
             recommended_pairs = []
-            for idx in candidate_idx:
+            for idx in selected_idx:
                 pair_key = str(df_pairs.loc[idx, "ペアキー"])
                 recommended_pairs.append(pair_key)
             recommended_pairs = sorted(recommended_pairs, key=lambda x: tuple(int(v) for v in x.split("-")))
             recommended_text = " / ".join(recommended_pairs)
             if recommended_text:
                 st.success(f"本日の推奨2車複候補：{recommended_text}")
+
+            drop_cols = [
+                "_expected_ok", "_below_base", "_overhit", "_cold",
+                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_coef_core", "_coef_too_low", "_not_overheated",
+                "_stable_lowpay_12", "_middle_core", "_distortion_core", "_枠内順位",
+            ]
+            df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
 
             drop_cols = [
                 "_expected_ok", "_below_base", "_overhit", "_cold",
@@ -1240,6 +1299,7 @@ with tabs[2]:
         "配当偏差値",
         "配当位置",
         "配当戻り余地",
+        "資産枠",
         "総合候補理由",
         "回収率%",
     ]
