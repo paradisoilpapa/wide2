@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v7.4｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.2｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -600,24 +600,39 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 個別2車複 引継ぎ入力（累積）")
-        st.caption("分析結果の『個別2車複 引継ぎ用累積表』をそのまま転記します。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じ扱いで自動計算します。")
-
-        h7 = st.columns([2.0, 1, 1.2, 1])
-        h7[0].markdown("**型**")
-        h7[1].markdown("**対象N**")
-        h7[2].markdown("**払戻合計SUM**")
-        h7[3].markdown("**的中H**")
+        st.caption(
+            "分析結果の『個別2車複 引継ぎ用累積表』をそのまま転記します。"
+            "対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じ扱いで自動計算します。"
+            " 1-7・2-7も低頻度確認用として残しますが、未回収なら候補には入りません。"
+        )
 
         nishafuku_pair_inputs = []
-        for a, b in NISHAFUKU_PAIRS:
-            label = nishafuku_label(a, b)
-            safe_key = label.replace(" ", "_").replace("-", "_")
-            c0, c1, c2, c3 = st.columns([2.0, 1, 1.2, 1])
-            c0.write(label)
-            N = c1.number_input("", key=f"prev_pair_{safe_key}_N", min_value=0, value=0)
-            SUM = c2.number_input("", key=f"prev_pair_{safe_key}_SUM", min_value=0, value=0, step=10)
-            H = c3.number_input("", key=f"prev_pair_{safe_key}_H", min_value=0, value=0)
-            nishafuku_pair_inputs.append((label, int(N), int(SUM), int(H)))
+
+        def _pair_input_block(title: str, pairs: List[Tuple[int, int]]):
+            st.markdown(f"**{title}**")
+            h_pair = st.columns([1.35, 0.85, 1.05, 0.75])
+            h_pair[0].markdown("**型**")
+            h_pair[1].markdown("**N**")
+            h_pair[2].markdown("**SUM**")
+            h_pair[3].markdown("**H**")
+
+            for a, b in pairs:
+                label = nishafuku_label(a, b)
+                safe_key = label.replace(" ", "_").replace("-", "_")
+                c0, c1, c2, c3 = st.columns([1.35, 0.85, 1.05, 0.75])
+                c0.write(label.replace("2車複 ", ""))
+                N = c1.number_input("", key=f"prev_pair_{safe_key}_N", min_value=0, value=0, label_visibility="collapsed")
+                SUM = c2.number_input("", key=f"prev_pair_{safe_key}_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
+                H = c3.number_input("", key=f"prev_pair_{safe_key}_H", min_value=0, value=0, label_visibility="collapsed")
+                nishafuku_pair_inputs.append((label, int(N), int(SUM), int(H)))
+
+        left_pairs = [(1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7)]
+        right_pairs = [(2, 3), (2, 4), (2, 5), (2, 6), (2, 7)]
+        col_left, col_right = st.columns(2)
+        with col_left:
+            _pair_input_block("評価1軸", left_pairs)
+        with col_right:
+            _pair_input_block("評価2軸", right_pairs)
 
         st.divider()
 
