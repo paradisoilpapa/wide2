@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 標準棚/穴棚 v5.9｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 標準棚/穴棚 v6.1｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -936,15 +936,75 @@ with tabs[2]:
             return None
         return round((s + h) / 2.0, 2)
 
-    def _wave_judge(values):
+    def _median(values):
+        vals = sorted([float(v) for v in values if v is not None and not pd.isna(v)])
+        if not vals:
+            return None
+        n = len(vals)
+        mid = n // 2
+        if n % 2 == 1:
+            return vals[mid]
+        return (vals[mid - 1] + vals[mid]) / 2.0
+
+    def _mean(values):
+        vals = [float(v) for v in values if v is not None and not pd.isna(v)]
+        if not vals:
+            return None
+        return sum(vals) / len(vals)
+
+    def _std_pop(values):
+        vals = [float(v) for v in values if v is not None and not pd.isna(v)]
+        if len(vals) <= 1:
+            return 0.0
+        m = sum(vals) / len(vals)
+        return (sum((x - m) ** 2 for x in vals) / len(vals)) ** 0.5
+
+    def _deviation_stats(value, all_values):
+        """候補群内での平均との差・中央値差・偏差値を返す。"""
+        v = _num_or_none(value)
+        vals = [float(x) for x in all_values if x is not None and not pd.isna(x)]
+        if v is None or not vals:
+            return {
+                "平均との差": None,
+                "中央値差": None,
+                "偏差値": None,
+                "基準位置": "",
+            }
+        m = _mean(vals)
+        med = _median(vals)
+        sd = _std_pop(vals)
+        if sd and sd > 0:
+            z = round(50 + 10 * ((v - m) / sd), 1)
+        else:
+            z = 50.0
+        mean_delta = round(v - m, 1) if m is not None else None
+        median_delta = round(v - med, 1) if med is not None else None
+
+        if median_delta is not None and median_delta < 0 and z < 50:
+            pos = "基準下"
+        elif median_delta is not None and median_delta > 0 and z > 50:
+            pos = "基準上"
+        else:
+            pos = "中央値付近"
+
+        return {
+            "平均との差": mean_delta,
+            "中央値差": median_delta,
+            "偏差値": z,
+            "基準位置": pos,
+        }
+
+    def _wave_judge(values, baseline_median_delta=None, baseline_z=None):
         """
         直近3回の合成差から波判定。
+        ここでは単なるプラス/マイナスではなく、候補群の中央値・偏差値より下にいるかも見る。
         優先順位：
-        1) マイナス域 + 3回連続上昇
-        2) マイナス域 + 上昇傾向
-        3) マイナス域
-        4) 上昇傾向
-        5) その他
+        1) 基準下 + マイナス域 + 3回連続上昇
+        2) 基準下 + 3回連続上昇
+        3) 基準下 + 上昇傾向
+        4) マイナス域 + 上昇傾向
+        5) 基準下
+        6) その他
         """
         vals = [float(v) for v in values if v is not None and not pd.isna(v)]
         if len(vals) < 2:
@@ -967,21 +1027,33 @@ with tabs[2]:
             rising_strict = vals[1] > vals[0]
             rising_soft = rising_strict
 
-        if current < 0 and rising_strict:
-            label = "◎ マイナス域＋連続上昇"
+        below_baseline = False
+        if baseline_median_delta is not None and not pd.isna(baseline_median_delta):
+            below_baseline = float(baseline_median_delta) < 0
+        if baseline_z is not None and not pd.isna(baseline_z):
+            below_baseline = below_baseline or float(baseline_z) < 50
+
+        if below_baseline and current < 0 and rising_strict:
+            label = "◎ 基準下＋マイナス域＋連続上昇"
             group = 1
-        elif current < 0 and rising_soft:
-            label = "○ マイナス域＋上昇"
+        elif below_baseline and rising_strict:
+            label = "○ 基準下＋連続上昇"
             group = 2
-        elif current < 0:
-            label = "△ マイナス域"
+        elif below_baseline and rising_soft:
+            label = "○ 基準下＋上昇"
             group = 3
-        elif rising_soft:
-            label = "▲ 上昇中"
+        elif current < 0 and rising_soft:
+            label = "△ マイナス域＋上昇"
             group = 4
+        elif below_baseline:
+            label = "△ 基準下"
+            group = 5
+        elif rising_soft:
+            label = "▲ 上昇中（基準上）"
+            group = 6
         else:
             label = "見送り"
-            group = 5
+            group = 7
 
         # 小さいほど優先。group優先、次に傾きが大きい軸、最後に現在値が0へ近い軸。
         priority = round(group * 10000 - slope * 100 + abs(current), 2)
@@ -1042,6 +1114,16 @@ with tabs[2]:
                 "prev1_comp": _avg_diff(prev1_std, prev1_hole),
             }
 
+    # 軸候補の現在合成差を先に作り、候補群内の平均・中央値・偏差値を判定に使う。
+    axis_current_comps = {}
+    for axis, (std_label, hole_label) in axis_defs.items():
+        std_row = df_sim[df_sim["型"] == std_label]
+        hole_row = df_sim[df_sim["型"] == hole_label]
+        std_diff_tmp = std_row.iloc[0].get("想定との差") if not std_row.empty else None
+        hole_diff_tmp = hole_row.iloc[0].get("想定との差") if not hole_row.empty else None
+        axis_current_comps[axis] = _avg_diff(std_diff_tmp, hole_diff_tmp)
+    axis_comp_values = list(axis_current_comps.values())
+
     axis_rows = []
     wave_chart_rows = []
 
@@ -1074,7 +1156,12 @@ with tabs[2]:
         else:
             wave_values = [current_comp]
 
-        wave_info = _wave_judge(wave_values)
+        axis_dev = _deviation_stats(current_comp, axis_comp_values)
+        wave_info = _wave_judge(
+            wave_values,
+            baseline_median_delta=axis_dev.get("中央値差"),
+            baseline_z=axis_dev.get("偏差値"),
+        )
 
         # グラフ用
         if hist.get("use") and current_comp is not None:
@@ -1096,6 +1183,10 @@ with tabs[2]:
                 "穴差": hole_diff,
                 "穴回収率%": hole_roi,
                 "現在合成差": current_comp,
+                "平均との差": axis_dev.get("平均との差"),
+                "中央値差": axis_dev.get("中央値差"),
+                "偏差値": axis_dev.get("偏差値"),
+                "基準位置": axis_dev.get("基準位置"),
                 "直近3回傾き": wave_info["直近3回傾き"],
                 "波判定": wave_info["波判定"],
                 "波優先度": wave_info["波優先度"],
@@ -1137,6 +1228,10 @@ with tabs[2]:
         "穴差",
         "穴回収率%",
         "現在合成差",
+        "平均との差",
+        "中央値差",
+        "偏差値",
+        "基準位置",
         "直近3回傾き",
         "波判定",
         "軸別安定度",
@@ -1146,7 +1241,7 @@ with tabs[2]:
 
     if final_axis is not None:
         st.markdown("### 最終相手候補｜軸別ペア比較")
-        st.caption("最終軸と各評価の2車複を比較し、想定との差が0に近い相手3車を候補にします。")
+        st.caption("最終軸と各評価の2車複を比較します。平均との差・中央値差・偏差値で基準位置を出し、基準下の戻り候補を優先します。")
 
         pair_rows = []
         for opp in range(1, 8):
@@ -1176,31 +1271,65 @@ with tabs[2]:
         df_pairs = pd.DataFrame(pair_rows)
 
         # 相手候補：
-        # 想定ペア的中率0%は候補対象外。
-        # そのうえで、想定との差が0に近い3車を候補にする。
+        # 旧ロジックの「想定との差が0に近い順」は、当たりすぎ/安定側を拾いやすい。
+        # ここでは候補群内の平均との差・中央値差・偏差値を出し、
+        # 「基準下＝下振れ圏」から戻り候補を優先する。
         if not df_pairs.empty and df_pairs["想定との差"].notna().any():
-            df_pairs["_absdiff"] = df_pairs["想定との差"].abs()
-
             candidate_mask = (
                 df_pairs["想定との差"].notna()
                 & df_pairs["想定ペア的中率%"].notna()
                 & (df_pairs["想定ペア的中率%"] > 0)
             )
 
+            diff_values = df_pairs.loc[candidate_mask, "想定との差"].tolist() if candidate_mask.any() else []
+            for idx in df_pairs.index:
+                stats = _deviation_stats(df_pairs.loc[idx, "想定との差"], diff_values)
+                df_pairs.loc[idx, "平均との差"] = stats.get("平均との差")
+                df_pairs.loc[idx, "中央値差"] = stats.get("中央値差")
+                df_pairs.loc[idx, "偏差値"] = stats.get("偏差値")
+                df_pairs.loc[idx, "基準位置"] = stats.get("基準位置")
+
             if candidate_mask.any():
+                # 基準下かつ想定的中率がある候補を優先。
+                # 想定率が低すぎる下振れは「外れて当然」になりやすいので、候補群の中央値以上を厚く見る。
+                expected_median = _median(df_pairs.loc[candidate_mask, "想定ペア的中率%"].tolist())
+                df_pairs["_expected_ok"] = df_pairs["想定ペア的中率%"].apply(
+                    lambda x: bool(pd.notna(x) and expected_median is not None and float(x) >= float(expected_median))
+                )
+                df_pairs["_below_base"] = (
+                    (df_pairs["中央値差"].notna() & (df_pairs["中央値差"] < 0))
+                    | (df_pairs["偏差値"].notna() & (df_pairs["偏差値"] < 50))
+                )
+                df_pairs["_absdiff"] = df_pairs["想定との差"].abs()
+
+                # 優先順：
+                # 1) 基準下＋想定率中央値以上
+                # 2) 基準下
+                # 3) 中央値付近で、まだ過熱していないもの
+                df_pairs["_候補優先"] = 9
+                df_pairs.loc[candidate_mask & df_pairs["_below_base"] & df_pairs["_expected_ok"], "_候補優先"] = 1
+                df_pairs.loc[candidate_mask & df_pairs["_below_base"] & ~df_pairs["_expected_ok"], "_候補優先"] = 2
+                df_pairs.loc[
+                    candidate_mask
+                    & ~df_pairs["_below_base"]
+                    & df_pairs["中央値差"].notna()
+                    & (df_pairs["中央値差"].abs() <= 3.0),
+                    "_候補優先",
+                ] = 3
+
                 candidate_df = df_pairs.loc[candidate_mask].sort_values(
-                    ["_absdiff", "想定ペア的中率%", "相手"],
-                    ascending=[True, False, True],
+                    ["_候補優先", "中央値差", "偏差値", "想定ペア的中率%", "相手"],
+                    ascending=[True, True, True, False, True],
                 )
                 candidate_idx = candidate_df.head(3).index
                 df_pairs.loc[candidate_idx, "相手候補"] = "☆"
                 recommended_opps = sorted([int(x) for x in df_pairs.loc[candidate_idx, "相手"].tolist()])
                 recommended_text = "".join(str(x) for x in recommended_opps)
                 st.success(f"本日の推奨セット候補：評価{final_axis}-{recommended_text}")
+
+                df_pairs = df_pairs.drop(columns=["_expected_ok", "_below_base", "_absdiff", "_候補優先"])
             else:
                 st.info("候補対象となる相手がありません。想定ペア的中率0%の組み合わせは除外しています。")
-
-            df_pairs = df_pairs.drop(columns=["_absdiff"])
         else:
             st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
 
@@ -1214,6 +1343,10 @@ with tabs[2]:
             "的中率%",
             "想定ペア的中率%",
             "想定との差",
+            "平均との差",
+            "中央値差",
+            "偏差値",
+            "基準位置",
             "状態",
             "平均配当",
             "回収率%",
