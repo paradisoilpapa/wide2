@@ -908,7 +908,10 @@ with tabs[2]:
     st.dataframe(df_sim, use_container_width=True, hide_index=True)
 
     st.markdown("### 最終軸候補｜軸1・2限定 標準棚＋穴棚 合成")
-    st.caption("評価1・評価2のみを軸候補にし、同じ軸の標準棚と穴棚を合成します。軸別安定度＝|標準差|＋|穴差|。")
+    st.caption(
+        "評価1・評価2のみを軸候補にします。"
+        "通常は直近3回の波判定を優先。履歴未入力時は従来の軸別安定度で判定します。"
+    )
 
     # 軸ごとに標準棚・穴棚をまとめる
     axis_defs = {
@@ -916,7 +919,132 @@ with tabs[2]:
         2: ("標準 2-134", "穴 2-567"),
     }
 
+    def _num_or_none(v):
+        """None/NaNを安全に処理してfloatへ。"""
+        try:
+            if pd.isna(v):
+                return None
+            return float(v)
+        except Exception:
+            return None
+
+    def _avg_diff(std_diff, hole_diff):
+        """標準差と穴差の合成値。両方ある時だけ平均する。"""
+        s = _num_or_none(std_diff)
+        h = _num_or_none(hole_diff)
+        if s is None or h is None:
+            return None
+        return round((s + h) / 2.0, 2)
+
+    def _wave_judge(values):
+        """
+        直近3回の合成差から波判定。
+        優先順位：
+        1) マイナス域 + 3回連続上昇
+        2) マイナス域 + 上昇傾向
+        3) マイナス域
+        4) 上昇傾向
+        5) その他
+        """
+        vals = [float(v) for v in values if v is not None and not pd.isna(v)]
+        if len(vals) < 2:
+            return {
+                "波判定": "履歴不足",
+                "波優先度": None,
+                "直近3回傾き": None,
+                "現在合成差": vals[-1] if vals else None,
+            }
+
+        # 直近3回だけ使う
+        vals = vals[-3:]
+        current = vals[-1]
+        slope = round(vals[-1] - vals[0], 2)
+
+        if len(vals) >= 3:
+            rising_strict = vals[0] < vals[1] < vals[2]
+            rising_soft = vals[2] > vals[1] and vals[2] > vals[0]
+        else:
+            rising_strict = vals[1] > vals[0]
+            rising_soft = rising_strict
+
+        if current < 0 and rising_strict:
+            label = "◎ マイナス域＋連続上昇"
+            group = 1
+        elif current < 0 and rising_soft:
+            label = "○ マイナス域＋上昇"
+            group = 2
+        elif current < 0:
+            label = "△ マイナス域"
+            group = 3
+        elif rising_soft:
+            label = "▲ 上昇中"
+            group = 4
+        else:
+            label = "見送り"
+            group = 5
+
+        # 小さいほど優先。group優先、次に傾きが大きい軸、最後に現在値が0へ近い軸。
+        priority = round(group * 10000 - slope * 100 + abs(current), 2)
+        return {
+            "波判定": label,
+            "波優先度": priority,
+            "直近3回傾き": slope,
+            "現在合成差": current,
+        }
+
+    # ---- 波履歴入力：過去2回 + 現在値 = 直近3回 ----
+    st.markdown("#### 波履歴入力｜過去2回分")
+    st.caption(
+        "各軸の過去2回分の標準差・穴差を入れると、現在値と合わせて直近3回の波を判定します。"
+        "未入力なら従来の安定度判定に戻します。"
+    )
+
+    wave_history = {}
+    with st.expander("波履歴を入力する（任意）", expanded=False):
+        st.write("入力例：前々回=-14.2、前回=-7.8、今回=現在自動計算。")
+        for axis in [1, 2]:
+            st.markdown(f"**評価{axis}**")
+            c1, c2, c3, c4 = st.columns(4)
+            prev2_std = c1.number_input(
+                "前々回 標準差",
+                key=f"wave_axis{axis}_prev2_std",
+                value=0.0,
+                step=0.1,
+                format="%.1f",
+            )
+            prev2_hole = c2.number_input(
+                "前々回 穴差",
+                key=f"wave_axis{axis}_prev2_hole",
+                value=0.0,
+                step=0.1,
+                format="%.1f",
+            )
+            prev1_std = c3.number_input(
+                "前回 標準差",
+                key=f"wave_axis{axis}_prev1_std",
+                value=0.0,
+                step=0.1,
+                format="%.1f",
+            )
+            prev1_hole = c4.number_input(
+                "前回 穴差",
+                key=f"wave_axis{axis}_prev1_hole",
+                value=0.0,
+                step=0.1,
+                format="%.1f",
+            )
+
+            # 0.0を未入力扱いにすると本当に0.0の履歴を使えないので、チェックで使用可否を決める
+            use_hist = st.checkbox(f"評価{axis}の波履歴を使う", key=f"wave_axis{axis}_use", value=False)
+            wave_history[axis] = {
+                "use": use_hist,
+                "prev2_comp": _avg_diff(prev2_std, prev2_hole),
+                "prev1_comp": _avg_diff(prev1_std, prev1_hole),
+            }
+
     axis_rows = []
+    wave_chart_rows = []
+
     for axis, (std_label, hole_label) in axis_defs.items():
         std_row = df_sim[df_sim["型"] == std_label]
         hole_row = df_sim[df_sim["型"] == hole_label]
@@ -938,6 +1066,26 @@ with tabs[2]:
         else:
             stability = None
 
+        current_comp = _avg_diff(std_diff, hole_diff)
+        hist = wave_history.get(axis, {"use": False})
+
+        if hist.get("use") and current_comp is not None:
+            wave_values = [hist.get("prev2_comp"), hist.get("prev1_comp"), current_comp]
+        else:
+            wave_values = [current_comp]
+
+        wave_info = _wave_judge(wave_values)
+
+        # グラフ用
+        if hist.get("use") and current_comp is not None:
+            wave_chart_rows.extend(
+                [
+                    {"回": "前々回", "軸": f"評価{axis}", "合成差": hist.get("prev2_comp")},
+                    {"回": "前回", "軸": f"評価{axis}", "合成差": hist.get("prev1_comp")},
+                    {"回": "現在", "軸": f"評価{axis}", "合成差": current_comp},
+                ]
+            )
+
         axis_rows.append(
             {
                 "軸": f"評価{axis}",
@@ -947,6 +1095,10 @@ with tabs[2]:
                 "穴型": hole_label,
                 "穴差": hole_diff,
                 "穴回収率%": hole_roi,
+                "現在合成差": current_comp,
+                "直近3回傾き": wave_info["直近3回傾き"],
+                "波判定": wave_info["波判定"],
+                "波優先度": wave_info["波優先度"],
                 "軸別安定度": stability,
                 "最終軸候補": "",
             }
@@ -954,12 +1106,42 @@ with tabs[2]:
 
     df_axis = pd.DataFrame(axis_rows)
 
+    if wave_chart_rows:
+        df_wave_chart = pd.DataFrame(wave_chart_rows)
+        df_wave_pivot = df_wave_chart.pivot(index="回", columns="軸", values="合成差").reindex(["前々回", "前回", "現在"])
+        st.markdown("#### 波グラフ｜標準差・穴差の合成値")
+        st.line_chart(df_wave_pivot)
+
     final_axis = None
-    if not df_axis.empty and df_axis["軸別安定度"].notna().any():
+
+    # 波履歴が使える軸がある場合は波優先度で選ぶ。
+    # なければ従来どおり軸別安定度で選ぶ。
+    if not df_axis.empty and df_axis["波優先度"].notna().any():
+        idx_final = df_axis["波優先度"].idxmin()
+        df_axis.loc[idx_final, "最終軸候補"] = "☆"
+        final_axis = int(str(df_axis.loc[idx_final, "軸"]).replace("評価", ""))
+        st.success(f"波判定での最終軸候補：評価{final_axis}")
+    elif not df_axis.empty and df_axis["軸別安定度"].notna().any():
         idx_final = df_axis["軸別安定度"].idxmin()
         df_axis.loc[idx_final, "最終軸候補"] = "☆"
         final_axis = int(str(df_axis.loc[idx_final, "軸"]).replace("評価", ""))
+        st.info(f"履歴未入力のため、従来の安定度で判定：評価{final_axis}")
 
+    preferred_axis_cols = [
+        "最終軸候補",
+        "軸",
+        "標準型",
+        "標準差",
+        "標準回収率%",
+        "穴型",
+        "穴差",
+        "穴回収率%",
+        "現在合成差",
+        "直近3回傾き",
+        "波判定",
+        "軸別安定度",
+    ]
+    df_axis = df_axis[[c for c in preferred_axis_cols if c in df_axis.columns]]
     st.dataframe(df_axis, use_container_width=True, hide_index=True)
 
     if final_axis is not None:
