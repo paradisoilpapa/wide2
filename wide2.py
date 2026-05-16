@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.2｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.3｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1333,7 +1333,7 @@ with tabs[2]:
         "回収率%",
     ]
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
-    st.dataframe(df_pairs, use_container_width=True, hide_index=True)
+    st.dataframe(df_pairs, use_container_width=True, hide_index=True, height=470)
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
@@ -1353,7 +1353,7 @@ with tabs[2]:
             "ペア基準配当": PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}"),
             "回収率%": row.get("回収率%"),
         })
-    st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True, height=430)
 
     st.markdown("### 買い目確認")
     st.write("今日入力の個別2車複：評価1・評価2軸に必要なペアを自動集計")
