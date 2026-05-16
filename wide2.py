@@ -945,7 +945,7 @@ with tabs[2]:
     st.divider()
 
     st.markdown("### 個別2車複候補｜評価1・2軸 合成ペア比較")
-    st.caption("標準棚/穴棚シミュレーターと波履歴は削除。個別ペアの偏差値・配当係数・未回収除外・配当戻り余地で3〜4点を選びます。")
+    st.caption("標準棚/穴棚シミュレーターと波履歴は削除。個別ペアの偏差値・配当係数・未回収除外・配当戻り余地で3〜4点を選びます。1-2は低配当安定枠として別判定します。")
 
     st.markdown("#### 配当収束シミュレーション設定")
     st.caption("平均配当の基準は、固定1200円ではなくペア別基準配当で判定します。初期値は小倉ミッドナイトA級7車・直近2年の平均配当です。")
@@ -1115,17 +1115,42 @@ with tabs[2]:
             df_pairs["_coef_too_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) < 0.50)
             df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"]
 
+            # 1-2はペア基準配当が極端に低い本線枠なので、配当係数だけで「高すぎ」扱いにしない。
+            # 条件：的中実績あり／偏差値45〜55／回収率70〜130／平均配当300〜700／配当係数1.0〜1.8。
+            # これは主砲ではなく「低配当安定枠」として候補に残すための特例。
+            df_pairs["_stable_lowpay_12"] = (
+                (df_pairs["ペアキー"] == "1-2")
+                & df_pairs["_has_hit"]
+                & df_pairs["偏差値"].notna()
+                & (df_pairs["偏差値"].astype(float) >= 45.0)
+                & (df_pairs["偏差値"].astype(float) <= 55.0)
+                & df_pairs["回収率%"].notna()
+                & (df_pairs["回収率%"].astype(float) >= 70.0)
+                & (df_pairs["回収率%"].astype(float) <= 130.0)
+                & df_pairs["平均配当"].notna()
+                & (df_pairs["平均配当"].astype(float) >= 300.0)
+                & (df_pairs["平均配当"].astype(float) <= 700.0)
+                & df_pairs["配当係数"].notna()
+                & (df_pairs["配当係数"].astype(float) >= 1.0)
+                & (df_pairs["配当係数"].astype(float) <= 1.8)
+            )
+
             final_candidate_mask = candidate_mask & df_pairs["_has_hit"] & df_pairs["_not_overheated"]
             if PAY_RETURN_ONLY:
-                final_candidate_mask = final_candidate_mask & (df_pairs["_pay_low"] | df_pairs["_pay_near"])
+                final_candidate_mask = final_candidate_mask & (df_pairs["_pay_low"] | df_pairs["_pay_near"] | df_pairs["_stable_lowpay_12"])
 
             # 優先順：
+            # 0) 1-2低配当安定枠（ペア基準比では高くても絶対配当が安く、過熱していない）
             # 1) 配当係数0.50〜1.20・下振れ（戻り余地があり、過熱していない）
             # 2) 配当係数0.50〜1.20・中庸（自然な補完候補）
             # 3) 配当係数0.50未満（安すぎるがスパン長期化注意）
             # 4) その他の未過熱・実績あり
             # 除外：未回収、回収率180%以上、的中率偏差値60以上、配当高すぎ。
             df_pairs["_候補優先"] = 9
+            df_pairs.loc[
+                final_candidate_mask & df_pairs["_stable_lowpay_12"],
+                "_候補優先",
+            ] = 0
             df_pairs.loc[
                 final_candidate_mask & df_pairs["_coef_core"] & df_pairs["_below_base"],
                 "_候補優先",
@@ -1142,19 +1167,21 @@ with tabs[2]:
                 final_candidate_mask & ~df_pairs["_pay_high"],
                 "_候補優先",
             ] = df_pairs.loc[final_candidate_mask & ~df_pairs["_pay_high"], "_候補優先"].clip(upper=4)
-            df_pairs.loc[final_candidate_mask & df_pairs["_pay_high"], "_候補優先"] = 8
+            df_pairs.loc[final_candidate_mask & df_pairs["_pay_high"] & ~df_pairs["_stable_lowpay_12"], "_候補優先"] = 8
             df_pairs.loc[candidate_mask & ~df_pairs["_has_hit"], "_候補優先"] = 9
             df_pairs.loc[df_pairs["_roi_overheat"] | df_pairs["_overhit"], "_候補優先"] = 9
 
             df_pairs.loc[df_pairs["_pay_low"], "配当戻り余地"] = "あり"
             df_pairs.loc[df_pairs["_pay_near"], "配当戻り余地"] = "中庸"
             df_pairs.loc[df_pairs["_pay_high"], "配当戻り余地"] = "上振れ警戒"
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "配当戻り余地"] = "低配当安定"
             df_pairs.loc[~df_pairs["_has_hit"], "総合候補理由"] = "未回収除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_overheat"], "総合候補理由"] = "回収率過熱除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"] & ~df_pairs["_roi_overheat"], "総合候補理由"] = "的中率過熱除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_core"] & df_pairs["_below_base"], "総合候補理由"] = "未過熱＋下振れ"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_core"] & ~df_pairs["_below_base"], "総合候補理由"] = "未過熱＋基準帯"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_too_low"], "総合候補理由"] = "安すぎ注意枠"
+            df_pairs.loc[df_pairs["_stable_lowpay_12"], "総合候補理由"] = "低配当安定枠"
 
             # 重複する2車複ペアは1つにまとめる。
             # 例：評価1-2は評価1軸でも評価2軸でも同一券なので、優先順位が高い方だけ採用。
