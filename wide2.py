@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v7.3｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v7.4｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -986,7 +986,7 @@ with tabs[2]:
 
     c_final1, c_final2, c_final3 = st.columns([1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
-        "最終買い目点数",
+        "候補点数",
         key="final_point_n_axis12",
         min_value=3,
         max_value=4,
@@ -1014,6 +1014,10 @@ with tabs[2]:
     for axis in [1, 2]:
         for opp in range(1, 8):
             if opp == axis:
+                continue
+            # 2車複は順不同なので、評価2軸の相手1（2-1）は評価1-2と重複。
+            # 表示・候補選定ともに1-2側だけを残す。
+            if axis == 2 and opp == 1:
                 continue
 
             a, b = sorted((axis, opp))
@@ -1050,7 +1054,7 @@ with tabs[2]:
             row["配当位置"] = ""
             row["配当戻り余地"] = ""
             row["総合候補理由"] = ""
-            row["最終買い目"] = ""
+            row["候補"] = ""
             pair_rows.append(row)
 
     df_pairs = pd.DataFrame(pair_rows)
@@ -1165,7 +1169,7 @@ with tabs[2]:
                 candidate_unique = candidate_df.drop_duplicates(subset=["ペアキー"], keep="first")
                 candidate_idx = candidate_unique.head(int(FINAL_POINT_N)).index
 
-            df_pairs.loc[candidate_idx, "最終買い目"] = "☆"
+            df_pairs.loc[candidate_idx, "候補"] = "☆"
 
             recommended_pairs = []
             for idx in candidate_idx:
@@ -1187,7 +1191,7 @@ with tabs[2]:
         st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
 
     preferred_pair_cols = [
-        "最終買い目",
+        "候補",
         "軸",
         "相手",
         "型",
