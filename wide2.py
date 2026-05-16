@@ -1006,16 +1006,17 @@ with tabs[2]:
                 )
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
-    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。1R3点前提で、安定1点＋中庸優先＋不足分だけ歪みを採用します。")
+    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。歪み枠は本線に入れず、注として監視表示します。")
 
-    c_final1, c_final2, c_final3 = st.columns([1, 1, 2])
+    c_final1, c_final2, c_final3, c_final4 = st.columns([1, 1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
-        "候補点数",
+        "本線点数",
         key="final_point_n_axis12",
-        min_value=3,
-        max_value=4,
-        value=3,
+        min_value=2,
+        max_value=2,
+        value=2,
         step=1,
+        help="実戦で買う柱の点数。現在は2点固定です。",
     )
     MIN_EXPECTED_PAIR_RATE = c_final2.number_input(
         "最低想定ペア的%",
@@ -1026,13 +1027,22 @@ with tabs[2]:
         step=0.5,
         format="%.1f",
     )
-    PAY_RETURN_ONLY = c_final3.checkbox(
+    NOTE_MAX_N = c_final3.number_input(
+        "注表示最大",
+        key="note_max_n_axis12",
+        min_value=0,
+        max_value=6,
+        value=3,
+        step=1,
+        help="歪み枠を注として表示する最大数。予算が増えた時の追加候補です。",
+    )
+    PAY_RETURN_ONLY = c_final4.checkbox(
         "未回収除外＋配当戻り優先",
         key="pay_return_only_axis12",
         value=True,
         help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値/配当偏差値が過熱ライン以上は除外します。",
     )
-    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、安定枠→中庸枠→歪み枠の順で候補化します。中庸枠が2点以上ある場合は歪み枠より中庸枠を優先します。")
+    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。")
 
     pair_rows = []
     for axis in [1, 2]:
@@ -1079,6 +1089,7 @@ with tabs[2]:
             row["配当戻り余地"] = ""
             row["総合候補理由"] = ""
             row["候補"] = ""
+            row["注"] = ""
             pair_rows.append(row)
 
     df_pairs = pd.DataFrame(pair_rows)
@@ -1215,8 +1226,8 @@ with tabs[2]:
             df_pairs.loc[df_pairs["_distortion_core"], "総合候補理由"] = "歪み枠"
 
             # 枠別の優先順位。
-            # 1R3点前提：安定1点＋中庸優先＋不足分だけ歪み。
-            # 中庸枠が2点以上ある場合は、歪み枠より中庸枠を優先する。
+            # 本線は2点固定：安定枠＋中庸枠を柱にする。
+            # 歪み枠は本線には入れず、注として監視表示する。
             df_pairs["_枠内順位"] = 999.0
             df_pairs.loc[df_pairs["_stable_lowpay_12"], "_枠内順位"] = (
                 (df_pairs["偏差値"].astype(float) - 50.0).abs()
@@ -1248,6 +1259,7 @@ with tabs[2]:
                 return picked
 
             selected_idx = []
+            note_idx = []
             used_pairs = set()
             target_n = int(FINAL_POINT_N)
 
@@ -1255,30 +1267,32 @@ with tabs[2]:
             middle_df = df_pairs.loc[final_candidate_mask & df_pairs["_middle_core"]]
             distortion_df = df_pairs.loc[final_candidate_mask & df_pairs["_distortion_core"]]
 
-            # まず安定枠を最大1点。
+            # 本線：まず安定枠を最大1点。
             selected_idx += _pick_unique(stable_df, 1, used_pairs)
 
-            # 次に中庸枠。中庸が2点以上あるなら、歪みより中庸を優先して2点まで採用。
-            middle_limit = max(0, target_n - len(selected_idx))
-            if len(middle_df.drop_duplicates(subset=["ペアキー"])) >= 2:
-                middle_limit = min(middle_limit, 2)
-            else:
-                middle_limit = min(middle_limit, 1)
-            selected_idx += _pick_unique(middle_df, middle_limit, used_pairs)
+            # 本線：残りは中庸枠を優先。歪み枠は本線には入れない。
+            selected_idx += _pick_unique(middle_df, target_n - len(selected_idx), used_pairs)
 
-            # まだ足りない時だけ歪み枠を追加。
-            selected_idx += _pick_unique(distortion_df, target_n - len(selected_idx), used_pairs)
-
-            # それでも足りない場合だけ、未過熱・実績ありの広め候補で補完。
+            # それでも2点に届かない場合のみ、歪み以外の未過熱・実績あり候補で補完。
+            # ここでも歪み枠は注へ回す。
             if len(selected_idx) < target_n:
-                fallback_df = df_pairs.loc[final_candidate_mask & ~df_pairs.index.isin(selected_idx)].copy()
+                fallback_df = df_pairs.loc[
+                    final_candidate_mask
+                    & ~df_pairs.index.isin(selected_idx)
+                    & ~df_pairs["_distortion_core"]
+                ].copy()
                 fallback_df["_枠内順位"] = fallback_df["_枠内順位"].fillna(999.0)
                 selected_idx += _pick_unique(fallback_df, target_n - len(selected_idx), used_pairs)
 
+            # 注：歪み枠は予算増時の追加候補として表示。複数可。
+            note_used_pairs = set(used_pairs)
+            note_idx += _pick_unique(distortion_df, int(NOTE_MAX_N), note_used_pairs)
+
             if not selected_idx and PAY_RETURN_ONLY:
-                st.warning("未回収除外＋配当戻り優先では候補がありません。必要ならチェックを外して広め候補を確認してください。")
+                st.warning("未回収除外＋配当戻り優先では本線候補がありません。必要ならチェックを外して広め候補を確認してください。")
 
             df_pairs.loc[selected_idx, "候補"] = "☆"
+            df_pairs.loc[note_idx, "注"] = "注"
 
             recommended_pairs = []
             for idx in selected_idx:
@@ -1286,8 +1300,18 @@ with tabs[2]:
                 recommended_pairs.append(pair_key)
             recommended_pairs = sorted(recommended_pairs, key=lambda x: tuple(int(v) for v in x.split("-")))
             recommended_text = " / ".join(recommended_pairs)
+
+            note_pairs = []
+            for idx in note_idx:
+                pair_key = str(df_pairs.loc[idx, "ペアキー"])
+                note_pairs.append(pair_key)
+            note_pairs = sorted(note_pairs, key=lambda x: tuple(int(v) for v in x.split("-")))
+            note_text = " / ".join(note_pairs)
+
             if recommended_text:
-                st.success(f"本日の推奨2車複候補：{recommended_text}")
+                st.success(f"本日の推奨2車複本線：{recommended_text}")
+            if note_text:
+                st.info(f"注：{note_text}")
 
             drop_cols = [
                 "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
@@ -1308,6 +1332,7 @@ with tabs[2]:
 
     preferred_pair_cols = [
         "候補",
+        "注",
         "軸",
         "相手",
         "型",
