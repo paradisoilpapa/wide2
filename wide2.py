@@ -936,7 +936,7 @@ with tabs[2]:
         step=1,
     )
     MIN_EXPECTED_PAIR_RATE = c_final2.number_input(
-        "最低想定ペア的中率%",
+        "最低想定ペア的%",
         key="min_expected_pair_rate_axis12",
         min_value=0.0,
         max_value=30.0,
@@ -968,7 +968,7 @@ with tabs[2]:
             row["軸番号"] = axis
             row["相手"] = opp
             row["ペアキー"] = f"{a}-{b}"
-            row["想定ペア的中率%"] = expected_pair
+            row["想定ペア的%"] = expected_pair
 
             if row["的中率%"] is not None and expected_pair is not None:
                 diff = round(row["的中率%"] - expected_pair, 1)
@@ -997,8 +997,8 @@ with tabs[2]:
     if not df_pairs.empty and df_pairs["想定との差"].notna().any():
         candidate_mask = (
             df_pairs["想定との差"].notna()
-            & df_pairs["想定ペア的中率%"].notna()
-            & (df_pairs["想定ペア的中率%"] > float(MIN_EXPECTED_PAIR_RATE))
+            & df_pairs["想定ペア的%"].notna()
+            & (df_pairs["想定ペア的%"] > float(MIN_EXPECTED_PAIR_RATE))
         )
 
         # 評価1・2の全候補を同一母集団として、平均との差・中央値差・偏差値を出す。
@@ -1026,8 +1026,8 @@ with tabs[2]:
                 df_pairs.loc[idx, "配当位置"] = "高すぎ"
 
         if candidate_mask.any():
-            expected_median = _median(df_pairs.loc[candidate_mask, "想定ペア的中率%"].tolist())
-            df_pairs["_expected_ok"] = df_pairs["想定ペア的中率%"].apply(
+            expected_median = _median(df_pairs.loc[candidate_mask, "想定ペア的%"].tolist())
+            df_pairs["_expected_ok"] = df_pairs["想定ペア的%"].apply(
                 lambda x: bool(pd.notna(x) and expected_median is not None and float(x) >= float(expected_median))
             )
             df_pairs["_below_base"] = (
@@ -1093,7 +1093,7 @@ with tabs[2]:
             # 重複する2車複ペアは1つにまとめる。
             # 例：評価1-2は評価1軸でも評価2軸でも同一券なので、優先順位が高い方だけ採用。
             candidate_df = df_pairs.loc[final_candidate_mask].sort_values(
-                ["_候補優先", "回収率%", "想定ペア的中率%", "配当係数", "偏差値", "軸番号", "相手"],
+                ["_候補優先", "回収率%", "想定ペア的%", "配当係数", "偏差値", "軸番号", "相手"],
                 ascending=[True, False, False, True, True, True, True],
             )
             if candidate_df.empty:
@@ -1121,7 +1121,7 @@ with tabs[2]:
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
         else:
-            st.info("候補対象となる相手がありません。想定ペア的中率が最低ライン以下の組み合わせは除外しています。")
+            st.info("候補対象となる相手がありません。想定ペア的%が最低ライン以下の組み合わせは除外しています。")
     else:
         st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
 
@@ -1133,7 +1133,7 @@ with tabs[2]:
         "対象N",
         "的中H",
         "的中率%",
-        "想定ペア的中率%",
+        "想定ペア的%",
         "想定との差",
         "平均との差",
         "中央値差",
