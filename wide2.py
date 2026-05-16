@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v7.2｜引継ぎ表つき｜偏差値・配当係数｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v7.3｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -34,6 +34,22 @@ NISHAFUKU_PAIRS = [
     (2, 5), (2, 6), (2, 7),
 ]
 NISHAFUKU_EXTRA_PAIRS = []
+
+# 小倉ミッドナイトA級7車・直近2年ベースのペア別平均配当（100円あたり）。
+# 必要に応じて画面上で上書きできます。
+PAIR_BASE_AVG_PAY_DEFAULTS = {
+    "1-2": 271,
+    "1-3": 436,
+    "1-4": 654,
+    "1-5": 1059,
+    "1-6": 1754,
+    "1-7": 1519,
+    "2-3": 881,
+    "2-4": 1333,
+    "2-5": 1869,
+    "2-6": 1657,
+    "2-7": 4092,
+}
 
 
 RANK_SYMBOLS = {
@@ -932,16 +948,9 @@ with tabs[2]:
     st.caption("標準棚/穴棚シミュレーターと波履歴は削除。個別ペアの偏差値・配当係数・未回収除外・配当戻り余地で3〜4点を選びます。")
 
     st.markdown("#### 配当収束シミュレーション設定")
-    st.caption("的中率のズレだけでなく、平均配当が基準より安すぎる/高すぎるかも候補判定に加えます。")
-    c_pay1, c_pay2, c_pay3 = st.columns([1, 1, 2])
-    BASE_AVG_PAY = c_pay1.number_input(
-        "基準平均配当",
-        key="base_avg_pay",
-        min_value=100,
-        value=1200,
-        step=50,
-    )
-    OVERHEAT_Z = c_pay2.number_input(
+    st.caption("平均配当の基準は、固定1200円ではなくペア別基準配当で判定します。初期値は小倉ミッドナイトA級7車・直近2年の平均配当です。")
+    c_pay1, c_pay2 = st.columns([1, 3])
+    OVERHEAT_Z = c_pay1.number_input(
         "過熱偏差値ライン",
         key="overheat_z_line",
         min_value=50.0,
@@ -950,7 +959,27 @@ with tabs[2]:
         step=1.0,
         format="%.1f",
     )
-    c_pay3.write("基準例：平塚A級7車の平均配当1397円を参考に、実戦では1200円前後を初期値にしています。")
+    c_pay2.write("ペアごとに基準配当を変えるため、1-2の安さと2-7の安さを同じ1200円基準で誤判定しません。")
+
+    with st.expander("ペア別基準配当を確認・調整", expanded=False):
+        st.caption("初期値：小倉ミッドナイトA級7車・直近2年。会場や条件を変える場合はここを上書きしてください。")
+        pair_base_avg_pay = {}
+        base_pairs = [
+            ("1-2", 271), ("1-3", 436), ("1-4", 654),
+            ("1-5", 1059), ("1-6", 1754), ("1-7", 1519),
+            ("2-3", 881), ("2-4", 1333), ("2-5", 1869),
+            ("2-6", 1657), ("2-7", 4092),
+        ]
+        for i in range(0, len(base_pairs), 4):
+            cols = st.columns(4)
+            for col, (pair_key, default_pay) in zip(cols, base_pairs[i:i+4]):
+                pair_base_avg_pay[pair_key] = col.number_input(
+                    pair_key,
+                    key=f"pair_base_avg_pay_{pair_key.replace('-', '_')}",
+                    min_value=100,
+                    value=int(PAIR_BASE_AVG_PAY_DEFAULTS.get(pair_key, default_pay)),
+                    step=10,
+                )
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
     st.caption("評価1軸・評価2軸の個別2車複を同時に比較し、未回収除外＋配当戻り優先で3〜4点に絞ります。")
@@ -1007,10 +1036,13 @@ with tabs[2]:
             row["想定との差"] = diff
             row["状態"] = diff_status(diff, expected_pair)
 
+            pair_base_pay = int(pair_base_avg_pay.get(f"{a}-{b}", PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 1200)))
+            row["ペア基準配当"] = pair_base_pay
+
             avg_pay = row.get("平均配当")
-            if avg_pay is not None and pd.notna(avg_pay) and BASE_AVG_PAY > 0:
-                row["配当係数"] = round(float(avg_pay) / float(BASE_AVG_PAY), 2)
-                row["配当差"] = round(float(avg_pay) - float(BASE_AVG_PAY), 1)
+            if avg_pay is not None and pd.notna(avg_pay) and pair_base_pay > 0:
+                row["配当係数"] = round(float(avg_pay) / float(pair_base_pay), 2)
+                row["配当差"] = round(float(avg_pay) - float(pair_base_pay), 1)
             else:
                 row["配当係数"] = None
                 row["配当差"] = None
@@ -1170,6 +1202,7 @@ with tabs[2]:
         "基準位置",
         "状態",
         "平均配当",
+        "ペア基準配当",
         "配当係数",
         "配当差",
         "配当偏差値",
@@ -1196,6 +1229,7 @@ with tabs[2]:
             "的中H": row.get("的中H"),
             "的中率%": row.get("的中率%"),
             "平均配当": row.get("平均配当"),
+            "ペア基準配当": PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}"),
             "回収率%": row.get("回収率%"),
         })
     st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True)
