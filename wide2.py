@@ -333,6 +333,72 @@ def diff_status(diff, expected=None) -> str:
     return "中庸"
 
 
+def _clean_num_list(values):
+    out = []
+    for v in values:
+        try:
+            if pd.notna(v):
+                out.append(float(v))
+        except Exception:
+            pass
+    return out
+
+
+def _median(values):
+    vals = sorted(_clean_num_list(values))
+    n = len(vals)
+    if n == 0:
+        return None
+    mid = n // 2
+    if n % 2 == 1:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def _deviation_stats(value, values):
+    """平均との差・中央値差・偏差値・基準位置を返す。少数候補でも落ちない軽量版。"""
+    try:
+        if value is None or pd.isna(value):
+            return {"平均との差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+        x = float(value)
+    except Exception:
+        return {"平均との差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+
+    vals = _clean_num_list(values)
+    if not vals:
+        return {"平均との差": None, "中央値差": None, "偏差値": None, "基準位置": ""}
+
+    mean = sum(vals) / len(vals)
+    med = _median(vals)
+    var = sum((v - mean) ** 2 for v in vals) / len(vals) if len(vals) > 0 else 0.0
+    sd = var ** 0.5
+
+    mean_diff = round(x - mean, 1)
+    med_diff = round(x - med, 1) if med is not None else None
+    if sd > 0:
+        dev = round(50.0 + 10.0 * (x - mean) / sd, 1)
+    else:
+        dev = 50.0
+
+    if dev >= 60:
+        pos = "高すぎ"
+    elif dev >= 55:
+        pos = "やや高い"
+    elif dev <= 40:
+        pos = "低すぎ"
+    elif dev <= 45:
+        pos = "やや低い"
+    else:
+        pos = "中庸"
+
+    return {
+        "平均との差": mean_diff,
+        "中央値差": med_diff,
+        "偏差値": dev,
+        "基準位置": pos,
+    }
+
+
 
 # =========================
 # Tabs
