@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v6.7｜偏差値・配当係数｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v7.2｜引継ぎ表つき｜偏差値・配当係数｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -578,9 +578,30 @@ with tabs[1]:
         st.divider()
 
         # 固定型（1→23 / 2→13）の累積入力は削除。
-        # 必要な確認は下の「個別回収」で行う。
+        # 必要な確認は下の「個別2車複 引継ぎ入力」で行う。
         payout_inputs = []
 
+        st.divider()
+
+        st.markdown("## 個別2車複 引継ぎ入力（累積）")
+        st.caption("分析結果の『個別2車複 引継ぎ用累積表』をそのまま転記します。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じ扱いで自動計算します。")
+
+        h7 = st.columns([2.0, 1, 1.2, 1])
+        h7[0].markdown("**型**")
+        h7[1].markdown("**対象N**")
+        h7[2].markdown("**払戻合計SUM**")
+        h7[3].markdown("**的中H**")
+
+        nishafuku_pair_inputs = []
+        for a, b in NISHAFUKU_PAIRS:
+            label = nishafuku_label(a, b)
+            safe_key = label.replace(" ", "_").replace("-", "_")
+            c0, c1, c2, c3 = st.columns([2.0, 1, 1.2, 1])
+            c0.write(label)
+            N = c1.number_input("", key=f"prev_pair_{safe_key}_N", min_value=0, value=0)
+            SUM = c2.number_input("", key=f"prev_pair_{safe_key}_SUM", min_value=0, value=0, step=10)
+            H = c3.number_input("", key=f"prev_pair_{safe_key}_H", min_value=0, value=0)
+            nishafuku_pair_inputs.append((label, int(N), int(SUM), int(H)))
 
         st.divider()
 
@@ -605,6 +626,14 @@ with tabs[1]:
             rec = agg_payout_2t_pattern_manual[axis]
             rec["N"] += int(N)
             rec["KSUM"] += int(KSUM)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+
+    for label, N, SUM, H in nishafuku_pair_inputs:
+        if any([N, SUM, H]) and label in agg_payout_nishafuku_manual:
+            rec = agg_payout_nishafuku_manual[label]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(N)
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
 
@@ -1151,6 +1180,25 @@ with tabs[2]:
     ]
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
     st.dataframe(df_pairs, use_container_width=True, hide_index=True)
+
+    st.markdown("### 個別2車複 引継ぎ用累積表")
+    st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
+
+    carry_rows = []
+    for a, b in NISHAFUKU_PAIRS:
+        label = nishafuku_label(a, b)
+        rec = payout_nishafuku_total.get(label, new_payout_rec())
+        row = payout_row(label, rec)
+        carry_rows.append({
+            "型": label,
+            "対象N": row.get("対象N"),
+            "払戻合計SUM": row.get("払戻合計SUM"),
+            "的中H": row.get("的中H"),
+            "的中率%": row.get("的中率%"),
+            "平均配当": row.get("平均配当"),
+            "回収率%": row.get("回収率%"),
+        })
+    st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True)
 
     st.markdown("### 買い目確認")
     st.write("今日入力の個別2車複：評価1・評価2軸に必要なペアを自動集計")
