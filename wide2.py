@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 標準棚/穴棚 v6.1｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 標準棚/穴棚 v6.2｜配当係数つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1239,9 +1239,30 @@ with tabs[2]:
     df_axis = df_axis[[c for c in preferred_axis_cols if c in df_axis.columns]]
     st.dataframe(df_axis, use_container_width=True, hide_index=True)
 
+    st.markdown("#### 配当収束シミュレーション設定")
+    st.caption("的中率のズレだけでなく、平均配当が基準より安すぎる/高すぎるかも候補判定に加えます。")
+    c_pay1, c_pay2, c_pay3 = st.columns([1, 1, 2])
+    BASE_AVG_PAY = c_pay1.number_input(
+        "基準平均配当",
+        key="base_avg_pay",
+        min_value=100,
+        value=1200,
+        step=50,
+    )
+    OVERHEAT_Z = c_pay2.number_input(
+        "過熱偏差値ライン",
+        key="overheat_z_line",
+        min_value=50.0,
+        max_value=80.0,
+        value=60.0,
+        step=1.0,
+        format="%.1f",
+    )
+    c_pay3.write("基準例：平塚A級7車の平均配当1397円を参考に、実戦では1200円前後を初期値にしています。")
+
     if final_axis is not None:
         st.markdown("### 最終相手候補｜軸別ペア比較")
-        st.caption("最終軸と各評価の2車複を比較します。平均との差・中央値差・偏差値で基準位置を出し、基準下の戻り候補を優先します。")
+        st.caption("最終軸と各評価の2車複を比較します。的中率偏差値に加え、平均配当が基準配当へ戻る余地も見ます。")
 
         pair_rows = []
         for opp in range(1, 8):
@@ -1265,6 +1286,17 @@ with tabs[2]:
 
             row["想定との差"] = diff
             row["状態"] = diff_status(diff, expected_pair)
+
+            avg_pay = row.get("平均配当")
+            if avg_pay is not None and pd.notna(avg_pay) and BASE_AVG_PAY > 0:
+                row["配当係数"] = round(float(avg_pay) / float(BASE_AVG_PAY), 2)
+                row["配当差"] = round(float(avg_pay) - float(BASE_AVG_PAY), 1)
+            else:
+                row["配当係数"] = None
+                row["配当差"] = None
+
+            row["配当位置"] = ""
+            row["総合候補理由"] = ""
             row["相手候補"] = ""
             pair_rows.append(row)
 
@@ -1282,6 +1314,7 @@ with tabs[2]:
             )
 
             diff_values = df_pairs.loc[candidate_mask, "想定との差"].tolist() if candidate_mask.any() else []
+            pay_values = df_pairs.loc[candidate_mask & df_pairs["平均配当"].notna(), "平均配当"].tolist() if candidate_mask.any() else []
             for idx in df_pairs.index:
                 stats = _deviation_stats(df_pairs.loc[idx, "想定との差"], diff_values)
                 df_pairs.loc[idx, "平均との差"] = stats.get("平均との差")
@@ -1289,9 +1322,22 @@ with tabs[2]:
                 df_pairs.loc[idx, "偏差値"] = stats.get("偏差値")
                 df_pairs.loc[idx, "基準位置"] = stats.get("基準位置")
 
+                pay_stats = _deviation_stats(df_pairs.loc[idx, "平均配当"], pay_values)
+                df_pairs.loc[idx, "配当偏差値"] = pay_stats.get("偏差値")
+
+                coef = df_pairs.loc[idx, "配当係数"]
+                if pd.isna(coef):
+                    df_pairs.loc[idx, "配当位置"] = "未回収"
+                elif float(coef) < 0.80:
+                    df_pairs.loc[idx, "配当位置"] = "安すぎ"
+                elif float(coef) <= 1.30:
+                    df_pairs.loc[idx, "配当位置"] = "基準付近"
+                else:
+                    df_pairs.loc[idx, "配当位置"] = "高すぎ"
+
             if candidate_mask.any():
                 # 基準下かつ想定的中率がある候補を優先。
-                # 想定率が低すぎる下振れは「外れて当然」になりやすいので、候補群の中央値以上を厚く見る。
+                # さらに平均配当が基準より安い/基準付近なら「配当戻り余地あり」として加点する。
                 expected_median = _median(df_pairs.loc[candidate_mask, "想定ペア的中率%"].tolist())
                 df_pairs["_expected_ok"] = df_pairs["想定ペア的中率%"].apply(
                     lambda x: bool(pd.notna(x) and expected_median is not None and float(x) >= float(expected_median))
@@ -1300,25 +1346,57 @@ with tabs[2]:
                     (df_pairs["中央値差"].notna() & (df_pairs["中央値差"] < 0))
                     | (df_pairs["偏差値"].notna() & (df_pairs["偏差値"] < 50))
                 )
-                df_pairs["_absdiff"] = df_pairs["想定との差"].abs()
+                df_pairs["_overhit"] = df_pairs["偏差値"].notna() & (df_pairs["偏差値"] >= float(OVERHEAT_Z))
+                df_pairs["_cold"] = df_pairs["偏差値"].notna() & (df_pairs["偏差値"] <= 40)
+                df_pairs["_pay_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] < 0.80)
+                df_pairs["_pay_near"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] >= 0.80) & (df_pairs["配当係数"] <= 1.30)
+                df_pairs["_pay_high"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] > 1.30)
 
                 # 優先順：
-                # 1) 基準下＋想定率中央値以上
-                # 2) 基準下
-                # 3) 中央値付近で、まだ過熱していないもの
+                # 1) 基準下＋想定率中央値以上＋配当安すぎ/基準付近（的中率も配当も戻り余地）
+                # 2) 基準下＋想定率中央値以上
+                # 3) 中央値付近＋配当安すぎ（1-2のような配当戻り候補）
+                # 4) 基準下
+                # 5) 中央値付近で過熱していないもの
+                # 偏差値60以上は過熱扱いで強く減点。
                 df_pairs["_候補優先"] = 9
-                df_pairs.loc[candidate_mask & df_pairs["_below_base"] & df_pairs["_expected_ok"], "_候補優先"] = 1
-                df_pairs.loc[candidate_mask & df_pairs["_below_base"] & ~df_pairs["_expected_ok"], "_候補優先"] = 2
+                df_pairs.loc[
+                    candidate_mask & ~df_pairs["_overhit"] & df_pairs["_below_base"] & df_pairs["_expected_ok"] & (df_pairs["_pay_low"] | df_pairs["_pay_near"]),
+                    "_候補優先",
+                ] = 1
+                df_pairs.loc[
+                    candidate_mask & ~df_pairs["_overhit"] & df_pairs["_below_base"] & df_pairs["_expected_ok"],
+                    "_候補優先",
+                ] = 2
+                df_pairs.loc[
+                    candidate_mask & ~df_pairs["_overhit"] & ~df_pairs["_below_base"] & df_pairs["_pay_low"],
+                    "_候補優先",
+                ] = 3
+                df_pairs.loc[
+                    candidate_mask & ~df_pairs["_overhit"] & df_pairs["_below_base"],
+                    "_候補優先",
+                ] = 4
                 df_pairs.loc[
                     candidate_mask
+                    & ~df_pairs["_overhit"]
                     & ~df_pairs["_below_base"]
                     & df_pairs["中央値差"].notna()
                     & (df_pairs["中央値差"].abs() <= 3.0),
                     "_候補優先",
-                ] = 3
+                ] = 5
 
+                df_pairs["配当戻り余地"] = ""
+                df_pairs.loc[df_pairs["_pay_low"], "配当戻り余地"] = "あり"
+                df_pairs.loc[df_pairs["_pay_near"], "配当戻り余地"] = "中庸"
+                df_pairs.loc[df_pairs["_pay_high"], "配当戻り余地"] = "上振れ警戒"
+                df_pairs.loc[df_pairs["_overhit"], "総合候補理由"] = "的中率過熱"
+                df_pairs.loc[df_pairs["_below_base"] & df_pairs["_pay_low"], "総合候補理由"] = "下振れ＋配当安"
+                df_pairs.loc[df_pairs["_below_base"] & df_pairs["_pay_near"], "総合候補理由"] = "下振れ＋配当中庸"
+                df_pairs.loc[(~df_pairs["_below_base"]) & df_pairs["_pay_low"], "総合候補理由"] = "配当戻り狙い"
+
+                # 並び順では、優先度→配当係数の低さ→偏差値の低さ→想定的中率を使う。
                 candidate_df = df_pairs.loc[candidate_mask].sort_values(
-                    ["_候補優先", "中央値差", "偏差値", "想定ペア的中率%", "相手"],
+                    ["_候補優先", "配当係数", "偏差値", "想定ペア的中率%", "相手"],
                     ascending=[True, True, True, False, True],
                 )
                 candidate_idx = candidate_df.head(3).index
@@ -1327,7 +1405,7 @@ with tabs[2]:
                 recommended_text = "".join(str(x) for x in recommended_opps)
                 st.success(f"本日の推奨セット候補：評価{final_axis}-{recommended_text}")
 
-                df_pairs = df_pairs.drop(columns=["_expected_ok", "_below_base", "_absdiff", "_候補優先"])
+                df_pairs = df_pairs.drop(columns=["_expected_ok", "_below_base", "_overhit", "_cold", "_pay_low", "_pay_near", "_pay_high", "_候補優先"])
             else:
                 st.info("候補対象となる相手がありません。想定ペア的中率0%の組み合わせは除外しています。")
         else:
@@ -1349,6 +1427,12 @@ with tabs[2]:
             "基準位置",
             "状態",
             "平均配当",
+            "配当係数",
+            "配当差",
+            "配当偏差値",
+            "配当位置",
+            "配当戻り余地",
+            "総合候補理由",
             "回収率%",
         ]
         df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
