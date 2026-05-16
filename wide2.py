@@ -982,7 +982,7 @@ with tabs[2]:
                 )
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
-    st.caption("評価1軸・評価2軸の個別2車複を同時に比較し、未回収除外＋配当戻り優先で3〜4点に絞ります。")
+    st.caption("評価1軸・評価2軸の個別2車複を同時に比較し、未回収除外＋配当戻り優先。ただし回収率・的中率が過熱しているペアは除外して3〜4点に絞ります。")
 
     c_final1, c_final2, c_final3 = st.columns([1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
@@ -1006,9 +1006,9 @@ with tabs[2]:
         "未回収除外＋配当戻り優先",
         key="pay_return_only_axis12",
         value=True,
-        help="ONの場合、未回収ペアを除外し、配当安すぎを最優先。不足分は基準付近の配当実績ありペアで補完します。",
+        help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値60以上は過熱として除外します。",
     )
-    st.caption("評価1・評価2を両方候補化。初期設定では『未回収除外＋配当戻り優先、不足分は基準付近で補完』にします。")
+    st.caption("評価1・評価2を両方候補化。初期設定では『未回収除外＋配当戻り優先＋過熱除外』にします。回収率180%以上・的中偏差値60以上は原則候補から外します。")
 
     pair_rows = []
     for axis in [1, 2]:
@@ -1106,60 +1106,61 @@ with tabs[2]:
             df_pairs["_pay_high"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"] > 1.30)
 
             # 最終候補対象：
-            # スロットの未回収台と同じ扱いで、H=0（未回収）は原則除外。
-            # まず「配当安すぎ＝配当戻り余地あり」を優先し、点数が不足する場合だけ
-            # 「基準付近」の配当実績ありペアで補完する。
+            # H=0（未回収）は反発点が読めないため除外。
+            # さらに「配当が安い」だけでは買わず、回収率・的中率が上振れ済みのペアも除外する。
+            # 目安：回収率180%以上、的中率偏差値60以上は過熱扱い。
             df_pairs["_has_hit"] = df_pairs["的中H"].fillna(0).astype(float) > 0
-            final_candidate_mask = candidate_mask & df_pairs["_has_hit"]
+            df_pairs["_roi_overheat"] = df_pairs["回収率%"].notna() & (df_pairs["回収率%"].astype(float) >= 180.0)
+            df_pairs["_coef_core"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) >= 0.50) & (df_pairs["配当係数"].astype(float) <= 1.20)
+            df_pairs["_coef_too_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) < 0.50)
+            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"]
+
+            final_candidate_mask = candidate_mask & df_pairs["_has_hit"] & df_pairs["_not_overheated"]
             if PAY_RETURN_ONLY:
                 final_candidate_mask = final_candidate_mask & (df_pairs["_pay_low"] | df_pairs["_pay_near"])
 
             # 優先順：
-            # 1) 配当安すぎ・実績あり（配当戻り狙い）
-            # 2) 配当安すぎ＋基準下（的中率も下振れ）
-            # 3) 基準付近・回収率あり（不足分補完）
-            # 4) 基準付近＋基準下
-            # 5) その他の実績あり候補
-            # 未回収と配当高すぎは後ろ。偏差値60以上は警戒だが、配当安すぎなら除外せず減点に留める。
+            # 1) 配当係数0.50〜1.20・下振れ（戻り余地があり、過熱していない）
+            # 2) 配当係数0.50〜1.20・中庸（自然な補完候補）
+            # 3) 配当係数0.50未満（安すぎるがスパン長期化注意）
+            # 4) その他の未過熱・実績あり
+            # 除外：未回収、回収率180%以上、的中率偏差値60以上、配当高すぎ。
             df_pairs["_候補優先"] = 9
             df_pairs.loc[
-                final_candidate_mask & df_pairs["_pay_low"] & ~df_pairs["_below_base"],
+                final_candidate_mask & df_pairs["_coef_core"] & df_pairs["_below_base"],
                 "_候補優先",
             ] = 1
             df_pairs.loc[
-                final_candidate_mask & df_pairs["_pay_low"] & df_pairs["_below_base"],
+                final_candidate_mask & df_pairs["_coef_core"] & ~df_pairs["_below_base"],
                 "_候補優先",
             ] = 2
             df_pairs.loc[
-                final_candidate_mask & df_pairs["_pay_near"] & ~df_pairs["_overhit"],
+                final_candidate_mask & df_pairs["_coef_too_low"],
                 "_候補優先",
             ] = 3
             df_pairs.loc[
-                final_candidate_mask & df_pairs["_pay_near"] & df_pairs["_below_base"],
-                "_候補優先",
-            ] = 4
-            df_pairs.loc[
                 final_candidate_mask & ~df_pairs["_pay_high"],
                 "_候補優先",
-            ] = df_pairs.loc[final_candidate_mask & ~df_pairs["_pay_high"], "_候補優先"].clip(upper=5)
+            ] = df_pairs.loc[final_candidate_mask & ~df_pairs["_pay_high"], "_候補優先"].clip(upper=4)
             df_pairs.loc[final_candidate_mask & df_pairs["_pay_high"], "_候補優先"] = 8
             df_pairs.loc[candidate_mask & ~df_pairs["_has_hit"], "_候補優先"] = 9
+            df_pairs.loc[df_pairs["_roi_overheat"] | df_pairs["_overhit"], "_候補優先"] = 9
 
             df_pairs.loc[df_pairs["_pay_low"], "配当戻り余地"] = "あり"
             df_pairs.loc[df_pairs["_pay_near"], "配当戻り余地"] = "中庸"
             df_pairs.loc[df_pairs["_pay_high"], "配当戻り余地"] = "上振れ警戒"
             df_pairs.loc[~df_pairs["_has_hit"], "総合候補理由"] = "未回収除外"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"], "総合候補理由"] = "的中率過熱"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_below_base"] & df_pairs["_pay_low"], "総合候補理由"] = "下振れ＋配当安"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_below_base"] & df_pairs["_pay_near"], "総合候補理由"] = "下振れ＋配当中庸"
-            df_pairs.loc[df_pairs["_has_hit"] & (~df_pairs["_below_base"]) & df_pairs["_pay_low"], "総合候補理由"] = "配当戻り狙い"
-            df_pairs.loc[df_pairs["_has_hit"] & (~df_pairs["_below_base"]) & df_pairs["_pay_near"] & (df_pairs["総合候補理由"] == ""), "総合候補理由"] = "基準付近補完"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_overheat"], "総合候補理由"] = "回収率過熱除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"] & ~df_pairs["_roi_overheat"], "総合候補理由"] = "的中率過熱除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_core"] & df_pairs["_below_base"], "総合候補理由"] = "未過熱＋下振れ"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_core"] & ~df_pairs["_below_base"], "総合候補理由"] = "未過熱＋基準帯"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_not_overheated"] & df_pairs["_coef_too_low"], "総合候補理由"] = "安すぎ注意枠"
 
             # 重複する2車複ペアは1つにまとめる。
             # 例：評価1-2は評価1軸でも評価2軸でも同一券なので、優先順位が高い方だけ採用。
             candidate_df = df_pairs.loc[final_candidate_mask].sort_values(
-                ["_候補優先", "回収率%", "想定ペア的%", "配当係数", "偏差値", "軸番号", "相手"],
-                ascending=[True, False, False, True, True, True, True],
+                ["_候補優先", "配当係数", "偏差値", "回収率%", "想定ペア的%", "軸番号", "相手"],
+                ascending=[True, True, True, True, False, True, True],
             )
             if candidate_df.empty:
                 if PAY_RETURN_ONLY:
@@ -1182,7 +1183,7 @@ with tabs[2]:
 
             drop_cols = [
                 "_expected_ok", "_below_base", "_overhit", "_cold",
-                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_候補優先",
+                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_coef_core", "_coef_too_low", "_not_overheated", "_候補優先",
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
         else:
