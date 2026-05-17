@@ -433,6 +433,78 @@ def _deviation_stats(value, values):
     }
 
 
+def render_sticky_table(df: pd.DataFrame, height: int = 470):
+    """横スクロールしても『判定』『型』が左に残る簡易HTML表。"""
+    if df is None or df.empty:
+        st.info("表示するデータがありません。")
+        return
+
+    show_df = df.copy().fillna("")
+    table_html = show_df.to_html(index=False, escape=True, border=0)
+
+    st.markdown(
+        f"""
+        <style>
+        .velobi-sticky-wrap {{
+            max-height: {height}px;
+            overflow: auto;
+            border: 1px solid rgba(49, 51, 63, 0.2);
+            border-radius: 6px;
+        }}
+        .velobi-sticky-wrap table {{
+            border-collapse: separate;
+            border-spacing: 0;
+            width: max-content;
+            min-width: 100%;
+            font-size: 0.88rem;
+        }}
+        .velobi-sticky-wrap th,
+        .velobi-sticky-wrap td {{
+            padding: 6px 8px;
+            border-bottom: 1px solid rgba(49, 51, 63, 0.15);
+            white-space: nowrap;
+            background: white;
+        }}
+        .velobi-sticky-wrap th {{
+            position: sticky;
+            top: 0;
+            z-index: 3;
+            background: #f6f6f6;
+            font-weight: 700;
+        }}
+        .velobi-sticky-wrap th:nth-child(1),
+        .velobi-sticky-wrap td:nth-child(1) {{
+            position: sticky;
+            left: 0;
+            z-index: 4;
+            min-width: 64px;
+            background: #fff;
+            font-weight: 700;
+        }}
+        .velobi-sticky-wrap th:nth-child(2),
+        .velobi-sticky-wrap td:nth-child(2) {{
+            position: sticky;
+            left: 64px;
+            z-index: 4;
+            min-width: 110px;
+            background: #fff;
+            font-weight: 700;
+            box-shadow: 2px 0 2px rgba(0,0,0,0.05);
+        }}
+        .velobi-sticky-wrap th:nth-child(1),
+        .velobi-sticky-wrap th:nth-child(2) {{
+            z-index: 5;
+            background: #f6f6f6;
+        }}
+        </style>
+        <div class="velobi-sticky-wrap">
+            {table_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 
 # =========================
 # Tabs
@@ -1132,8 +1204,7 @@ with tabs[2]:
             row["配当位置"] = ""
             row["配当戻り余地"] = ""
             row["総合候補理由"] = ""
-            row["候補"] = ""
-            row["注"] = ""
+            row["判定"] = ""
             pair_rows.append(row)
 
     df_pairs = pd.DataFrame(pair_rows)
@@ -1337,8 +1408,8 @@ with tabs[2]:
             if not selected_idx and PAY_RETURN_ONLY:
                 st.warning("未回収除外＋配当戻り優先では本線候補がありません。必要ならチェックを外して広め候補を確認してください。")
 
-            df_pairs.loc[selected_idx, "候補"] = "☆"
-            df_pairs.loc[note_idx, "注"] = "注"
+            df_pairs.loc[selected_idx, "判定"] = "本線"
+            df_pairs.loc[note_idx, "判定"] = "注"
 
             recommended_pairs = []
             for idx in selected_idx:
@@ -1355,7 +1426,7 @@ with tabs[2]:
             note_text = " / ".join(note_pairs)
 
             if recommended_text:
-                st.success(f"本日の推奨2車複本線：{recommended_text}")
+                st.success(f"現在の推奨2車複本線：{recommended_text}")
             if note_text:
                 st.info(f"注：{note_text}")
 
@@ -1377,10 +1448,7 @@ with tabs[2]:
         st.info("候補を出すには、個別2車複データが必要です。")
 
     preferred_pair_cols = [
-        "候補",
-        "注",
-        "軸",
-        "相手",
+        "判定",
         "型",
         "対象N",
         "的中H",
@@ -1406,7 +1474,7 @@ with tabs[2]:
         "総合候補理由",
     ]
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
-    st.dataframe(df_pairs, use_container_width=True, hide_index=True, height=470)
+    render_sticky_table(df_pairs, height=470)
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
