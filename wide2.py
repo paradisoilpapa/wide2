@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.4｜固定想定ペア的%｜想定元非表示｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.5｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1027,7 +1027,7 @@ with tabs[2]:
     st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。歪み枠は本線に入れず、注として監視表示します。")
     st.caption("想定ペア的%は、現在の入力データではなく小倉ミッドA級7車・直近2年の固定値を強制使用します。例：1-2=22.6、2-4=5.7、2-7=3.0。")
 
-    c_final1, c_final2, c_final3, c_final4 = st.columns([1, 1, 1, 2])
+    c_final1, c_final2, c_final3, c_final4, c_final5 = st.columns([1, 1, 1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
         "本線点数",
         key="final_point_n_axis12",
@@ -1055,13 +1055,23 @@ with tabs[2]:
         step=1,
         help="歪み枠を注として表示する最大数。予算が増えた時の追加候補です。",
     )
-    PAY_RETURN_ONLY = c_final4.checkbox(
+    ROI_DIFF_LIMIT = c_final4.number_input(
+        "回収差許容",
+        key="roi_diff_limit_axis12",
+        min_value=0.0,
+        max_value=50.0,
+        value=10.0,
+        step=1.0,
+        format="%.1f",
+        help="実回収率−想定回収率がこの値を超えたペアは後追い扱いで候補から外します。",
+    )
+    PAY_RETURN_ONLY = c_final5.checkbox(
         "未回収除外＋配当戻り優先",
         key="pay_return_only_axis12",
         value=True,
         help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値/配当偏差値が過熱ライン以上は除外します。",
     )
-    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。")
+    st.caption("評価1・評価2を両方候補化。未回収・過熱・想定回収率超えすぎを除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。")
 
     pair_rows = []
     for axis in [1, 2]:
@@ -1099,6 +1109,17 @@ with tabs[2]:
 
             pair_base_pay = int(pair_base_avg_pay.get(f"{a}-{b}", PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 1200)))
             row["ペア基準配当"] = pair_base_pay
+
+            if expected_pair is not None and pair_base_pay > 0:
+                row["想定回収率%"] = round(float(expected_pair) * float(pair_base_pay) / 100.0, 1)
+            else:
+                row["想定回収率%"] = None
+
+            actual_roi = row.get("回収率%")
+            if actual_roi is not None and pd.notna(actual_roi) and row["想定回収率%"] is not None:
+                row["回収差"] = round(float(actual_roi) - float(row["想定回収率%"]), 1)
+            else:
+                row["回収差"] = None
 
             avg_pay = row.get("平均配当")
             if avg_pay is not None and pd.notna(avg_pay) and pair_base_pay > 0:
@@ -1169,11 +1190,12 @@ with tabs[2]:
 
             # 最終候補対象：
             # H=0（未回収）は反発点が読めないため除外。
-            # 回収率180%以上、的中率偏差値・配当偏差値が過熱ライン以上なら過熱として原則除外。
+            # 回収率180%以上、的中率偏差値・配当偏差値が過熱ライン以上、または実回収率が想定回収率を上回りすぎた場合は過熱として原則除外。
             # その上で、買い目を「安定枠／中庸枠／歪み枠」に分けて選ぶ。
             df_pairs["_has_hit"] = df_pairs["的中H"].fillna(0).astype(float) > 0
             df_pairs["_roi_overheat"] = df_pairs["回収率%"].notna() & (df_pairs["回収率%"].astype(float) >= 180.0)
-            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_pay_dev_overheat"]
+            df_pairs["_roi_follow_over"] = df_pairs["回収差"].notna() & (df_pairs["回収差"].astype(float) > float(ROI_DIFF_LIMIT))
+            df_pairs["_not_overheated"] = ~df_pairs["_overhit"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_pay_dev_overheat"] & ~df_pairs["_roi_follow_over"]
             df_pairs["_coef_core"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) >= 0.50) & (df_pairs["配当係数"].astype(float) <= 1.20)
             df_pairs["_coef_too_low"] = df_pairs["配当係数"].notna() & (df_pairs["配当係数"].astype(float) < 0.50)
 
@@ -1242,8 +1264,9 @@ with tabs[2]:
 
             df_pairs.loc[~df_pairs["_has_hit"], "総合候補理由"] = "未回収除外"
             df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_overheat"], "総合候補理由"] = "回収率過熱除外"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"] & ~df_pairs["_roi_overheat"], "総合候補理由"] = "的中率過熱除外"
-            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_pay_dev_overheat"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_overhit"], "総合候補理由"] = "配当過熱除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_roi_follow_over"] & ~df_pairs["_roi_overheat"], "総合候補理由"] = "後追い除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_overhit"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_roi_follow_over"], "総合候補理由"] = "的中率過熱除外"
+            df_pairs.loc[df_pairs["_has_hit"] & df_pairs["_pay_dev_overheat"] & ~df_pairs["_roi_overheat"] & ~df_pairs["_overhit"] & ~df_pairs["_roi_follow_over"], "総合候補理由"] = "配当過熱除外"
             df_pairs.loc[df_pairs["_stable_lowpay_12"], "総合候補理由"] = "安定枠"
             df_pairs.loc[df_pairs["_middle_core"], "総合候補理由"] = "中庸枠"
             df_pairs.loc[df_pairs["_distortion_core"], "総合候補理由"] = "歪み枠"
@@ -1338,14 +1361,14 @@ with tabs[2]:
 
             drop_cols = [
                 "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
-                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_coef_core", "_coef_too_low", "_not_overheated",
+                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_roi_follow_over", "_coef_core", "_coef_too_low", "_not_overheated",
                 "_stable_lowpay_12", "_middle_core", "_distortion_core", "_枠内順位",
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
 
             drop_cols = [
                 "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
-                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_coef_core", "_coef_too_low", "_not_overheated", "_候補優先",
+                "_pay_low", "_pay_near", "_pay_high", "_has_hit", "_roi_overheat", "_roi_follow_over", "_coef_core", "_coef_too_low", "_not_overheated", "_候補優先",
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
         else:
@@ -1371,6 +1394,9 @@ with tabs[2]:
         "状態",
         "平均配当",
         "ペア基準配当",
+        "想定回収率%",
+        "回収率%",
+        "回収差",
         "配当係数",
         "配当差",
         "配当偏差値",
@@ -1378,7 +1404,6 @@ with tabs[2]:
         "配当戻り余地",
         "資産枠",
         "総合候補理由",
-        "回収率%",
     ]
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
     st.dataframe(df_pairs, use_container_width=True, hide_index=True, height=470)
@@ -1400,7 +1425,9 @@ with tabs[2]:
             "平均配当": row.get("平均配当"),
             "ペア基準配当": PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}"),
             "想定ペア的%": PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}"),
+            "想定回収率%": round(float(PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}", 0)) * float(PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 0)) / 100.0, 1),
             "回収率%": row.get("回収率%"),
+            "回収差": round(float(row.get("回収率%")) - (float(PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}", 0)) * float(PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 0)) / 100.0), 1) if row.get("回収率%") is not None else None,
         })
     st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True, height=430)
 
