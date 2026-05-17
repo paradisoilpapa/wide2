@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.5｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.6｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1006,7 +1006,7 @@ with tabs[2]:
                 )
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
-    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。的中率の平均差・中央値差・偏差値で位置を見ます。歪み枠は本線に入れず、注として監視表示します。")
+    st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。歪み枠は本線に入れず、注として監視表示します。")
 
     c_final1, c_final2, c_final3, c_final4 = st.columns([1, 1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
@@ -1019,7 +1019,7 @@ with tabs[2]:
         help="実戦で買う柱の点数。現在は2点固定です。",
     )
     MIN_EXPECTED_PAIR_RATE = c_final2.number_input(
-        "最低想定ペア的%",
+        "最低的中率%",
         key="min_expected_pair_rate_axis12",
         min_value=0.0,
         max_value=30.0,
@@ -1042,7 +1042,7 @@ with tabs[2]:
         value=True,
         help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値/配当偏差値が過熱ライン以上は除外します。",
     )
-    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。")
+    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。※同じ累積から作る想定ペア的%は的中率と同値になるため、候補表から削除しました。")
 
     pair_rows = []
     for axis in [1, 2]:
@@ -1059,20 +1059,13 @@ with tabs[2]:
             rec = payout_nishafuku_total.get(label, new_payout_rec())
             row = payout_row(label, rec)
 
-            expected_pair = expected_pair_hit_rate_from_pair12(axis, opp, pair12_total)
             row["軸"] = f"評価{axis}"
             row["軸番号"] = axis
             row["相手"] = opp
             row["ペアキー"] = f"{a}-{b}"
-            row["想定ペア的%"] = expected_pair
-
-            if row["的中率%"] is not None and expected_pair is not None:
-                diff = round(row["的中率%"] - expected_pair, 1)
-            else:
-                diff = None
-
-            row["想定差"] = diff
-            row["状態"] = diff_status(diff, expected_pair)
+            # 注意：同じ累積成績から作る想定ペア的%は、実的中率%と同値になります。
+            # そのため候補判定・表示からは外し、的中率%そのものの分布で偏差値を見ます。
+            row["状態"] = ""
 
             pair_base_pay = int(pair_base_avg_pay.get(f"{a}-{b}", PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 1200)))
             row["ペア基準配当"] = pair_base_pay
@@ -1094,16 +1087,14 @@ with tabs[2]:
 
     df_pairs = pd.DataFrame(pair_rows)
 
-    if not df_pairs.empty and df_pairs["想定差"].notna().any():
+    if not df_pairs.empty and df_pairs["的中率%"].notna().any():
         candidate_mask = (
-            df_pairs["想定差"].notna()
-            & df_pairs["想定ペア的%"].notna()
-            & (df_pairs["想定ペア的%"] > float(MIN_EXPECTED_PAIR_RATE))
+            df_pairs["的中率%"].notna()
+            & (df_pairs["的中率%"].astype(float) > float(MIN_EXPECTED_PAIR_RATE))
         )
 
         # 評価1・2の全候補を同一母集団として、的中率%の平均差・中央値差・偏差値を出す。
-        # 注意：1→2着分布と個別2車複を同じ累積母集団で管理すると、想定差は定義上0に寄ります。
-        # そのため候補判定の位置取りは「想定差」ではなく「的中率%」で行います。
+        # 同じ累積から作った「想定ペア的%」は実的中率%と一致するため使用しません。
         diff_values = df_pairs.loc[candidate_mask, "的中率%"].tolist() if candidate_mask.any() else []
         # 配当偏差値は「平均配当そのもの」ではなく、
         # ペア基準配当との差（配当差）を母集団にして計算する。
@@ -1139,11 +1130,6 @@ with tabs[2]:
                 df_pairs.loc[idx, "配当位置"] = "高すぎ"
 
         if candidate_mask.any():
-            expected_median = _median(df_pairs.loc[candidate_mask, "想定ペア的%"].tolist())
-            hitrate_median = _median(df_pairs.loc[candidate_mask, "的中率%"].tolist())
-            df_pairs["_expected_ok"] = df_pairs["想定ペア的%"].apply(
-                lambda x: bool(pd.notna(x) and expected_median is not None and float(x) >= float(expected_median))
-            )
             df_pairs["_below_base"] = (
                 (df_pairs["中央値差"].notna() & (df_pairs["中央値差"] < 0))
                 | (df_pairs["偏差値"].notna() & (df_pairs["偏差値"] < 50))
@@ -1337,7 +1323,7 @@ with tabs[2]:
             ]
             df_pairs = df_pairs.drop(columns=[c for c in drop_cols if c in df_pairs.columns])
         else:
-            st.info("候補対象となる相手がありません。想定ペア的%が最低ライン以下の組み合わせは除外しています。")
+            st.info("候補対象となる相手がありません。的中率%が最低ライン以下の組み合わせは除外しています。")
     else:
         st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
 
@@ -1350,8 +1336,6 @@ with tabs[2]:
         "対象N",
         "的中H",
         "的中率%",
-        "想定ペア的%",
-        "想定差",
         "平均差",
         "中央値差",
         "偏差値",
