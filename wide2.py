@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.2｜固定想定ペア的%完全反映｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.3｜固定想定ペア的%強制反映｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1025,6 +1025,7 @@ with tabs[2]:
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
     st.caption("評価1軸・評価2軸の個別2車複を、安定枠・中庸枠・歪み枠に分けて比較します。本線は2点固定。歪み枠は本線に入れず、注として監視表示します。")
+    st.caption("想定ペア的%は、現在の入力データではなく小倉ミッドA級7車・直近2年の固定値を強制使用します。例：1-2=22.6、2-4=5.7、2-7=3.0。")
 
     c_final1, c_final2, c_final3, c_final4 = st.columns([1, 1, 1, 2])
     FINAL_POINT_N = c_final1.number_input(
@@ -1087,6 +1088,7 @@ with tabs[2]:
             row["相手"] = opp
             row["ペアキー"] = pair_key
             row["想定ペア的%"] = expected_pair
+            row["想定元"] = "小倉2年固定"
 
             if row["的中率%"] is not None and expected_pair is not None:
                 diff = round(float(row["的中率%"] ) - float(expected_pair), 1)
@@ -1362,6 +1364,7 @@ with tabs[2]:
         "的中H",
         "的中率%",
         "想定ペア的%",
+        "想定元",
         "想定差",
         "平均差",
         "中央値差",
