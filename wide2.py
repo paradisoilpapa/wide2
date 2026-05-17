@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.6｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.7｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -50,6 +50,23 @@ PAIR_BASE_AVG_PAY_DEFAULTS = {
     "2-6": 1657,
     "2-7": 4092,
 }
+
+# 小倉ミッドナイトA級7車・直近2年ベースのペア別出目回数。
+# 想定ペア的中率 = ペア出目回数 / 基準レース数 * 100 で算出します。
+PAIR_BASE_HIT_COUNT_DEFAULTS = {
+    "1-2": 167,
+    "1-3": 105,
+    "1-4": 78,
+    "1-5": 38,
+    "1-6": 26,
+    "1-7": 35,
+    "2-3": 46,
+    "2-4": 42,
+    "2-5": 27,
+    "2-6": 15,
+    "2-7": 22,
+}
+PAIR_BASE_RACE_N_DEFAULT = 738
 
 
 RANK_SYMBOLS = {
@@ -960,10 +977,10 @@ with tabs[2]:
     st.divider()
 
     st.markdown("### 個別2車複候補｜評価1・2軸 合成ペア比較")
-    st.caption("標準棚/穴棚シミュレーターと波履歴は削除。個別ペアの偏差値・配当係数・未回収除外・配当戻り余地で3〜4点を選びます。1-2は低配当安定枠として別判定します。")
+    st.caption("標準棚/穴棚シミュレーターと波履歴は削除。個別ペアの実的中率分布・配当係数・未回収除外・配当戻り余地で候補を選びます。1-2は低配当安定枠として別判定します。")
 
     st.markdown("#### 配当収束シミュレーション設定")
-    st.caption("平均配当の基準は、固定1200円ではなくペア別基準配当で判定します。初期値は小倉ミッドナイトA級7車・直近2年の平均配当です。")
+    st.caption("平均配当と想定ペア的中率は、固定値ではなくペア別外部基準で判定します。初期値は小倉ミッドナイトA級7車・直近2年データです。")
     c_pay1, c_pay2, c_pay3 = st.columns([1, 1, 3])
     OVERHEAT_Z = c_pay1.number_input(
         "的中過熱偏差値",
@@ -985,24 +1002,43 @@ with tabs[2]:
     )
     c_pay3.write("ペアごとに基準配当を変え、さらに配当偏差値が高すぎるペアは過熱として候補から外します。")
 
-    with st.expander("ペア別基準配当を確認・調整", expanded=False):
-        st.caption("初期値：小倉ミッドナイトA級7車・直近2年。会場や条件を変える場合はここを上書きしてください。")
+    with st.expander("ペア別基準配当・想定回数を確認・調整", expanded=False):
+        st.caption("初期値：小倉ミッドナイトA級7車・直近2年。想定ペア的% = 出目回数 ÷ 基準レース数 ×100 で計算します。")
+        base_race_n = st.number_input(
+            "基準レース数",
+            key="pair_base_race_n",
+            min_value=1,
+            value=int(PAIR_BASE_RACE_N_DEFAULT),
+            step=1,
+        )
         pair_base_avg_pay = {}
+        pair_base_hit_count = {}
         base_pairs = [
-            ("1-2", 271), ("1-3", 436), ("1-4", 654),
-            ("1-5", 1059), ("1-6", 1754), ("1-7", 1519),
-            ("2-3", 881), ("2-4", 1333), ("2-5", 1869),
-            ("2-6", 1657), ("2-7", 4092),
+            ("1-2", 271, 167), ("1-3", 436, 105), ("1-4", 654, 78),
+            ("1-5", 1059, 38), ("1-6", 1754, 26), ("1-7", 1519, 35),
+            ("2-3", 881, 46), ("2-4", 1333, 42), ("2-5", 1869, 27),
+            ("2-6", 1657, 15), ("2-7", 4092, 22),
         ]
-        for i in range(0, len(base_pairs), 4):
-            cols = st.columns(4)
-            for col, (pair_key, default_pay) in zip(cols, base_pairs[i:i+4]):
-                pair_base_avg_pay[pair_key] = col.number_input(
-                    pair_key,
+        for i in range(0, len(base_pairs), 2):
+            cols = st.columns(2)
+            for col, (pair_key, default_pay, default_count) in zip(cols, base_pairs[i:i+2]):
+                col.markdown(f"**{pair_key}**")
+                sub1, sub2 = col.columns(2)
+                pair_base_avg_pay[pair_key] = sub1.number_input(
+                    "基準配当",
                     key=f"pair_base_avg_pay_{pair_key.replace('-', '_')}",
                     min_value=100,
                     value=int(PAIR_BASE_AVG_PAY_DEFAULTS.get(pair_key, default_pay)),
                     step=10,
+                    label_visibility="collapsed",
+                )
+                pair_base_hit_count[pair_key] = sub2.number_input(
+                    "出目回数",
+                    key=f"pair_base_hit_count_{pair_key.replace('-', '_')}",
+                    min_value=0,
+                    value=int(PAIR_BASE_HIT_COUNT_DEFAULTS.get(pair_key, default_count)),
+                    step=1,
+                    label_visibility="collapsed",
                 )
 
     st.markdown("### 最終2車複候補｜評価1・2軸")
@@ -1019,7 +1055,7 @@ with tabs[2]:
         help="実戦で買う柱の点数。現在は2点固定です。",
     )
     MIN_EXPECTED_PAIR_RATE = c_final2.number_input(
-        "最低的中率%",
+        "最低想定ペア的%",
         key="min_expected_pair_rate_axis12",
         min_value=0.0,
         max_value=30.0,
@@ -1040,9 +1076,9 @@ with tabs[2]:
         "未回収除外＋配当戻り優先",
         key="pay_return_only_axis12",
         value=True,
-        help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・的中偏差値/配当偏差値が過熱ライン以上は除外します。",
+        help="ONの場合、未回収ペアを除外し、配当安すぎ〜基準付近を優先。ただし回収率180%以上・実的中率偏差値/配当偏差値が過熱ライン以上は除外します。",
     )
-    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。※同じ累積から作る想定ペア的%は的中率と同値になるため、候補表から削除しました。")
+    st.caption("評価1・評価2を両方候補化。未回収・過熱を除外し、本線は安定枠＋中庸枠を優先して2点まで。歪み枠は候補欄ではなく『注』欄に表示します。")
 
     pair_rows = []
     for axis in [1, 2]:
@@ -1059,12 +1095,22 @@ with tabs[2]:
             rec = payout_nishafuku_total.get(label, new_payout_rec())
             row = payout_row(label, rec)
 
+            pair_key = f"{a}-{b}"
+            base_count = int(pair_base_hit_count.get(pair_key, PAIR_BASE_HIT_COUNT_DEFAULTS.get(pair_key, 0)))
+            if int(base_race_n) > 0:
+                expected_pair = round(100.0 * base_count / int(base_race_n), 1)
+            else:
+                expected_pair = None
+            row["想定ペア的%"] = expected_pair
+            if row["的中率%"] is not None and expected_pair is not None:
+                row["想定差"] = round(float(row["的中率%"] ) - float(expected_pair), 1)
+            else:
+                row["想定差"] = None
+
             row["軸"] = f"評価{axis}"
             row["軸番号"] = axis
             row["相手"] = opp
             row["ペアキー"] = f"{a}-{b}"
-            # 注意：同じ累積成績から作る想定ペア的%は、実的中率%と同値になります。
-            # そのため候補判定・表示からは外し、的中率%そのものの分布で偏差値を見ます。
             row["状態"] = ""
 
             pair_base_pay = int(pair_base_avg_pay.get(f"{a}-{b}", PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 1200)))
@@ -1087,34 +1133,27 @@ with tabs[2]:
 
     df_pairs = pd.DataFrame(pair_rows)
 
-    if not df_pairs.empty and df_pairs["的中率%"].notna().any():
+    if not df_pairs.empty and df_pairs["想定差"].notna().any():
         candidate_mask = (
-            df_pairs["的中率%"].notna()
-            & (df_pairs["的中率%"].astype(float) > float(MIN_EXPECTED_PAIR_RATE))
+            df_pairs["想定差"].notna()
+            & df_pairs["想定ペア的%"].notna()
+            & (df_pairs["想定ペア的%"] >= float(MIN_EXPECTED_PAIR_RATE))
         )
 
-        # 評価1・2の全候補を同一母集団として、的中率%の平均差・中央値差・偏差値を出す。
-        # 同じ累積から作った「想定ペア的%」は実的中率%と一致するため使用しません。
-        diff_values = df_pairs.loc[candidate_mask, "的中率%"].tolist() if candidate_mask.any() else []
+        # 評価1・2の全候補を同一母集団として、外部想定に対する想定差の平均差・中央値差・偏差値を出す。
+        diff_values = df_pairs.loc[candidate_mask, "想定差"].tolist() if candidate_mask.any() else []
         # 配当偏差値は「平均配当そのもの」ではなく、
         # ペア基準配当との差（配当差）を母集団にして計算する。
         # 例：1-2の平均348円・基準271円なら配当差+77円。
         pay_values = df_pairs.loc[candidate_mask & df_pairs["配当差"].notna(), "配当差"].tolist() if candidate_mask.any() else []
 
         for idx in df_pairs.index:
-            stats = _deviation_stats(df_pairs.loc[idx, "的中率%"], diff_values)
+            stats = _deviation_stats(df_pairs.loc[idx, "想定差"], diff_values)
             df_pairs.loc[idx, "平均差"] = stats.get("平均差")
             df_pairs.loc[idx, "中央値差"] = stats.get("中央値差")
             df_pairs.loc[idx, "偏差値"] = stats.get("偏差値")
             df_pairs.loc[idx, "基準位置"] = stats.get("基準位置")
-            dev_tmp = stats.get("偏差値")
-            if dev_tmp is not None and pd.notna(dev_tmp):
-                if float(dev_tmp) >= float(OVERHEAT_Z):
-                    df_pairs.loc[idx, "状態"] = "当たりすぎ"
-                elif float(dev_tmp) <= 40.0:
-                    df_pairs.loc[idx, "状態"] = "当たらなすぎ"
-                else:
-                    df_pairs.loc[idx, "状態"] = "中庸"
+            df_pairs.loc[idx, "状態"] = stats.get("基準位置")
 
             pay_stats = _deviation_stats(df_pairs.loc[idx, "配当差"], pay_values)
             df_pairs.loc[idx, "配当偏差値"] = pay_stats.get("偏差値")
@@ -1130,6 +1169,10 @@ with tabs[2]:
                 df_pairs.loc[idx, "配当位置"] = "高すぎ"
 
         if candidate_mask.any():
+            diff_median = _median(df_pairs.loc[candidate_mask, "想定差"].tolist())
+            df_pairs["_expected_ok"] = df_pairs["想定差"].apply(
+                lambda x: bool(pd.notna(x) and diff_median is not None and float(x) >= float(diff_median))
+            )
             df_pairs["_below_base"] = (
                 (df_pairs["中央値差"].notna() & (df_pairs["中央値差"] < 0))
                 | (df_pairs["偏差値"].notna() & (df_pairs["偏差値"] < 50))
@@ -1325,7 +1368,7 @@ with tabs[2]:
         else:
             st.info("候補対象となる相手がありません。的中率%が最低ライン以下の組み合わせは除外しています。")
     else:
-        st.info("相手候補を出すには、1→2着評価分布と日次2車複データが必要です。")
+        st.info("相手候補を出すには、外部想定回数と日次2車複データが必要です。")
 
     preferred_pair_cols = [
         "候補",
@@ -1336,6 +1379,8 @@ with tabs[2]:
         "対象N",
         "的中H",
         "的中率%",
+        "想定ペア的%",
+        "想定差",
         "平均差",
         "中央値差",
         "偏差値",
@@ -1371,6 +1416,7 @@ with tabs[2]:
             "的中率%": row.get("的中率%"),
             "平均配当": row.get("平均配当"),
             "ペア基準配当": PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}"),
+            "想定出目回数": PAIR_BASE_HIT_COUNT_DEFAULTS.get(f"{a}-{b}"),
             "回収率%": row.get("回収率%"),
         })
     st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True, height=430)
