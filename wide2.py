@@ -51,22 +51,22 @@ PAIR_BASE_AVG_PAY_DEFAULTS = {
     "2-7": 4092,
 }
 
-# 小倉ミッドナイトA級7車・直近2年ベースのペア別出目回数。
-# 想定ペア的中率 = ペア出目回数 / 基準レース数 * 100 で算出します。
-PAIR_BASE_HIT_COUNT_DEFAULTS = {
-    "1-2": 167,
-    "1-3": 105,
-    "1-4": 78,
-    "1-5": 38,
-    "1-6": 26,
-    "1-7": 35,
-    "2-3": 46,
-    "2-4": 42,
-    "2-5": 27,
-    "2-6": 15,
-    "2-7": 22,
+# 小倉ミッドナイトA級7車・直近2年ベースのペア別想定的中率（%）。
+# 出目回数 ÷ 基準レース数から算出した固定値として扱います。
+# これを使うことで、現在入力中の実的中率とは独立した「外部想定ペア的%」になります。
+PAIR_BASE_HIT_RATE_DEFAULTS = {
+    "1-2": 22.6,  # 167 / 738
+    "1-3": 14.2,  # 105 / 738
+    "1-4": 10.6,  # 78 / 738
+    "1-5": 5.1,   # 38 / 738
+    "1-6": 3.5,   # 26 / 738
+    "1-7": 4.7,   # 35 / 738
+    "2-3": 6.2,   # 46 / 738
+    "2-4": 5.7,   # 42 / 738
+    "2-5": 3.7,   # 27 / 738
+    "2-6": 2.0,   # 15 / 738
+    "2-7": 3.0,   # 22 / 738
 }
-PAIR_BASE_RACE_N_DEFAULT = 738
 
 
 RANK_SYMBOLS = {
@@ -1002,26 +1002,19 @@ with tabs[2]:
     )
     c_pay3.write("ペアごとに基準配当を変え、さらに配当偏差値が高すぎるペアは過熱として候補から外します。")
 
-    with st.expander("ペア別基準配当・想定回数を確認・調整", expanded=False):
-        st.caption("初期値：小倉ミッドナイトA級7車・直近2年。想定ペア的% = 出目回数 ÷ 基準レース数 ×100 で計算します。")
-        base_race_n = st.number_input(
-            "基準レース数",
-            key="pair_base_race_n",
-            min_value=1,
-            value=int(PAIR_BASE_RACE_N_DEFAULT),
-            step=1,
-        )
+    with st.expander("ペア別基準配当・外部想定ペア的%を確認・調整", expanded=False):
+        st.caption("初期値：小倉ミッドナイトA級7車・直近2年。出目回数÷基準レース数で作った想定的中率を、固定値として直接使います。")
         pair_base_avg_pay = {}
-        pair_base_hit_count = {}
+        pair_base_hit_rate = {}
         base_pairs = [
-            ("1-2", 271, 167), ("1-3", 436, 105), ("1-4", 654, 78),
-            ("1-5", 1059, 38), ("1-6", 1754, 26), ("1-7", 1519, 35),
-            ("2-3", 881, 46), ("2-4", 1333, 42), ("2-5", 1869, 27),
-            ("2-6", 1657, 15), ("2-7", 4092, 22),
+            ("1-2", 271, 22.6), ("1-3", 436, 14.2), ("1-4", 654, 10.6),
+            ("1-5", 1059, 5.1), ("1-6", 1754, 3.5), ("1-7", 1519, 4.7),
+            ("2-3", 881, 6.2), ("2-4", 1333, 5.7), ("2-5", 1869, 3.7),
+            ("2-6", 1657, 2.0), ("2-7", 4092, 3.0),
         ]
         for i in range(0, len(base_pairs), 2):
             cols = st.columns(2)
-            for col, (pair_key, default_pay, default_count) in zip(cols, base_pairs[i:i+2]):
+            for col, (pair_key, default_pay, default_rate) in zip(cols, base_pairs[i:i+2]):
                 col.markdown(f"**{pair_key}**")
                 sub1, sub2 = col.columns(2)
                 pair_base_avg_pay[pair_key] = sub1.number_input(
@@ -1032,12 +1025,14 @@ with tabs[2]:
                     step=10,
                     label_visibility="collapsed",
                 )
-                pair_base_hit_count[pair_key] = sub2.number_input(
-                    "出目回数",
-                    key=f"pair_base_hit_count_{pair_key.replace('-', '_')}",
-                    min_value=0,
-                    value=int(PAIR_BASE_HIT_COUNT_DEFAULTS.get(pair_key, default_count)),
-                    step=1,
+                pair_base_hit_rate[pair_key] = sub2.number_input(
+                    "外部想定%",
+                    key=f"pair_base_hit_rate_{pair_key.replace('-', '_')}",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=float(PAIR_BASE_HIT_RATE_DEFAULTS.get(pair_key, default_rate)),
+                    step=0.1,
+                    format="%.1f",
                     label_visibility="collapsed",
                 )
 
@@ -1096,11 +1091,8 @@ with tabs[2]:
             row = payout_row(label, rec)
 
             pair_key = f"{a}-{b}"
-            base_count = int(pair_base_hit_count.get(pair_key, PAIR_BASE_HIT_COUNT_DEFAULTS.get(pair_key, 0)))
-            if int(base_race_n) > 0:
-                expected_pair = round(100.0 * base_count / int(base_race_n), 1)
-            else:
-                expected_pair = None
+            expected_pair = pair_base_hit_rate.get(pair_key, PAIR_BASE_HIT_RATE_DEFAULTS.get(pair_key))
+            expected_pair = round(float(expected_pair), 1) if expected_pair is not None and pd.notna(expected_pair) else None
             row["外部想定ペア的%"] = expected_pair
             if row["的中率%"] is not None and expected_pair is not None:
                 row["想定差"] = round(float(row["的中率%"] ) - float(expected_pair), 1)
@@ -1416,7 +1408,7 @@ with tabs[2]:
             "的中率%": row.get("的中率%"),
             "平均配当": row.get("平均配当"),
             "ペア基準配当": PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}"),
-            "想定出目回数": PAIR_BASE_HIT_COUNT_DEFAULTS.get(f"{a}-{b}"),
+            "外部想定ペア的%": PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}"),
             "回収率%": row.get("回収率%"),
         })
     st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True, height=430)
