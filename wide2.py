@@ -5,6 +5,7 @@ from typing import List, Dict, Tuple
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
 st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.8｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
@@ -434,7 +435,7 @@ def _deviation_stats(value, values):
 
 
 def render_sticky_table(df: pd.DataFrame, height: int = 470):
-    """横スクロールしても『判定』『型』が左に残る簡易HTML表。"""
+    """横スクロールしても『判定』『型』が左に残るHTML表。components.htmlで確実に描画する。"""
     if df is None or df.empty:
         st.info("表示するデータがありません。")
         return
@@ -442,67 +443,80 @@ def render_sticky_table(df: pd.DataFrame, height: int = 470):
     show_df = df.copy().fillna("")
     table_html = show_df.to_html(index=False, escape=True, border=0)
 
-    st.markdown(
-        f"""
-        <style>
-        .velobi-sticky-wrap {{
-            max-height: {height}px;
-            overflow: auto;
-            border: 1px solid rgba(49, 51, 63, 0.2);
-            border-radius: 6px;
-        }}
-        .velobi-sticky-wrap table {{
-            border-collapse: separate;
-            border-spacing: 0;
-            width: max-content;
-            min-width: 100%;
-            font-size: 0.88rem;
-        }}
-        .velobi-sticky-wrap th,
-        .velobi-sticky-wrap td {{
-            padding: 6px 8px;
-            border-bottom: 1px solid rgba(49, 51, 63, 0.15);
-            white-space: nowrap;
-            background: white;
-        }}
-        .velobi-sticky-wrap th {{
-            position: sticky;
-            top: 0;
-            z-index: 3;
-            background: #f6f6f6;
-            font-weight: 700;
-        }}
-        .velobi-sticky-wrap th:nth-child(1),
-        .velobi-sticky-wrap td:nth-child(1) {{
-            position: sticky;
-            left: 0;
-            z-index: 4;
-            min-width: 64px;
-            background: #fff;
-            font-weight: 700;
-        }}
-        .velobi-sticky-wrap th:nth-child(2),
-        .velobi-sticky-wrap td:nth-child(2) {{
-            position: sticky;
-            left: 64px;
-            z-index: 4;
-            min-width: 110px;
-            background: #fff;
-            font-weight: 700;
-            box-shadow: 2px 0 2px rgba(0,0,0,0.05);
-        }}
-        .velobi-sticky-wrap th:nth-child(1),
-        .velobi-sticky-wrap th:nth-child(2) {{
-            z-index: 5;
-            background: #f6f6f6;
-        }}
-        </style>
-        <div class="velobi-sticky-wrap">
-            {table_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    html = f"""
+    <!doctype html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+    body {{
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+    }}
+    .velobi-sticky-wrap {{
+        height: {height}px;
+        overflow: auto;
+        border: 1px solid rgba(49, 51, 63, 0.20);
+        border-radius: 6px;
+        background: #fff;
+    }}
+    .velobi-sticky-wrap table {{
+        border-collapse: separate;
+        border-spacing: 0;
+        width: max-content;
+        min-width: 100%;
+        font-size: 13px;
+    }}
+    .velobi-sticky-wrap th,
+    .velobi-sticky-wrap td {{
+        padding: 6px 8px;
+        border-bottom: 1px solid rgba(49, 51, 63, 0.14);
+        border-right: 1px solid rgba(49, 51, 63, 0.10);
+        white-space: nowrap;
+        background: #fff;
+    }}
+    .velobi-sticky-wrap th {{
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        background: #f6f6f6;
+        font-weight: 700;
+    }}
+    .velobi-sticky-wrap th:nth-child(1),
+    .velobi-sticky-wrap td:nth-child(1) {{
+        position: sticky;
+        left: 0;
+        z-index: 4;
+        min-width: 58px;
+        background: #fff;
+        font-weight: 700;
+    }}
+    .velobi-sticky-wrap th:nth-child(2),
+    .velobi-sticky-wrap td:nth-child(2) {{
+        position: sticky;
+        left: 58px;
+        z-index: 4;
+        min-width: 110px;
+        background: #fff;
+        font-weight: 700;
+        box-shadow: 2px 0 2px rgba(0,0,0,0.08);
+    }}
+    .velobi-sticky-wrap th:nth-child(1),
+    .velobi-sticky-wrap th:nth-child(2) {{
+        z-index: 5;
+        background: #f6f6f6;
+    }}
+    </style>
+    </head>
+    <body>
+    <div class="velobi-sticky-wrap">
+        {table_html}
+    </div>
+    </body>
+    </html>
+    """
+    components.html(html, height=height + 20, scrolling=False)
 
 
 
