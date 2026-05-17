@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.3｜固定想定ペア的%強制反映｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.4｜固定想定ペア的%｜想定元非表示｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1088,7 +1088,6 @@ with tabs[2]:
             row["相手"] = opp
             row["ペアキー"] = pair_key
             row["想定ペア的%"] = expected_pair
-            row["想定元"] = "小倉2年固定"
 
             if row["的中率%"] is not None and expected_pair is not None:
                 diff = round(float(row["的中率%"] ) - float(expected_pair), 1)
@@ -1364,7 +1363,6 @@ with tabs[2]:
         "的中H",
         "的中率%",
         "想定ペア的%",
-        "想定元",
         "想定差",
         "平均差",
         "中央値差",
