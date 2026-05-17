@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.7｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v8.9｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1101,7 +1101,7 @@ with tabs[2]:
                 expected_pair = round(100.0 * base_count / int(base_race_n), 1)
             else:
                 expected_pair = None
-            row["想定ペア的%"] = expected_pair
+            row["外部想定ペア的%"] = expected_pair
             if row["的中率%"] is not None and expected_pair is not None:
                 row["想定差"] = round(float(row["的中率%"] ) - float(expected_pair), 1)
             else:
@@ -1136,8 +1136,8 @@ with tabs[2]:
     if not df_pairs.empty and df_pairs["想定差"].notna().any():
         candidate_mask = (
             df_pairs["想定差"].notna()
-            & df_pairs["想定ペア的%"].notna()
-            & (df_pairs["想定ペア的%"] >= float(MIN_EXPECTED_PAIR_RATE))
+            & df_pairs["外部想定ペア的%"].notna()
+            & (df_pairs["外部想定ペア的%"] >= float(MIN_EXPECTED_PAIR_RATE))
         )
 
         # 評価1・2の全候補を同一母集団として、外部想定に対する想定差の平均差・中央値差・偏差値を出す。
@@ -1379,7 +1379,7 @@ with tabs[2]:
         "対象N",
         "的中H",
         "的中率%",
-        "想定ペア的%",
+        "外部想定ペア的%",
         "想定差",
         "平均差",
         "中央値差",
