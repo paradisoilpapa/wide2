@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.1｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v9.2｜固定想定ペア的%完全反映｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1078,6 +1078,8 @@ with tabs[2]:
             row = payout_row(label, rec)
 
             pair_key = f"{a}-{b}"
+            # 想定ペア的%は現在入力データから計算しない。
+            # 小倉ミッドA級7車・直近2年の固定値をそのまま使用する。
             expected_pair = PAIR_BASE_HIT_RATE_DEFAULTS.get(pair_key)
             expected_pair = round(float(expected_pair), 1) if expected_pair is not None else None
             row["軸"] = f"評価{axis}"
