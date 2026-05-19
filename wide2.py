@@ -2327,6 +2327,168 @@ with tabs[2]:
             height=table_auto_height(df_trio_show),
         )
 
+
+    st.markdown("#### 穴ワイド参考候補｜12-567")
+    st.caption(
+        "ワイド配当データは使わず、12-567（1-5 / 1-6 / 1-7 / 2-5 / 2-6 / 2-7）だけを参考候補化します。"
+        "資金が少ない時に、3連複の代替・延命用として最大3点まで確認する欄です。"
+    )
+    wide_pick_n = st.number_input(
+        "穴ワイド 最大点数",
+        key="hole_wide_pick_n",
+        min_value=0,
+        max_value=3,
+        value=1,
+        step=1,
+        help="0にすると候補表示のみ。1〜3で参考候補を上位から表示します。",
+    )
+
+    hole_wide_pairs = [(1, 5), (1, 6), (1, 7), (2, 5), (2, 6), (2, 7)]
+    wide_rows = []
+    for a, b in hole_wide_pairs:
+        pair_key = f"{a}-{b}"
+        label = nishafuku_label(a, b)
+        rec = payout_nishafuku_total.get(label, new_payout_rec())
+        base_row = payout_row(label, rec)
+
+        low_eval = max(a, b)
+        cur_place = None
+        if low_eval in rank_total:
+            rec_rank = rank_total.get(low_eval, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+            n_rank = int(rec_rank.get("N", 0))
+            if n_rank > 0:
+                cur_place = round(
+                    100.0 * (
+                        int(rec_rank.get("C1", 0))
+                        + int(rec_rank.get("C2", 0))
+                        + int(rec_rank.get("C3", 0))
+                    ) / n_rank,
+                    1,
+                )
+        base_place = TRIO_BASE_PLACE_RATES.get(low_eval)
+        place_diff = round(float(cur_place) - float(base_place), 1) if cur_place is not None and base_place is not None else None
+        place_stat = place_state(place_diff)
+
+        expected_pair = PAIR_BASE_HIT_RATE_DEFAULTS.get(pair_key)
+        expected_pair = round(float(expected_pair), 1) if expected_pair is not None else None
+        hit_rate = base_row.get("的中率%")
+        pair_diff = round(float(hit_rate) - float(expected_pair), 1) if hit_rate is not None and expected_pair is not None else None
+
+        pair_base_pay = int(PAIR_BASE_AVG_PAY_DEFAULTS.get(pair_key, 1200))
+        expected_roi = round(float(expected_pair) * float(pair_base_pay) / 100.0, 1) if expected_pair is not None else None
+        actual_roi = base_row.get("回収率%")
+        roi_diff = round(float(actual_roi) - float(expected_roi), 1) if actual_roi is not None and expected_roi is not None else None
+        avg_pay = base_row.get("平均配当")
+        if avg_pay is not None and pd.notna(avg_pay) and pair_base_pay > 0:
+            pay_coef = round(float(avg_pay) / float(pair_base_pay), 2)
+            pay_diff = round(float(avg_pay) - float(pair_base_pay), 1)
+        else:
+            pay_coef = None
+            pay_diff = None
+
+        if pay_coef is None:
+            pay_pos = "未回収"
+        elif float(pay_coef) < 0.80:
+            pay_pos = "安すぎ"
+        elif float(pay_coef) <= 1.30:
+            pay_pos = "基準付近"
+        else:
+            pay_pos = "高すぎ"
+
+        reasons = []
+        if place_stat == "基準未満":
+            reasons.append("複勝戻り")
+        elif place_stat == "来すぎ":
+            reasons.append("複勝来すぎ")
+        else:
+            reasons.append("複勝中庸")
+
+        if avg_pay is None or pd.isna(avg_pay):
+            reasons.append("2車複未回収")
+        elif pay_coef is not None and float(pay_coef) < 0.80:
+            reasons.append("配当戻り")
+        elif pay_coef is not None and float(pay_coef) > 1.30:
+            reasons.append("配当上振れ")
+
+        # 穴ワイドは配当データがないため、候補性は「低評価側の複勝状態」と2車複側の過熱回避で見る。
+        overheat = False
+        if place_stat == "来すぎ":
+            overheat = True
+        if pair_diff is not None and float(pair_diff) >= 10.0:
+            overheat = True
+        if actual_roi is not None and float(actual_roi) >= 180.0:
+            overheat = True
+
+        score = 1000.0
+        if not overheat:
+            score = 0.0
+            if place_stat == "基準未満":
+                score -= 4.0
+            elif place_stat == "中庸":
+                score += 0.0
+            else:
+                score += 20.0
+
+            # 2車複側が未回収・安すぎ・回収不足なら、ワイド参考候補としては上にする。
+            if avg_pay is None or pd.isna(avg_pay):
+                score -= 2.0
+            if pay_coef is not None:
+                score += abs(float(pay_coef) - 0.8) * 4.0
+            if roi_diff is not None:
+                if float(roi_diff) < 0:
+                    score += max(-6.0, float(roi_diff) / 15.0)
+                else:
+                    score += float(roi_diff) / 25.0
+            # 5・6・7の中では、極端な7偏重を避けるため評価順の軽い補正。
+            score += (low_eval - 5) * 0.6
+
+        wide_rows.append({
+            "判定": "",
+            "ワイド候補": pair_key,
+            "低評価側": low_eval,
+            "現在複勝率%": cur_place,
+            "基準複勝率%": base_place,
+            "複勝差": place_diff,
+            "複勝状態": place_stat,
+            "参考理由": "／".join(reasons),
+            "2車複的中率%": hit_rate,
+            "想定ペア的%": expected_pair,
+            "想定差": pair_diff,
+            "平均配当": avg_pay,
+            "ペア基準配当": pair_base_pay,
+            "配当係数": pay_coef,
+            "配当位置": pay_pos,
+            "想定回収率%": expected_roi,
+            "2車複回収率%": actual_roi,
+            "回収差": roi_diff,
+            "_score": score,
+            "_overheat": overheat,
+        })
+
+    df_wide = pd.DataFrame(wide_rows)
+    if not df_wide.empty:
+        selected_wide_idx = []
+        if int(wide_pick_n) > 0:
+            cand = df_wide.loc[~df_wide["_overheat"]].copy()
+            for idx, _r in cand.sort_values(["_score", "ワイド候補"]).iterrows():
+                selected_wide_idx.append(idx)
+                if len(selected_wide_idx) >= int(wide_pick_n):
+                    break
+        if selected_wide_idx:
+            df_wide.loc[selected_wide_idx, "判定"] = "参考"
+            st.info("穴ワイド参考候補：" + " / ".join(df_wide.loc[selected_wide_idx, "ワイド候補"].tolist()))
+        else:
+            st.caption("穴ワイド参考候補はありません。")
+
+        wide_cols = [
+            "判定", "ワイド候補", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
+            "2車複的中率%", "想定ペア的%", "想定差", "平均配当", "ペア基準配当", "配当係数", "配当位置",
+            "2車複回収率%", "想定回収率%", "回収差",
+        ]
+        df_wide_show = df_wide[[c for c in wide_cols if c in df_wide.columns]]
+        df_wide_show = drop_blank_display_columns(df_wide_show)
+        render_sortable_table(df_wide_show)
+
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
 
