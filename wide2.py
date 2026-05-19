@@ -8,7 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v10.0｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v10.0｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜3連複5軸限定")
 
 # =========================
 # 基本設定（7車ベース）
@@ -230,14 +230,37 @@ TRIO_FULL_EXPECTED_ROIS = {
     for k in TRIO_FULL_BASE_COUNTS
 }
 
+# 実運用で3連複の軸候補にする2車複ペア。
+# 現実的に使うのは、想定ペア的中率が高く、軸として成立しやすい5候補まで。
+# これ以外の2車複本線が出ても、3連複軸には使わない。
+TRIO_AXIS_ALLOWED_KEYS = ["1-2", "1-3", "1-4", "2-3", "2-4"]
+
+
+def _trio_key_from_parts(a: int, b: int, c: int) -> str:
+    return "-".join(str(x) for x in sorted([int(a), int(b), int(c)]))
+
+
+def _build_trio_used_keys(axis_keys):
+    keys = []
+    seen = set()
+    for axis_key in axis_keys:
+        try:
+            a, b = [int(x) for x in axis_key.split("-")]
+        except Exception:
+            continue
+        for target in range(1, FIELD_SIZE + 1):
+            if target in (a, b):
+                continue
+            key = _trio_key_from_parts(a, b, target)
+            if key in TRIO_FULL_BASE_COUNTS and key not in seen:
+                keys.append(key)
+                seen.add(key)
+    return keys
+
+
 # 実運用で累積転記する3連複キー。
-# 2車複候補は 1-2〜1-7 / 2-3〜2-7 だけを使うため、
-# 3連複個別も「評価1または評価2を含む目」だけに絞る。
-# 3-4-5 など評価3〜7だけの目は小倉基準計算には残すが、転記対象からは外す。
-TRIO_USED_KEYS = [
-    k for k in TRIO_FULL_BASE_COUNTS
-    if any(int(x) in (1, 2) for x in k.split("-"))
-]
+# 小倉基準計算には全35通りを使うが、手入力・引継ぎは上記5軸から派生する目だけに絞る。
+TRIO_USED_KEYS = _build_trio_used_keys(TRIO_AXIS_ALLOWED_KEYS)
 
 
 
@@ -1195,8 +1218,8 @@ with tabs[1]:
             H = c3.number_input("", key=f"prev_sp12_{safe}_H", min_value=0, value=0, label_visibility="collapsed")
             sanrenpuku12_inputs.append((label, int(N), int(SUM), int(H)))
 
-        st.markdown("## 3連複 個別 引継ぎ入力（累積｜1・2絡み）")
-        st.caption("1・2絡みの3連複だけを転記します。3-4-5など評価3〜7だけの目は使わないため省略します。通常は日次入力で自動加算されます。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
+        st.markdown("## 3連複 個別 引継ぎ入力（累積｜対象5軸）")
+        st.caption("対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）から派生する3連複だけを転記します。通常は日次入力で自動加算されます。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
         sanrenpuku12_individual_inputs = []
         for label in ["仮想全体"]:
             st.markdown(f"**{label}**")
@@ -2140,7 +2163,7 @@ with tabs[2]:
     st.dataframe(df_sp12[[c for c in sp_cols if c in df_sp12.columns]], use_container_width=True, hide_index=True)
 
     st.markdown("#### 3連複 個別候補｜2車複上位2軸方式")
-    st.caption("2車複表の本線ペアを最大2セット使い、各軸の3連複候補を小倉基準で個別判定します。最大4点までに抑えます。")
+    st.caption("2車複表の本線ペアのうち、対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）だけを最大2セット使い、各軸の3連複候補を小倉基準で個別判定します。最大4点までに抑えます。")
     trio_pick_n = st.number_input(
         "推奨3連複 最大点数",
         key="trio_axis_pick_n",
@@ -2158,16 +2181,19 @@ with tabs[2]:
         step=1,
     )
 
-    # 2車複表の本線ペアを3連複軸に採用。なければ1-2を暫定表示。
+    # 2車複表の本線ペアを3連複軸に採用。
+    # ただし三連複軸として使うのは、現実的な対象5軸だけ。
     axis_pairs = []
     try:
         if "判定" in df_pairs.columns and "ペアキー" in df_pairs.columns:
-            axis_pairs = [str(x) for x in df_pairs.loc[df_pairs["判定"].eq("本線"), "ペアキー"].dropna().tolist()]
+            raw_axis_pairs = [str(x) for x in df_pairs.loc[df_pairs["判定"].eq("本線"), "ペアキー"].dropna().tolist()]
+            axis_pairs = [x for x in raw_axis_pairs if x in TRIO_AXIS_ALLOWED_KEYS]
     except Exception:
         axis_pairs = []
-    if not axis_pairs:
-        axis_pairs = ["1-2"]
     axis_pairs = axis_pairs[: int(trio_axis_n)]
+
+    if not axis_pairs:
+        st.info("3連複軸候補はありません。対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）が2車複本線に出た時だけ表示します。")
 
     trio_rows = []
     for axis_key in axis_pairs:
@@ -2340,7 +2366,7 @@ with tabs[2]:
         height=max(90, 38 * (len(df_sp_carry) + 1)),
     )
 
-    st.markdown("#### 3連複 個別 引継ぎ用累積表｜1・2絡み")
+    st.markdown("#### 3連複 個別 引継ぎ用累積表｜対象5軸")
     tri_carry_rows = []
     for label in ["仮想全体"]:
         for key in TRIO_USED_KEYS:
