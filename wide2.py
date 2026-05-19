@@ -2639,47 +2639,73 @@ with tabs[2]:
         c_buy2.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
 
     st.markdown("### 投資EV診断（既存推奨買い目｜必要オッズ表示）")
+    st.caption(
+        "現在オッズは未入力なので、買い/ケンは確定しません。"
+        "ここでは券種・判定ごとに分けて、各買い目がEV1.10へ到達するための必要オッズを表示します。"
+    )
     if ev_diagnosis_frames:
         df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
         df_ev_diag["stake"] = 100.0
 
-        race_summary = race_ev_summary(df_ev_diag)
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("RaceEV", "—" if race_summary["RaceEV"] is None else f'{race_summary["RaceEV"]:.3f}')
-        m2.metric("RaceConfidence", "—" if race_summary["RaceConfidence"] is None else f'{race_summary["RaceConfidence"]:.3f}')
-        m3.metric("点数", race_summary["総点数"])
-        m4.metric("診断", race_summary["race_label"])
+        # 重要：現在オッズ未入力のため、2車複本線・2車複注・3連複推奨を混ぜたRaceEVは出さない。
+        # 券種と判定ごとに分けて、必要オッズを確認する。
+        st.warning("現在オッズ未入力：RaceEVは未確定です。2車複本線・2車複注・3連複推奨を分けて必要オッズを確認してください。")
 
-        if race_summary["race_label"] == "買い":
-            st.success("診断：買い条件を満たしています。")
-        elif race_summary["race_label"] == "小口買い":
-            st.info("診断：小口買い条件です。厚く張る段階ではありません。")
-        else:
-            st.warning("診断：現在オッズ未入力のためRaceEVは未確定です。各買い目の必要オッズを確認してください。")
+        def _fmt_needed_pairs(g: pd.DataFrame, limit: int = 4) -> str:
+            parts = []
+            for _, rr in g.iterrows():
+                key = str(rr.get("目") or rr.get("ペアキー") or rr.get("型") or "")
+                need = _safe_float(rr.get("必要odds_EV1.10"), None)
+                if need is None:
+                    parts.append(f"{key}: —")
+                else:
+                    parts.append(f"{key}: {need:.2f}倍")
+            if len(parts) > limit:
+                return " / ".join(parts[:limit]) + f" / ほか{len(parts)-limit}点"
+            return " / ".join(parts)
+
+        group_order = [
+            ("2車複", "本線"),
+            ("2車複", "注"),
+            ("3連複", "推奨"),
+        ]
+        group_rows = []
+        for bet_type, judge in group_order:
+            g = df_ev_diag[
+                df_ev_diag["券種"].astype(str).eq(bet_type)
+                & df_ev_diag["判定"].astype(str).eq(judge)
+            ].copy()
+            if g.empty:
+                continue
+            needs = [_safe_float(v, None) for v in g.get("必要odds_EV1.10", [])]
+            needs = [v for v in needs if v is not None]
+            confs = [_safe_float(v, None) for v in g.get("Confidence", [])]
+            confs = [v for v in confs if v is not None]
+            group_rows.append({
+                "区分": f"{bet_type} {judge}",
+                "点数": int(len(g)),
+                "必要odds_EV1.10_最大": round(max(needs), 2) if needs else None,
+                "必要odds_EV1.10_平均": round(sum(needs) / len(needs), 2) if needs else None,
+                "平均Confidence": round(sum(confs) / len(confs), 3) if confs else None,
+                "確認": _fmt_needed_pairs(g),
+            })
+
+        if group_rows:
+            df_group_summary = pd.DataFrame(group_rows)
+            st.markdown("#### 券種・判定別 必要オッズサマリー")
+            st.dataframe(
+                df_group_summary,
+                use_container_width=True,
+                hide_index=True,
+                height=table_auto_height(df_group_summary),
+            )
 
         anchor_mask = df_ev_diag.get("is_anchor", pd.Series([False] * len(df_ev_diag))).fillna(False).astype(bool)
-        if anchor_mask.any() and len(df_ev_diag) > int(anchor_mask.sum()):
-            summary_without_anchor = race_ev_summary(df_ev_diag.loc[~anchor_mask].copy())
-            c_a1, c_a2 = st.columns(2)
-            c_a1.caption(
-                "保険込み："
-                f'RaceEV={race_summary["RaceEV"]} / '
-                f'Conf={race_summary["RaceConfidence"]} / '
-                f'{race_summary["race_label"]}'
-            )
-            c_a2.caption(
-                "保険除外："
-                f'RaceEV={summary_without_anchor["RaceEV"]} / '
-                f'Conf={summary_without_anchor["RaceConfidence"]} / '
-                f'{summary_without_anchor["race_label"]}'
-            )
-            if (
-                summary_without_anchor["RaceEV"] is not None
-                and race_summary["RaceEV"] is not None
-                and float(summary_without_anchor["RaceEV"]) > float(race_summary["RaceEV"])
-                and float(race_summary["RaceEV"]) < 1.05
-            ):
-                st.warning("保険目がRaceEVを毀損しています。保険除外推奨です。")
+        if anchor_mask.any():
+            anchor_df = df_ev_diag.loc[anchor_mask].copy()
+            anchor_need = _safe_float(anchor_df.iloc[0].get("必要odds_EV1.10"), None) if not anchor_df.empty else None
+            if anchor_need is not None:
+                st.info(f"保険目（1-2）は、EV1.10基準なら最低 {anchor_need:.2f}倍 が必要です。現在オッズがこれ未満なら保険としても投資EVは不足します。")
 
         diag_cols = [
             "券種", "判定", "EV判定", "型", "目", "対象N", "的中H",
@@ -2696,7 +2722,7 @@ with tabs[2]:
             height=table_auto_height(df_ev_show),
         )
     else:
-        st.info("EV診断対象の推奨買い目がありません。")
+        st.info("投資EV診断の対象となる既存推奨買い目がありません。")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
