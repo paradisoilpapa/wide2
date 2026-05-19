@@ -1892,6 +1892,7 @@ with tabs[2]:
     # 2車複・3連複の各ロジックはこの下で計算されるため、
     # st.empty() を使って画面上の位置だけ先に確保しておきます。
     purchase_candidate_slot = st.empty()
+    ev_diagnosis_slot = st.empty()
     purchase_candidate_summary = {
         "nishafuku": "—",
         "trio": "—",
@@ -2638,91 +2639,92 @@ with tabs[2]:
         c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku', '—')}")
         c_buy2.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
 
-    st.markdown("### 投資EV診断（既存推奨買い目｜必要オッズ表示）")
-    st.caption(
-        "現在オッズは未入力なので、買い/ケンは確定しません。"
-        "ここでは券種・判定ごとに分けて、各買い目がEV1.10へ到達するための必要オッズを表示します。"
-    )
-    if ev_diagnosis_frames:
-        df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
-        df_ev_diag["stake"] = 100.0
+    with ev_diagnosis_slot.container():
+        st.markdown("### 投資EV診断（既存推奨買い目｜必要オッズ表示）")
+        st.caption(
+            "現在オッズは未入力なので、買い/ケンは確定しません。"
+            "ここでは券種・判定ごとに分けて、各買い目がEV1.10へ到達するための必要オッズを表示します。"
+        )
+        if ev_diagnosis_frames:
+            df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
+            df_ev_diag["stake"] = 100.0
 
-        # 重要：現在オッズ未入力のため、2車複本線・2車複注・3連複推奨を混ぜたRaceEVは出さない。
-        # 券種と判定ごとに分けて、必要オッズを確認する。
-        st.warning("現在オッズ未入力：RaceEVは未確定です。2車複本線・2車複注・3連複推奨を分けて必要オッズを確認してください。")
+            # 重要：現在オッズ未入力のため、2車複本線・2車複注・3連複推奨を混ぜたRaceEVは出さない。
+            # 券種と判定ごとに分けて、必要オッズを確認する。
+            st.warning("現在オッズ未入力：RaceEVは未確定です。2車複本線・2車複注・3連複推奨を分けて必要オッズを確認してください。")
 
-        def _fmt_needed_pairs(g: pd.DataFrame, limit: int = 4) -> str:
-            parts = []
-            for _, rr in g.iterrows():
-                key = str(rr.get("目") or rr.get("ペアキー") or rr.get("型") or "")
-                need = _safe_float(rr.get("必要odds_EV1.10"), None)
-                if need is None:
-                    parts.append(f"{key}: —")
-                else:
-                    parts.append(f"{key}: {need:.2f}倍")
-            if len(parts) > limit:
-                return " / ".join(parts[:limit]) + f" / ほか{len(parts)-limit}点"
-            return " / ".join(parts)
+            def _fmt_needed_pairs(g: pd.DataFrame, limit: int = 4) -> str:
+                parts = []
+                for _, rr in g.iterrows():
+                    key = str(rr.get("目") or rr.get("ペアキー") or rr.get("型") or "")
+                    need = _safe_float(rr.get("必要odds_EV1.10"), None)
+                    if need is None:
+                        parts.append(f"{key}: —")
+                    else:
+                        parts.append(f"{key}: {need:.2f}倍")
+                if len(parts) > limit:
+                    return " / ".join(parts[:limit]) + f" / ほか{len(parts)-limit}点"
+                return " / ".join(parts)
 
-        group_order = [
-            ("2車複", "本線"),
-            ("2車複", "注"),
-            ("3連複", "推奨"),
-        ]
-        group_rows = []
-        for bet_type, judge in group_order:
-            g = df_ev_diag[
-                df_ev_diag["券種"].astype(str).eq(bet_type)
-                & df_ev_diag["判定"].astype(str).eq(judge)
-            ].copy()
-            if g.empty:
-                continue
-            needs = [_safe_float(v, None) for v in g.get("必要odds_EV1.10", [])]
-            needs = [v for v in needs if v is not None]
-            confs = [_safe_float(v, None) for v in g.get("Confidence", [])]
-            confs = [v for v in confs if v is not None]
-            group_rows.append({
-                "区分": f"{bet_type} {judge}",
-                "点数": int(len(g)),
-                "必要odds_EV1.10_最大": round(max(needs), 2) if needs else None,
-                "必要odds_EV1.10_平均": round(sum(needs) / len(needs), 2) if needs else None,
-                "平均Confidence": round(sum(confs) / len(confs), 3) if confs else None,
-                "確認": _fmt_needed_pairs(g),
-            })
+            group_order = [
+                ("2車複", "本線"),
+                ("2車複", "注"),
+                ("3連複", "推奨"),
+            ]
+            group_rows = []
+            for bet_type, judge in group_order:
+                g = df_ev_diag[
+                    df_ev_diag["券種"].astype(str).eq(bet_type)
+                    & df_ev_diag["判定"].astype(str).eq(judge)
+                ].copy()
+                if g.empty:
+                    continue
+                needs = [_safe_float(v, None) for v in g.get("必要odds_EV1.10", [])]
+                needs = [v for v in needs if v is not None]
+                confs = [_safe_float(v, None) for v in g.get("Confidence", [])]
+                confs = [v for v in confs if v is not None]
+                group_rows.append({
+                    "区分": f"{bet_type} {judge}",
+                    "点数": int(len(g)),
+                    "必要odds_EV1.10_最大": round(max(needs), 2) if needs else None,
+                    "必要odds_EV1.10_平均": round(sum(needs) / len(needs), 2) if needs else None,
+                    "平均Confidence": round(sum(confs) / len(confs), 3) if confs else None,
+                    "確認": _fmt_needed_pairs(g),
+                })
 
-        if group_rows:
-            df_group_summary = pd.DataFrame(group_rows)
-            st.markdown("#### 券種・判定別 必要オッズサマリー")
+            if group_rows:
+                df_group_summary = pd.DataFrame(group_rows)
+                st.markdown("#### 券種・判定別 必要オッズサマリー")
+                st.dataframe(
+                    df_group_summary,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=table_auto_height(df_group_summary),
+                )
+
+            anchor_mask = df_ev_diag.get("is_anchor", pd.Series([False] * len(df_ev_diag))).fillna(False).astype(bool)
+            if anchor_mask.any():
+                anchor_df = df_ev_diag.loc[anchor_mask].copy()
+                anchor_need = _safe_float(anchor_df.iloc[0].get("必要odds_EV1.10"), None) if not anchor_df.empty else None
+                if anchor_need is not None:
+                    st.info(f"保険目（1-2）は、EV1.10基準なら最低 {anchor_need:.2f}倍 が必要です。現在オッズがこれ未満なら保険としても投資EVは不足します。")
+
+            diag_cols = [
+                "券種", "判定", "EV判定", "型", "目", "対象N", "的中H",
+                "p_adj%", "p_safe%",
+                "必要odds_EV1.00", "必要odds_EV1.05", "必要odds_EV1.10", "必要odds_EV1.20", "必要払戻_EV1.10",
+                "参考odds", "基準odds", "odds_ratio", "参考EV",
+                "Confidence", "heat_penalty", "Score", "資産枠", "総合候補理由",
+            ]
+            df_ev_show = df_ev_diag[[c for c in diag_cols if c in df_ev_diag.columns]]
             st.dataframe(
-                df_group_summary,
+                df_ev_show,
                 use_container_width=True,
                 hide_index=True,
-                height=table_auto_height(df_group_summary),
+                height=table_auto_height(df_ev_show),
             )
-
-        anchor_mask = df_ev_diag.get("is_anchor", pd.Series([False] * len(df_ev_diag))).fillna(False).astype(bool)
-        if anchor_mask.any():
-            anchor_df = df_ev_diag.loc[anchor_mask].copy()
-            anchor_need = _safe_float(anchor_df.iloc[0].get("必要odds_EV1.10"), None) if not anchor_df.empty else None
-            if anchor_need is not None:
-                st.info(f"保険目（1-2）は、EV1.10基準なら最低 {anchor_need:.2f}倍 が必要です。現在オッズがこれ未満なら保険としても投資EVは不足します。")
-
-        diag_cols = [
-            "券種", "判定", "EV判定", "型", "目", "対象N", "的中H",
-            "p_adj%", "p_safe%",
-            "必要odds_EV1.00", "必要odds_EV1.05", "必要odds_EV1.10", "必要odds_EV1.20", "必要払戻_EV1.10",
-            "参考odds", "基準odds", "odds_ratio", "参考EV",
-            "Confidence", "heat_penalty", "Score", "資産枠", "総合候補理由",
-        ]
-        df_ev_show = df_ev_diag[[c for c in diag_cols if c in df_ev_diag.columns]]
-        st.dataframe(
-            df_ev_show,
-            use_container_width=True,
-            hide_index=True,
-            height=table_auto_height(df_ev_show),
-        )
-    else:
-        st.info("投資EV診断の対象となる既存推奨買い目がありません。")
+        else:
+            st.info("投資EV診断の対象となる既存推奨買い目がありません。")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
