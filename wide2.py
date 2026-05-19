@@ -69,6 +69,32 @@ PAIR_BASE_HIT_RATE_DEFAULTS = {
     "2-7": 3.0,
 }
 
+# 3連複 1-2-全の固定想定値。
+# 小倉ミッドナイトA級7車・直近2年の3連複全集計より、
+# 1-2-3=101回/平均378円、1-2-4=88回/537円、
+# 1-2-5=57回/1053円、1-2-6=44回/1136円、1-2-7=30回/1545円。
+TRIO_12_ALL_BASE_COUNTS = {
+    "1-2-3": 101,
+    "1-2-4": 88,
+    "1-2-5": 57,
+    "1-2-6": 44,
+    "1-2-7": 30,
+}
+TRIO_12_ALL_BASE_AVG_PAYS = {
+    "1-2-3": 378,
+    "1-2-4": 537,
+    "1-2-5": 1053,
+    "1-2-6": 1136,
+    "1-2-7": 1545,
+}
+TRIO_12_ALL_EXPECTED_AVG_PAY = round(
+    sum(TRIO_12_ALL_BASE_COUNTS[k] * TRIO_12_ALL_BASE_AVG_PAYS[k] for k in TRIO_12_ALL_BASE_COUNTS)
+    / max(1, sum(TRIO_12_ALL_BASE_COUNTS.values())),
+    1,
+)
+TRIO_12_ALL_EXPECTED_HIT_RATE = round(PAIR_BASE_HIT_RATE_DEFAULTS["1-2"] * 3.0, 1)
+TRIO_12_ALL_EXPECTED_ROI = round((TRIO_12_ALL_EXPECTED_HIT_RATE / 100.0) * TRIO_12_ALL_EXPECTED_AVG_PAY / 500.0 * 100.0, 1)
+
 
 RANK_SYMBOLS = {
     1: "評価１",
@@ -195,26 +221,47 @@ def sanrenpuku12_expected_rate(pair12_rate: float | None = None) -> float | None
     """2車複1-2想定率×3で、1-2両方3着内率を概算。上限は100%。"""
     try:
         if pair12_rate is None:
-            pair12_rate = PAIR_BASE_HIT_RATE_DEFAULTS.get("1-2", 0.0)
+            return float(TRIO_12_ALL_EXPECTED_HIT_RATE)
         return round(min(100.0, float(pair12_rate) * 3.0), 1)
     except Exception:
         return None
 
 
 def sanrenpuku12_row(label: str, rec: Dict[str, int]) -> Dict:
-    """3連複1-2-全用の表示行。"""
+    """3連複1-2-全用の表示行。小倉2年分3連複集計を固定想定として併記。"""
     row = payout_row(label, rec)
     exp_rate = sanrenpuku12_expected_rate()
+    exp_avg_pay = float(TRIO_12_ALL_EXPECTED_AVG_PAY)
+    exp_roi = float(TRIO_12_ALL_EXPECTED_ROI)
+
     row["想定1-2両方3着内率%"] = exp_rate
+    row["想定平均配当"] = exp_avg_pay
+    row["ゾーン想定回収率%"] = exp_roi
+
     if exp_rate and exp_rate > 0:
         row["7車5点_損益分岐平均配当"] = round((5.0 * 100.0) / (exp_rate / 100.0), 1)
     else:
         row["7車5点_損益分岐平均配当"] = None
+
     avg_pay = row.get("平均配当")
-    if exp_rate and avg_pay is not None and pd.notna(avg_pay):
-        row["ゾーン想定回収率%"] = round((exp_rate / 100.0) * float(avg_pay) / 500.0 * 100.0, 1)
+    roi = row.get("回収率%")
+    hit_rate = row.get("的中率%")
+
+    if avg_pay is not None and pd.notna(avg_pay):
+        row["平均配当差"] = round(float(avg_pay) - exp_avg_pay, 1)
     else:
-        row["ゾーン想定回収率%"] = None
+        row["平均配当差"] = None
+
+    if roi is not None and pd.notna(roi):
+        row["ゾーン回収差"] = round(float(roi) - exp_roi, 1)
+    else:
+        row["ゾーン回収差"] = None
+
+    if hit_rate is not None and pd.notna(hit_rate) and exp_rate is not None:
+        row["的中率差"] = round(float(hit_rate) - float(exp_rate), 1)
+    else:
+        row["的中率差"] = None
+
     return row
 
 
@@ -1550,7 +1597,26 @@ with tabs[2]:
     render_sortable_table(df_pairs, height=470)
 
     st.markdown("### 3連複 1-2-全 ゾーン検証")
-    st.caption("仮想全体＝入力済み全レースで3連複1-2-全を買った想定。実購入＝日次入力で『1-2-全購入』にチェックしたレースだけ。的中Hは評価1・2がともに3着内に入った回数です。")
+    st.caption("仮想全体＝入力済み全レースで3連複1-2-全を買った想定。実購入＝日次入力で『1-2-全購入』にチェックしたレースだけ。想定平均配当は小倉2年分3連複全集計の1-2-全加重平均756円を使用します。")
+
+    with st.expander("3連複1-2-全 固定想定値", expanded=False):
+        st.write(
+            f"想定的中率：{TRIO_12_ALL_EXPECTED_HIT_RATE:.1f}% ／ "
+            f"想定平均配当：{TRIO_12_ALL_EXPECTED_AVG_PAY:.1f}円 ／ "
+            f"ゾーン想定回収率：{TRIO_12_ALL_EXPECTED_ROI:.1f}%"
+        )
+        st.dataframe(
+            pd.DataFrame([
+                {
+                    "目": k,
+                    "回数": TRIO_12_ALL_BASE_COUNTS[k],
+                    "平均配当": TRIO_12_ALL_BASE_AVG_PAYS[k],
+                }
+                for k in TRIO_12_ALL_BASE_COUNTS
+            ]),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     sp_rows = []
     for label in ["仮想全体", "実購入"]:
@@ -1566,10 +1632,14 @@ with tabs[2]:
         "的中H",
         "的中率%",
         "平均配当",
+        "想定平均配当",
+        "平均配当差",
+        "的中率差",
         "回収率%",
         "想定1-2両方3着内率%",
         "7車5点_損益分岐平均配当",
         "ゾーン想定回収率%",
+        "ゾーン回収差",
     ]
     st.dataframe(df_sp12[[c for c in sp_cols if c in df_sp12.columns]], use_container_width=True, hide_index=True)
 
@@ -1585,7 +1655,11 @@ with tabs[2]:
             "的中H": row.get("的中H"),
             "的中率%": row.get("的中率%"),
             "平均配当": row.get("平均配当"),
+            "想定平均配当": row.get("想定平均配当"),
+            "平均配当差": row.get("平均配当差"),
             "回収率%": row.get("回収率%"),
+            "ゾーン想定回収率%": row.get("ゾーン想定回収率%"),
+            "ゾーン回収差": row.get("ゾーン回収差"),
         })
     st.dataframe(pd.DataFrame(sp_carry_rows), use_container_width=True, hide_index=True, height=130)
 
