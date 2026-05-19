@@ -2210,6 +2210,20 @@ with tabs[2]:
 
     df_trio_ind = pd.DataFrame(trio_rows)
 
+    # 対象5軸を独立チェックすると、例：1-2-3 が 1-2軸 / 1-3軸 / 2-3軸の
+    # 複数ルートから生成される。表示・推奨では同じ3連複目を重複させない。
+    # 軸優先順は TRIO_AXIS_ALLOWED_KEYS の並びを採用し、最初に出たものだけ残す。
+    if not df_trio_ind.empty:
+        axis_priority = {axis: i for i, axis in enumerate(TRIO_AXIS_ALLOWED_KEYS)}
+        df_trio_ind["_axis_priority"] = df_trio_ind["軸"].map(axis_priority).fillna(9999).astype(int)
+        df_trio_ind = (
+            df_trio_ind
+            .sort_values(["目", "_axis_priority"])
+            .drop_duplicates(subset=["目"], keep="first")
+            .sort_values(["_axis_priority", "目"])
+            .reset_index(drop=True)
+        )
+
     if not df_trio_ind.empty:
         for idx in df_trio_ind.index:
             target_eval = int(df_trio_ind.loc[idx, "評価"])
