@@ -2338,7 +2338,7 @@ with tabs[2]:
     st.markdown("#### ワイド参考候補｜12-34567")
     st.caption(
         "ワイド配当データは使わず、12-34567（1-3〜1-7 / 2-3〜2-7）を参考候補化します。"
-        "資金が少ない時に、3連複の代替・延命用として最大2点まで確認する欄です。購入目安倍が3.0倍以上の候補だけを選出対象にします。"
+        "資金が少ない時に、3連複の代替・延命用として最大2点まで確認する欄です。購入目安倍が3.0倍以上の候補だけを選出対象にし、点数を変えても候補順位は入れ替わらないよう固定順位で選びます。"
         "購入目安倍は、小倉3連複データから逆算した想定ワイド率ごとに個別算出します。"
     )
     wide_pick_n = st.number_input(
@@ -2491,22 +2491,26 @@ with tabs[2]:
 
     df_wide = pd.DataFrame(wide_rows)
     if not df_wide.empty:
-        selected_wide_idx = []
-        if int(wide_pick_n) > 0:
-            cand = df_wide.loc[(~df_wide["_overheat"]) & (df_wide["_target_ok"])].copy()
-            for idx, _r in cand.sort_values(["_score", "ワイド候補"]).iterrows():
-                selected_wide_idx.append(idx)
-                if len(selected_wide_idx) >= int(wide_pick_n):
-                    break
-        # 上部の＜購入候補＞には、画面設定に関係なく最大2点のワイド候補を表示します。
-        # 購入目安倍が3.0倍以上の候補から、
-        # 低評価側の戻り余地・2車複側の配当戻りを加味した参考上位2点です。
-        top_wide_idx = []
-        cand_top = df_wide.loc[(~df_wide["_overheat"]) & (df_wide["_target_ok"])].copy()
-        for idx, _r in cand_top.sort_values(["_score", "ワイド候補"]).iterrows():
-            top_wide_idx.append(idx)
-            if len(top_wide_idx) >= 2:
-                break
+        # ワイド候補の順位は、最大点数スライダーとは独立して一度だけ確定する。
+        # これにより、最大点数を1→2に変えても「1点目が入れ替わる」ような挙動を防ぐ。
+        wide_ranked_idx = []
+        cand_wide = df_wide.loc[(~df_wide["_overheat"]) & (df_wide["_target_ok"])].copy()
+        if not cand_wide.empty:
+            # 同点時も毎回同じ並びになるよう、候補名まで含めて安定ソートする。
+            cand_wide = cand_wide.sort_values(
+                ["_score", "購入目安倍", "ワイド候補"],
+                ascending=[True, False, True],
+                kind="mergesort",
+            )
+            wide_ranked_idx = list(cand_wide.index)
+            for _rank_no, _idx in enumerate(wide_ranked_idx, start=1):
+                df_wide.loc[_idx, "候補順位"] = int(_rank_no)
+
+        selected_wide_idx = wide_ranked_idx[:int(wide_pick_n)] if int(wide_pick_n) > 0 else []
+
+        # 上部の＜購入候補＞も、同じ確定順位の先頭2点を表示する。
+        # ここを別ロジックにしないことで、下の参考候補と上部表示のズレを防ぐ。
+        top_wide_idx = wide_ranked_idx[:2]
         if top_wide_idx:
             _top_wide_labels = []
             for _idx in top_wide_idx:
