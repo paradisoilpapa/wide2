@@ -229,6 +229,27 @@ TRIO_FULL_EXPECTED_ROIS = {
     for k in TRIO_FULL_BASE_COUNTS
 }
 
+
+# 小倉2年分3連複全集計から逆算する「推定ワイド率」。
+# 例：1-5ワイド率 = 1と5を含む3連複の出現回数合計 ÷ 総レース数。
+WIDE_BASE_COUNTS = {}
+for _trio_key, _cnt in TRIO_FULL_BASE_COUNTS.items():
+    _ranks = sorted(int(x) for x in _trio_key.split("-"))
+    for i in range(len(_ranks)):
+        for j in range(i + 1, len(_ranks)):
+            _pair_key = f"{_ranks[i]}-{_ranks[j]}"
+            WIDE_BASE_COUNTS[_pair_key] = WIDE_BASE_COUNTS.get(_pair_key, 0) + int(_cnt)
+
+WIDE_BASE_HIT_RATES = {
+    k: round(100.0 * v / TRIO_BASE_TOTAL_RACES, 1)
+    for k, v in WIDE_BASE_COUNTS.items()
+}
+
+WIDE_BASE_FAIR_ODDS = {
+    k: round(100.0 / v, 1) if v and v > 0 else None
+    for k, v in WIDE_BASE_HIT_RATES.items()
+}
+
 # 実運用で3連複の軸候補にする2車複ペア。
 # 現実的に使うのは、想定ペア的中率が高く、軸として成立しやすい5候補まで。
 # これ以外の2車複本線が出ても、3連複軸には使わない。
@@ -2317,16 +2338,27 @@ with tabs[2]:
     st.markdown("#### 穴ワイド参考候補｜12-567")
     st.caption(
         "ワイド配当データは使わず、12-567（1-5 / 1-6 / 1-7 / 2-5 / 2-6 / 2-7）だけを参考候補化します。"
-        "資金が少ない時に、3連複の代替・延命用として最大3点まで確認する欄です。"
+        "資金が少ない時に、3連複の代替・延命用として最大2点まで確認する欄です。"
     )
-    wide_pick_n = st.number_input(
+    c_wide_opt1, c_wide_opt2 = st.columns([1, 1])
+    wide_pick_n = c_wide_opt1.number_input(
         "穴ワイド 最大点数",
         key="hole_wide_pick_n",
         min_value=0,
-        max_value=3,
-        value=1,
+        max_value=2,
+        value=2,
         step=1,
-        help="0にすると候補表示のみ。1〜3で参考候補を上位から表示します。",
+        help="0にすると候補表示のみ。1〜2で参考候補を上位から表示します。",
+    )
+    wide_min_odds = c_wide_opt2.number_input(
+        "穴ワイド 最低確認オッズ",
+        key="hole_wide_min_odds",
+        min_value=1.0,
+        max_value=50.0,
+        value=2.0,
+        step=0.1,
+        format="%.1f",
+        help="実オッズ確認用の下限です。配当データは未入力のため、候補の足切りではなく目安表示に使います。",
     )
 
     hole_wide_pairs = [(1, 5), (1, 6), (1, 7), (2, 5), (2, 6), (2, 7)]
@@ -2336,6 +2368,13 @@ with tabs[2]:
         label = nishafuku_label(a, b)
         rec = payout_nishafuku_total.get(label, new_payout_rec())
         base_row = payout_row(label, rec)
+
+        base_wide_rate = WIDE_BASE_HIT_RATES.get(pair_key)
+        fair_wide_odds = WIDE_BASE_FAIR_ODDS.get(pair_key)
+        if fair_wide_odds is not None:
+            target_wide_odds = round(max(float(wide_min_odds), float(fair_wide_odds)), 1)
+        else:
+            target_wide_odds = round(float(wide_min_odds), 1)
 
         low_eval = max(a, b)
         cur_place = None
@@ -2431,6 +2470,9 @@ with tabs[2]:
         wide_rows.append({
             "判定": "",
             "ワイド候補": pair_key,
+            "基準ワイド率%": base_wide_rate,
+            "理論下限倍": fair_wide_odds,
+            "最低確認倍": target_wide_odds,
             "低評価側": low_eval,
             "現在複勝率%": cur_place,
             "基準複勝率%": base_place,
@@ -2460,14 +2502,14 @@ with tabs[2]:
                 selected_wide_idx.append(idx)
                 if len(selected_wide_idx) >= int(wide_pick_n):
                     break
-        # 上部の＜購入候補＞には、画面設定に関係なく最大3点の穴ワイド候補を表示します。
-        # ワイド配当データはないため「一番高いオッズ」そのものではなく、
-        # 低評価側の戻り余地・2車複側の配当戻りを加味した参考上位3点です。
+        # 上部の＜購入候補＞には、画面設定に関係なく最大2点の穴ワイド候補を表示します。
+        # ワイド配当データはないため実オッズ判定はせず、
+        # 低評価側の戻り余地・2車複側の配当戻りを加味した参考上位2点です。
         top_wide_idx = []
         cand_top = df_wide.loc[~df_wide["_overheat"]].copy()
         for idx, _r in cand_top.sort_values(["_score", "ワイド候補"]).iterrows():
             top_wide_idx.append(idx)
-            if len(top_wide_idx) >= 3:
+            if len(top_wide_idx) >= 2:
                 break
         if top_wide_idx:
             purchase_candidate_summary["holewide"] = " / ".join(df_wide.loc[top_wide_idx, "ワイド候補"].tolist())
@@ -2481,7 +2523,7 @@ with tabs[2]:
             st.caption("穴ワイド参考候補はありません。")
 
         wide_cols = [
-            "判定", "ワイド候補", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
+            "判定", "ワイド候補", "基準ワイド率%", "理論下限倍", "最低確認倍", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
             "2車複的中率%", "想定ペア的%", "想定差", "平均配当", "ペア基準配当", "配当係数", "配当位置",
             "2車複回収率%", "想定回収率%", "回収差",
         ]
@@ -2496,7 +2538,7 @@ with tabs[2]:
         c_buy1, c_buy2, c_buy3 = st.columns(3)
         c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku', '—')}")
         c_buy2.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
-        c_buy3.info(f"穴ワイド参考3点：{purchase_candidate_summary.get('holewide', '—')}")
+        c_buy3.info(f"穴ワイド参考2点：{purchase_candidate_summary.get('holewide', '—')}")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
