@@ -2162,8 +2162,8 @@ with tabs[2]:
     ]
     st.dataframe(df_sp12[[c for c in sp_cols if c in df_sp12.columns]], use_container_width=True, hide_index=True)
 
-    st.markdown("#### 3連複 個別候補｜2車複上位2軸方式")
-    st.caption("2車複表の本線ペアのうち、対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）だけを最大2セット使い、各軸の3連複候補を小倉基準で個別判定します。最大4点までに抑えます。")
+    st.markdown("#### 3連複 個別候補｜対象5軸独立方式")
+    st.caption("対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）を、2車複本線とは連動させず常時チェックします。各軸の3連複候補を小倉基準で個別判定し、最大4点までに抑えます。")
     trio_pick_n = st.number_input(
         "推奨3連複 最大点数",
         key="trio_axis_pick_n",
@@ -2172,28 +2172,10 @@ with tabs[2]:
         value=4,
         step=1,
     )
-    trio_axis_n = st.number_input(
-        "3連複 軸ペア最大数",
-        key="trio_axis_pair_n",
-        min_value=1,
-        max_value=2,
-        value=2,
-        step=1,
-    )
+    st.caption("3連複軸候補は 1-2 / 1-3 / 1-4 / 2-3 / 2-4 の5つ固定です。2車複本線に出ているかどうかとは切り離して判定します。")
 
-    # 2車複表の本線ペアを3連複軸に採用。
-    # ただし三連複軸として使うのは、現実的な対象5軸だけ。
-    axis_pairs = []
-    try:
-        if "判定" in df_pairs.columns and "ペアキー" in df_pairs.columns:
-            raw_axis_pairs = [str(x) for x in df_pairs.loc[df_pairs["判定"].eq("本線"), "ペアキー"].dropna().tolist()]
-            axis_pairs = [x for x in raw_axis_pairs if x in TRIO_AXIS_ALLOWED_KEYS]
-    except Exception:
-        axis_pairs = []
-    axis_pairs = axis_pairs[: int(trio_axis_n)]
-
-    if not axis_pairs:
-        st.info("3連複軸候補はありません。対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）が2車複本線に出た時だけ表示します。")
+    # 3連複は2車複本線と連動させず、対象5軸を常時チェックする。
+    axis_pairs = list(TRIO_AXIS_ALLOWED_KEYS)
 
     trio_rows = []
     for axis_key in axis_pairs:
@@ -2283,12 +2265,17 @@ with tabs[2]:
                 pass
             df_trio_ind.loc[idx, "_score"] = score
 
-        selected_trio_idx = list(
-            df_trio_ind.loc[df_trio_ind["_eligible"]]
-            .sort_values(["_score", "軸", "目"])
-            .head(int(trio_pick_n))
-            .index
-        )
+        selected_trio_idx = []
+        used_trio_keys = set()
+        for idx, r in df_trio_ind.loc[df_trio_ind["_eligible"]].sort_values(["_score", "軸", "目"]).iterrows():
+            trio_key = str(r.get("目"))
+            if trio_key in used_trio_keys:
+                continue
+            selected_trio_idx.append(idx)
+            used_trio_keys.add(trio_key)
+            if len(selected_trio_idx) >= int(trio_pick_n):
+                break
+
         df_trio_ind.loc[selected_trio_idx, "判定"] = "推奨"
         recommended_trio = df_trio_ind.loc[selected_trio_idx, "目"].tolist()
         if recommended_trio:
