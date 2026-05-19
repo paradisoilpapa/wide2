@@ -926,8 +926,36 @@ def _deviation_stats(value, values):
     }
 
 
-def render_sortable_table(df: pd.DataFrame, height: int = 470):
-    """Streamlit標準のソート可能表。判定・型を先頭に寄せ、横スクロールなしで見やすくする。"""
+
+def drop_blank_display_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """表示用：全行が空欄/None/NaNの列だけ削除する。判定列も全空なら削る。"""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    drop_cols = []
+    for col in out.columns:
+        s = out[col]
+        # None/NaN または 空文字だけなら空列扱い
+        is_blank = s.apply(lambda v: pd.isna(v) or str(v).strip() == "")
+        if bool(is_blank.all()):
+            drop_cols.append(col)
+    if drop_cols:
+        out = out.drop(columns=drop_cols)
+    return out
+
+def table_auto_height(df: pd.DataFrame, row_px: int = 35, header_px: int = 38, pad_px: int = 8, min_px: int = 90) -> int:
+    """行数に合わせて表の高さを自動調整。余白と縦スクロールを減らす。"""
+    if df is None:
+        return min_px
+    try:
+        n = len(df)
+    except Exception:
+        n = 0
+    return max(min_px, header_px + row_px * max(n, 1) + pad_px)
+
+
+def render_sortable_table(df: pd.DataFrame, height: int | None = None):
+    """Streamlit標準のソート可能表。高さ未指定なら行数に合わせて自動調整。"""
     if df is None or df.empty:
         st.info("表示するデータがありません。")
         return
@@ -936,7 +964,7 @@ def render_sortable_table(df: pd.DataFrame, height: int = 470):
         df,
         use_container_width=True,
         hide_index=True,
-        height=height,
+        height=height if height is not None else table_auto_height(df),
     )
 
 
@@ -2063,7 +2091,8 @@ with tabs[2]:
         "総合候補理由",
     ]
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
-    render_sortable_table(df_pairs, height=650)
+    df_pairs = drop_blank_display_columns(df_pairs)
+    render_sortable_table(df_pairs)
 
     st.markdown("### 1-2ゾーン基礎集計")
     st.caption("全体に対して、2車複1-2そのものがどれくらい機能しているかを確認します。3連複個別表は、この1-2ゾーンの上に乗せる買い目選別です。")
@@ -2290,11 +2319,12 @@ with tabs[2]:
             "回収率%", "想定回収率%", "回収差", "状態", "総合候補理由",
         ]
         df_trio_show = df_trio_ind[[c for c in trio_cols if c in df_trio_ind.columns]]
+        df_trio_show = drop_blank_display_columns(df_trio_show)
         st.dataframe(
             df_trio_show,
             use_container_width=True,
             hide_index=True,
-            height=max(420, 38 * (len(df_trio_show) + 1) + 20),
+            height=table_auto_height(df_trio_show),
         )
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
