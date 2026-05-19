@@ -230,26 +230,6 @@ TRIO_FULL_EXPECTED_ROIS = {
 }
 
 
-# 小倉2年分3連複全集計から逆算する「推定ワイド率」。
-# 例：1-5ワイド率 = 1と5を含む3連複の出現回数合計 ÷ 総レース数。
-WIDE_BASE_COUNTS = {}
-for _trio_key, _cnt in TRIO_FULL_BASE_COUNTS.items():
-    _ranks = sorted(int(x) for x in _trio_key.split("-"))
-    for i in range(len(_ranks)):
-        for j in range(i + 1, len(_ranks)):
-            _pair_key = f"{_ranks[i]}-{_ranks[j]}"
-            WIDE_BASE_COUNTS[_pair_key] = WIDE_BASE_COUNTS.get(_pair_key, 0) + int(_cnt)
-
-WIDE_BASE_HIT_RATES = {
-    k: round(100.0 * v / TRIO_BASE_TOTAL_RACES, 1)
-    for k, v in WIDE_BASE_COUNTS.items()
-}
-
-WIDE_BASE_FAIR_ODDS = {
-    k: round(100.0 / v, 1) if v and v > 0 else None
-    for k, v in WIDE_BASE_HIT_RATES.items()
-}
-
 # 実運用で3連複の軸候補にする2車複ペア。
 # 現実的に使うのは、想定ペア的中率が高く、軸として成立しやすい5候補まで。
 # これ以外の2車複本線が出ても、3連複軸には使わない。
@@ -1658,13 +1638,12 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(rows_out), use_container_width=True, hide_index=True)
 
     # 評価別テーブル直下に、最終的な購入候補を後から差し込むための枠。
-    # 2車複・3連複・穴ワイドの各ロジックはこの下で計算されるため、
+    # 2車複・3連複の各ロジックはこの下で計算されるため、
     # st.empty() を使って画面上の位置だけ先に確保しておきます。
     purchase_candidate_slot = st.empty()
     purchase_candidate_summary = {
         "nishafuku": "—",
         "trio": "—",
-        "holewide": "—",
     }
 
     st.divider()
@@ -2335,179 +2314,13 @@ with tabs[2]:
         )
 
 
-    st.markdown("#### ワイド参考候補｜全21ペア・複勝35%以上中央値方式")
-    st.caption(
-        "ワイド配当データは使わず、全21ペアから現在複勝率が2車とも35%以上の組だけを対象にします。"
-        "その中で合成複勝率が中央値に近い候補を上位表示します。"
-        "低評価同士の薄い穴へ寄せすぎず、的中スパン維持用の参考候補として確認する欄です。"
-    )
-    wide_pick_n = st.number_input(
-        "ワイド 最大点数",
-        key="hole_wide_pick_n",
-        min_value=0,
-        max_value=2,
-        value=2,
-        step=1,
-        help="0にすると候補表示のみ。1〜2で参考候補を上位順に表示します。上部の購入候補欄は常に最上位1点だけ表示します。",
-    )
-    WIDE_PLACE_MIN_RATE = 35.0     # 2車ともこの現在複勝率以上を対象にする。
-    WIDE_SHOW_TOP_N = 5            # 表示は上位5位まで。
-
-    def _current_place_rate(eval_rank: int):
-        rec_rank = rank_total.get(eval_rank, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-        n_rank = int(rec_rank.get("N", 0))
-        if n_rank <= 0:
-            return None
-        return round(
-            100.0 * (
-                int(rec_rank.get("C1", 0))
-                + int(rec_rank.get("C2", 0))
-                + int(rec_rank.get("C3", 0))
-            ) / n_rank,
-            1,
-        )
-
-    wide_pairs = [(a, b) for a in range(1, FIELD_SIZE + 1) for b in range(a + 1, FIELD_SIZE + 1)]
-    wide_rows = []
-    eligible_composites = []
-    tmp_wide_rows = []
-
-    for a, b in wide_pairs:
-        pair_key = f"{a}-{b}"
-        base_wide_rate = WIDE_BASE_HIT_RATES.get(pair_key)
-
-        cur_a = _current_place_rate(a)
-        cur_b = _current_place_rate(b)
-        base_a = TRIO_BASE_PLACE_RATES.get(a)
-        base_b = TRIO_BASE_PLACE_RATES.get(b)
-
-        diff_a = round(float(cur_a) - float(base_a), 1) if cur_a is not None and base_a is not None else None
-        diff_b = round(float(cur_b) - float(base_b), 1) if cur_b is not None and base_b is not None else None
-        stat_a = place_state(diff_a)
-        stat_b = place_state(diff_b)
-
-        current_balance = round(abs(float(cur_a) - float(cur_b)), 1) if cur_a is not None and cur_b is not None else None
-        base_balance = round(abs(float(base_a) - float(base_b)), 1) if base_a is not None and base_b is not None else None
-        composite = round((float(cur_a) + float(cur_b)) / 2.0, 1) if cur_a is not None and cur_b is not None else None
-        base_composite = round((float(base_a) + float(base_b)) / 2.0, 1) if base_a is not None and base_b is not None else None
-        composite_diff = round(float(composite) - float(base_composite), 1) if composite is not None and base_composite is not None else None
-
-        avg_diff = None
-        if diff_a is not None and diff_b is not None:
-            avg_diff = round((float(diff_a) + float(diff_b)) / 2.0, 1)
-
-        eligible = bool(
-            cur_a is not None
-            and cur_b is not None
-            and float(cur_a) >= WIDE_PLACE_MIN_RATE
-            and float(cur_b) >= WIDE_PLACE_MIN_RATE
-        )
-        if eligible and composite is not None:
-            eligible_composites.append(float(composite))
-
-        tmp_wide_rows.append({
-            "判定": "",
-            "候補順位": None,
-            "ワイド候補": pair_key,
-            "現在複勝率A%": cur_a,
-            "現在複勝率B%": cur_b,
-            "合成複勝率%": composite,
-            "中央値差": None,
-            "基準合成率%": base_composite,
-            "合成基準差": composite_diff,
-            "想定ワイド率%": base_wide_rate,
-            "バランス差": current_balance,
-            "基準バランス差": base_balance,
-            "複勝差平均": avg_diff,
-            "複勝状態": " / ".join([s for s in [stat_a, stat_b] if s]),
-            "参考理由": "対象" if eligible else "35%未満あり",
-            "_eligible": eligible,
-            "_composite": composite,
-        })
-
-    median_composite = _median(eligible_composites)
-
-    for row in tmp_wide_rows:
-        score = 1000.0
-        if row["_eligible"] and median_composite is not None and row["_composite"] is not None:
-            med_diff = round(abs(float(row["_composite"]) - float(median_composite)), 1)
-            row["中央値差"] = med_diff
-            score = med_diff
-
-            # 中央値差が同じ場合は、複勝バランスが極端に崩れていないものを少し優先。
-            if row.get("バランス差") is not None:
-                score += float(row["バランス差"]) * 0.03
-
-            # 基準から極端に上振れた合成率は、安すぎ/来すぎ寄りとして少し減点。
-            if row.get("合成基準差") is not None and float(row["合成基準差"]) > 5.0:
-                score += (float(row["合成基準差"]) - 5.0) * 0.10
-
-            # 小倉基準のワイド率が高い組を同点時に少し優先。
-            if row.get("想定ワイド率%") is not None:
-                score -= float(row["想定ワイド率%"]) * 0.01
-
-            row["参考理由"] = "中央値寄り"
-        row["_score"] = score
-        wide_rows.append(row)
-
-    df_wide = pd.DataFrame(wide_rows)
-    if not df_wide.empty:
-        wide_ranked_idx = []
-        cand_wide = df_wide.loc[df_wide["_eligible"]].copy()
-        if not cand_wide.empty:
-            cand_wide = cand_wide.sort_values(
-                ["_score", "合成複勝率%", "ワイド候補"],
-                ascending=[True, True, True],
-                kind="mergesort",
-            )
-            wide_ranked_idx = list(cand_wide.index)
-            for _rank_no, _idx in enumerate(wide_ranked_idx, start=1):
-                df_wide.loc[_idx, "候補順位"] = int(_rank_no)
-
-        selected_wide_idx = wide_ranked_idx[:int(wide_pick_n)] if int(wide_pick_n) > 0 else []
-
-        # 上部の＜購入候補＞は、同じ確定順位の先頭1点だけを表示。
-        top_wide_idx = wide_ranked_idx[:1]
-        if top_wide_idx:
-            _top_wide_labels = []
-            for _idx in top_wide_idx:
-                _pair = str(df_wide.loc[_idx, "ワイド候補"])
-                _top_wide_labels.append(_pair)
-            purchase_candidate_summary["holewide"] = " / ".join(_top_wide_labels)
-        else:
-            purchase_candidate_summary["holewide"] = "なし"
-
-        if selected_wide_idx:
-            df_wide.loc[selected_wide_idx, "判定"] = "参考"
-            _sel_wide_labels = []
-            for _idx in selected_wide_idx:
-                _pair = str(df_wide.loc[_idx, "ワイド候補"])
-                _sel_wide_labels.append(_pair)
-            st.info("ワイド参考候補：" + " / ".join(_sel_wide_labels))
-        else:
-            st.caption("ワイド参考候補はありません。")
-
-        wide_cols = [
-            "判定", "候補順位", "ワイド候補", "合成複勝率%", "中央値差",
-            "現在複勝率A%", "現在複勝率B%",
-            "基準合成率%", "合成基準差", "想定ワイド率%",
-            "バランス差", "複勝状態", "参考理由",
-        ]
-        df_wide_show = df_wide[[c for c in wide_cols if c in df_wide.columns]].copy()
-        df_wide_show = df_wide_show[df_wide_show["候補順位"].notna() & (df_wide_show["候補順位"].astype(float) <= float(WIDE_SHOW_TOP_N))]
-        if not df_wide_show.empty:
-            df_wide_show = df_wide_show.sort_values("候補順位", ascending=True, kind="mergesort")
-        df_wide_show = drop_blank_display_columns(df_wide_show)
-        render_sortable_table(df_wide_show)
-
     # 評価別テーブル直下の枠に、各ロジックで出た購入候補をまとめて表示。
     # 元の位置の表示は残したまま、スクロールしなくても最初に確認できるようにする。
     with purchase_candidate_slot.container():
         st.markdown("### ＜購入候補＞")
-        c_buy1, c_buy2, c_buy3 = st.columns(3)
+        c_buy1, c_buy2 = st.columns(2)
         c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku', '—')}")
         c_buy2.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
-        c_buy3.info(f"ワイド参考1点：{purchase_candidate_summary.get('holewide', '—')}")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
