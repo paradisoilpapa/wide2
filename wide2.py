@@ -230,6 +230,15 @@ TRIO_FULL_EXPECTED_ROIS = {
     for k in TRIO_FULL_BASE_COUNTS
 }
 
+# 実運用で累積転記する3連複キー。
+# 2車複候補は 1-2〜1-7 / 2-3〜2-7 だけを使うため、
+# 3連複個別も「評価1または評価2を含む目」だけに絞る。
+# 3-4-5 など評価3〜7だけの目は小倉基準計算には残すが、転記対象からは外す。
+TRIO_USED_KEYS = [
+    k for k in TRIO_FULL_BASE_COUNTS
+    if any(int(x) in (1, 2) for x in k.split("-"))
+]
+
 
 
 RANK_SYMBOLS = {
@@ -951,7 +960,7 @@ agg_payout_sanrenpuku12_all_manual: Dict[str, Dict[str, int]] = {
 
 # 前日まで：3連複 1-2 個別（1-2-3～1-2-7）
 agg_payout_sanrenpuku12_individual_manual: Dict[str, Dict[str, Dict[str, int]]] = {
-    "仮想全体": {k: new_payout_rec() for k in TRIO_FULL_BASE_COUNTS},
+    "仮想全体": {k: new_payout_rec() for k in TRIO_USED_KEYS},
 }
 
 
@@ -1186,8 +1195,8 @@ with tabs[1]:
             H = c3.number_input("", key=f"prev_sp12_{safe}_H", min_value=0, value=0, label_visibility="collapsed")
             sanrenpuku12_inputs.append((label, int(N), int(SUM), int(H)))
 
-        st.markdown("## 3連複 1-2 個別 引継ぎ入力（累積）")
-        st.caption("小倉基準の全35通りを個別に転記できます。通常は日次入力で自動加算されます。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
+        st.markdown("## 3連複 個別 引継ぎ入力（累積｜1・2絡み）")
+        st.caption("1・2絡みの3連複だけを転記します。3-4-5など評価3〜7だけの目は使わないため省略します。通常は日次入力で自動加算されます。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
         sanrenpuku12_individual_inputs = []
         for label in ["仮想全体"]:
             st.markdown(f"**{label}**")
@@ -1196,7 +1205,7 @@ with tabs[1]:
             h_tri[1].markdown("**N**")
             h_tri[2].markdown("**SUM**")
             h_tri[3].markdown("**H**")
-            for key in TRIO_FULL_BASE_COUNTS:
+            for key in TRIO_USED_KEYS:
                 safe_label = label.replace(" ", "_")
                 safe_key = key.replace("-", "_")
                 c0, c1, c2, c3 = st.columns([1.2, 0.85, 1.05, 0.75])
@@ -1482,7 +1491,7 @@ payout_sanrenpuku12_all_daily: Dict[str, Dict[str, int]] = {
     "仮想全体": new_payout_rec(),
 }
 payout_sanrenpuku12_individual_daily: Dict[str, Dict[str, Dict[str, int]]] = {
-    "仮想全体": {k: new_payout_rec() for k in TRIO_FULL_BASE_COUNTS},
+    "仮想全体": {k: new_payout_rec() for k in TRIO_USED_KEYS},
 }
 
 for row in byrace_rows:
@@ -1507,8 +1516,8 @@ for row in byrace_rows:
         rec_all["H"] += 1
         rec_all["SUM"] += pay_3f
 
-    # 個別3連複。小倉基準の全35通りを、存在する評価だけ毎回1点仮想購入。
-    for key in TRIO_FULL_BASE_COUNTS:
+    # 個別3連複。実運用対象の1・2絡みだけを、存在する評価ごとに毎回1点仮想購入。
+    for key in TRIO_USED_KEYS:
         one_ksum = ksum_sanrenpuku_key(key, field_n)
         if one_ksum <= 0:
             continue
@@ -1558,10 +1567,10 @@ for label in payout_sanrenpuku12_all_total.keys():
     add_rec(payout_sanrenpuku12_all_total[label], agg_payout_sanrenpuku12_all_manual[label])
 
 payout_sanrenpuku12_individual_total: Dict[str, Dict[str, Dict[str, int]]] = {
-    "仮想全体": {k: new_payout_rec() for k in TRIO_FULL_BASE_COUNTS},
+    "仮想全体": {k: new_payout_rec() for k in TRIO_USED_KEYS},
 }
 for label in payout_sanrenpuku12_individual_total.keys():
-    for key in TRIO_FULL_BASE_COUNTS:
+    for key in TRIO_USED_KEYS:
         add_rec(payout_sanrenpuku12_individual_total[label][key], payout_sanrenpuku12_individual_daily[label][key])
         add_rec(payout_sanrenpuku12_individual_total[label][key], agg_payout_sanrenpuku12_individual_manual[label][key])
 
@@ -2294,10 +2303,10 @@ with tabs[2]:
         })
     st.dataframe(pd.DataFrame(sp_carry_rows), use_container_width=True, hide_index=True, height=130)
 
-    st.markdown("#### 3連複 1-2 個別 引継ぎ用累積表")
+    st.markdown("#### 3連複 個別 引継ぎ用累積表｜1・2絡み")
     tri_carry_rows = []
     for label in ["仮想全体"]:
-        for key in TRIO_FULL_BASE_COUNTS:
+        for key in TRIO_USED_KEYS:
             rec = payout_sanrenpuku12_individual_total[label].get(key, new_payout_rec())
             row = sanrenpuku12_individual_row(label, rec, key)
             tri_carry_rows.append({
