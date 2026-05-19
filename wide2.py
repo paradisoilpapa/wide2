@@ -1894,7 +1894,8 @@ with tabs[2]:
     purchase_candidate_slot = st.empty()
     ev_diagnosis_slot = st.empty()
     purchase_candidate_summary = {
-        "nishafuku": "—",
+        "nishafuku_main": "—",
+        "nishafuku_note": "—",
         "trio": "—",
     }
     ev_diagnosis_frames = []
@@ -2299,9 +2300,10 @@ with tabs[2]:
 
             if recommended_text:
                 st.success(f"現在の推奨2車複本線：{recommended_text}")
-                purchase_candidate_summary["nishafuku"] = recommended_text
+                purchase_candidate_summary["nishafuku_main"] = recommended_text
             if note_text:
                 st.info(f"注：{note_text}")
+                purchase_candidate_summary["nishafuku_note"] = note_text
 
             drop_cols = [
                 "_expected_ok", "_below_base", "_overhit", "_pay_dev_overheat", "_cold",
@@ -2635,71 +2637,73 @@ with tabs[2]:
     # 元の位置の表示は残したまま、スクロールしなくても最初に確認できるようにする。
     with purchase_candidate_slot.container():
         st.markdown("### ＜購入候補＞")
-        c_buy1, c_buy2 = st.columns(2)
-        c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku', '—')}")
-        c_buy2.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
+        c_buy1, c_buy2, c_buy3 = st.columns(3)
+        c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku_main', '—')}")
+        c_buy2.info(f"2車複注：{purchase_candidate_summary.get('nishafuku_note', '—')}")
+        c_buy3.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
 
     with ev_diagnosis_slot.container():
-        st.markdown("### 投資EV診断（既存推奨買い目｜必要オッズ表示）")
-        st.caption(
-            "現在オッズは未入力なので、買い/ケンは確定しません。"
-            "ここでは券種・判定ごとに分けて、各買い目がEV1.10へ到達するための必要オッズを表示します。"
-        )
+        st.markdown("### 投資EV診断｜買い目別 必要オッズ")
+        st.caption("現在オッズ未入力のため、EV1.10到達に必要な最低オッズを買い目別に表示します。")
         if ev_diagnosis_frames:
             df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
             df_ev_diag["stake"] = 100.0
 
-            # 重要：現在オッズ未入力のため、2車複本線・2車複注・3連複推奨を混ぜたRaceEVは出さない。
-            # 券種と判定ごとに分けて、必要オッズを確認する。
-            st.warning("現在オッズ未入力：RaceEVは未確定です。2車複本線・2車複注・3連複推奨を分けて必要オッズを確認してください。")
-
-            def _fmt_needed_pairs(g: pd.DataFrame, limit: int = 4) -> str:
-                parts = []
-                for _, rr in g.iterrows():
-                    key = str(rr.get("目") or rr.get("ペアキー") or rr.get("型") or "")
-                    need = _safe_float(rr.get("必要odds_EV1.10"), None)
-                    if need is None:
-                        parts.append(f"{key}: —")
-                    else:
-                        parts.append(f"{key}: {need:.2f}倍")
-                if len(parts) > limit:
-                    return " / ".join(parts[:limit]) + f" / ほか{len(parts)-limit}点"
-                return " / ".join(parts)
+            def _display_bet_key(rr) -> str:
+                for col in ("ペアキー", "目", "型"):
+                    v = rr.get(col)
+                    if v is None:
+                        continue
+                    try:
+                        if pd.isna(v):
+                            continue
+                    except Exception:
+                        pass
+                    text = str(v).strip()
+                    if text and text.lower() != "nan" and text != "None":
+                        return text.replace("2車複 ", "").replace("3連複 ", "")
+                return "—"
 
             group_order = [
-                ("2車複", "本線"),
-                ("2車複", "注"),
-                ("3連複", "推奨"),
+                ("2車複", "本線", 1),
+                ("2車複", "注", 2),
+                ("3連複", "推奨", 3),
             ]
-            group_rows = []
-            for bet_type, judge in group_order:
+            detail_rows = []
+            for bet_type, judge, sort_no in group_order:
                 g = df_ev_diag[
                     df_ev_diag["券種"].astype(str).eq(bet_type)
                     & df_ev_diag["判定"].astype(str).eq(judge)
                 ].copy()
                 if g.empty:
                     continue
-                needs = [_safe_float(v, None) for v in g.get("必要odds_EV1.10", [])]
-                needs = [v for v in needs if v is not None]
-                confs = [_safe_float(v, None) for v in g.get("Confidence", [])]
-                confs = [v for v in confs if v is not None]
-                group_rows.append({
-                    "区分": f"{bet_type} {judge}",
-                    "点数": int(len(g)),
-                    "必要odds_EV1.10_最大": round(max(needs), 2) if needs else None,
-                    "必要odds_EV1.10_平均": round(sum(needs) / len(needs), 2) if needs else None,
-                    "平均Confidence": round(sum(confs) / len(confs), 3) if confs else None,
-                    "確認": _fmt_needed_pairs(g),
-                })
+                for _, rr in g.iterrows():
+                    need110 = _safe_float(rr.get("必要odds_EV1.10"), None)
+                    need100 = _safe_float(rr.get("必要odds_EV1.00"), None)
+                    pay110 = _safe_float(rr.get("必要払戻_EV1.10"), None)
+                    detail_rows.append({
+                        "_sort": sort_no,
+                        "区分": f"{bet_type} {judge}",
+                        "買い目": _display_bet_key(rr),
+                        "必要odds_EV1.00": round(need100, 2) if need100 is not None else None,
+                        "必要odds_EV1.10": round(need110, 2) if need110 is not None else None,
+                        "必要払戻_EV1.10": int(pay110) if pay110 is not None else None,
+                        "p_safe%": rr.get("p_safe%"),
+                        "Confidence": rr.get("Confidence"),
+                        "参考odds": rr.get("参考odds"),
+                        "基準odds": rr.get("基準odds"),
+                        "odds_ratio": rr.get("odds_ratio"),
+                        "EV判定": rr.get("EV判定"),
+                    })
 
-            if group_rows:
-                df_group_summary = pd.DataFrame(group_rows)
-                st.markdown("#### 券種・判定別 必要オッズサマリー")
+            if detail_rows:
+                df_need_detail = pd.DataFrame(detail_rows).sort_values(["_sort", "買い目"]).drop(columns=["_sort"])
+                st.markdown("#### 購入候補別 必要オッズ")
                 st.dataframe(
-                    df_group_summary,
+                    df_need_detail,
                     use_container_width=True,
                     hide_index=True,
-                    height=table_auto_height(df_group_summary),
+                    height=table_auto_height(df_need_detail),
                 )
 
             anchor_mask = df_ev_diag.get("is_anchor", pd.Series([False] * len(df_ev_diag))).fillna(False).astype(bool)
