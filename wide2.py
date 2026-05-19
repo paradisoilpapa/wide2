@@ -2338,17 +2338,17 @@ with tabs[2]:
     st.markdown("#### ワイド参考候補｜12-34567")
     st.caption(
         "ワイド配当データは使わず、12-34567（1-3〜1-7 / 2-3〜2-7）を参考候補化します。"
-        "資金が少ない時に、3連複の代替・延命用として最大2点まで確認する欄です。購入目安倍が3.0倍以上の候補だけを選出対象にし、点数を変えても候補順位は入れ替わらないよう固定順位で選びます。"
-        "購入目安倍は、小倉3連複データから逆算した想定ワイド率ごとに個別算出します。"
+        "資金が少ない時に、3連複の代替・延命用として最大1点だけ確認する欄です。"
+        "ワイドのオッズは変動が大きいため、画面上には下限オッズを表示せず、候補だけを表示します。"
     )
     wide_pick_n = st.number_input(
         "ワイド 最大点数",
         key="hole_wide_pick_n",
         min_value=0,
-        max_value=2,
-        value=2,
+        max_value=1,
+        value=1,
         step=1,
-        help="0にすると候補表示のみ。1〜2で参考候補を上位から表示します。",
+        help="0にすると候補表示のみ。1で参考候補を最上位1点だけ表示します。",
     )
     WIDE_ODDS_SAFETY_RATE = 1.10  # 理論下限に10%上乗せした実戦確認目安
     WIDE_MIN_TARGET_ODDS = 3.0  # 安すぎるワイドを避けるための購入目安下限
@@ -2473,7 +2473,7 @@ with tabs[2]:
             "基準複勝率%": base_place,
             "複勝差": place_diff,
             "複勝状態": place_stat,
-            "参考理由": "／".join(reasons + (["3倍未満"] if target_wide_odds is not None and float(target_wide_odds) < WIDE_MIN_TARGET_ODDS else [])),
+            "参考理由": "／".join(reasons),
             "2車複的中率%": hit_rate,
             "想定ペア的%": expected_pair,
             "想定差": pair_diff,
@@ -2508,18 +2508,14 @@ with tabs[2]:
 
         selected_wide_idx = wide_ranked_idx[:int(wide_pick_n)] if int(wide_pick_n) > 0 else []
 
-        # 上部の＜購入候補＞も、同じ確定順位の先頭2点を表示する。
+        # 上部の＜購入候補＞も、同じ確定順位の先頭1点を表示する。
         # ここを別ロジックにしないことで、下の参考候補と上部表示のズレを防ぐ。
-        top_wide_idx = wide_ranked_idx[:2]
+        top_wide_idx = wide_ranked_idx[:1]
         if top_wide_idx:
             _top_wide_labels = []
             for _idx in top_wide_idx:
                 _pair = str(df_wide.loc[_idx, "ワイド候補"])
-                _odds = df_wide.loc[_idx, "購入目安倍"] if "購入目安倍" in df_wide.columns else None
-                if _odds is not None and pd.notna(_odds):
-                    _top_wide_labels.append(f"{_pair}（{float(_odds):.1f}倍以上）")
-                else:
-                    _top_wide_labels.append(_pair)
+                _top_wide_labels.append(_pair)
             purchase_candidate_summary["holewide"] = " / ".join(_top_wide_labels)
         else:
             purchase_candidate_summary["holewide"] = "なし"
@@ -2529,17 +2525,13 @@ with tabs[2]:
             _sel_wide_labels = []
             for _idx in selected_wide_idx:
                 _pair = str(df_wide.loc[_idx, "ワイド候補"])
-                _odds = df_wide.loc[_idx, "購入目安倍"] if "購入目安倍" in df_wide.columns else None
-                if _odds is not None and pd.notna(_odds):
-                    _sel_wide_labels.append(f"{_pair}（{float(_odds):.1f}倍以上）")
-                else:
-                    _sel_wide_labels.append(_pair)
+                _sel_wide_labels.append(_pair)
             st.info("ワイド参考候補：" + " / ".join(_sel_wide_labels))
         else:
             st.caption("ワイド参考候補はありません。")
 
         wide_cols = [
-            "判定", "ワイド候補", "想定ワイド率%", "理論下限倍", "購入目安倍", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
+            "判定", "ワイド候補", "想定ワイド率%", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
             "2車複的中率%", "想定ペア的%", "想定差", "平均配当", "ペア基準配当", "配当係数", "配当位置",
             "2車複回収率%", "想定回収率%", "回収差",
         ]
@@ -2554,7 +2546,7 @@ with tabs[2]:
         c_buy1, c_buy2, c_buy3 = st.columns(3)
         c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku', '—')}")
         c_buy2.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
-        c_buy3.info(f"ワイド参考2点：{purchase_candidate_summary.get('holewide', '—')}")
+        c_buy3.info(f"ワイド参考1点：{purchase_candidate_summary.get('holewide', '—')}")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
