@@ -2339,7 +2339,7 @@ with tabs[2]:
     st.caption(
         "ワイド配当データは使わず、12-34567（1-3〜1-7 / 2-3〜2-7）を参考候補化します。"
         "資金が少ない時に、3連複の代替・延命用として最大2点まで確認する欄です。"
-        "ワイドのオッズは変動が大きいため、画面上には下限オッズを表示せず、候補だけを表示します。"
+        "ワイドは2車複とは別券種なので、2車複の想定回収・平均配当は表示・順位計算に使いません。"
     )
     wide_pick_n = st.number_input(
         "ワイド 最大点数",
@@ -2350,24 +2350,19 @@ with tabs[2]:
         step=1,
         help="0にすると候補表示のみ。1〜2で参考候補を上位順に表示します。上部の購入候補欄は常に最上位1点だけ表示します。",
     )
-    WIDE_ODDS_SAFETY_RATE = 1.10  # 理論下限に10%上乗せした実戦確認目安
-    WIDE_MIN_TARGET_ODDS = 3.0  # 安すぎるワイドを避けるための購入目安下限
+    WIDE_ODDS_SAFETY_RATE = 1.10  # 内部足切り用。画面には表示しない。
+    WIDE_MIN_TARGET_ODDS = 3.0    # 安すぎるワイドを避けるための内部下限。
 
-    hole_wide_pairs = [(1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7)]
+    wide_pairs = [(1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7)]
     wide_rows = []
-    for a, b in hole_wide_pairs:
+    for a, b in wide_pairs:
         pair_key = f"{a}-{b}"
-        label = nishafuku_label(a, b)
-        rec = payout_nishafuku_total.get(label, new_payout_rec())
-        base_row = payout_row(label, rec)
-
         base_wide_rate = WIDE_BASE_HIT_RATES.get(pair_key)
         fair_wide_odds = WIDE_BASE_FAIR_ODDS.get(pair_key)
-        if fair_wide_odds is not None:
-            target_wide_odds = round(float(fair_wide_odds) * WIDE_ODDS_SAFETY_RATE, 1)
-        else:
-            target_wide_odds = None
+        target_wide_odds = round(float(fair_wide_odds) * WIDE_ODDS_SAFETY_RATE, 1) if fair_wide_odds is not None else None
 
+        # ワイド表で見るのは、相手側（大きい評価番号）の複勝状態。
+        # 表示名は出さないが、内部では 1-6 なら評価6、2-7なら評価7として見る。
         low_eval = max(a, b)
         cur_place = None
         if low_eval in rank_total:
@@ -2386,32 +2381,6 @@ with tabs[2]:
         place_diff = round(float(cur_place) - float(base_place), 1) if cur_place is not None and base_place is not None else None
         place_stat = place_state(place_diff)
 
-        expected_pair = PAIR_BASE_HIT_RATE_DEFAULTS.get(pair_key)
-        expected_pair = round(float(expected_pair), 1) if expected_pair is not None else None
-        hit_rate = base_row.get("的中率%")
-        pair_diff = round(float(hit_rate) - float(expected_pair), 1) if hit_rate is not None and expected_pair is not None else None
-
-        pair_base_pay = int(PAIR_BASE_AVG_PAY_DEFAULTS.get(pair_key, 1200))
-        expected_roi = round(float(expected_pair) * float(pair_base_pay) / 100.0, 1) if expected_pair is not None else None
-        actual_roi = base_row.get("回収率%")
-        roi_diff = round(float(actual_roi) - float(expected_roi), 1) if actual_roi is not None and expected_roi is not None else None
-        avg_pay = base_row.get("平均配当")
-        if avg_pay is not None and pd.notna(avg_pay) and pair_base_pay > 0:
-            pay_coef = round(float(avg_pay) / float(pair_base_pay), 2)
-            pay_diff = round(float(avg_pay) - float(pair_base_pay), 1)
-        else:
-            pay_coef = None
-            pay_diff = None
-
-        if pay_coef is None:
-            pay_pos = "未回収"
-        elif float(pay_coef) < 0.80:
-            pay_pos = "安すぎ"
-        elif float(pay_coef) <= 1.30:
-            pay_pos = "基準付近"
-        else:
-            pay_pos = "高すぎ"
-
         reasons = []
         if place_stat == "基準未満":
             reasons.append("複勝戻り")
@@ -2420,22 +2389,9 @@ with tabs[2]:
         else:
             reasons.append("複勝中庸")
 
-        if avg_pay is None or pd.isna(avg_pay):
-            reasons.append("2車複未回収")
-        elif pay_coef is not None and float(pay_coef) < 0.80:
-            reasons.append("配当戻り")
-        elif pay_coef is not None and float(pay_coef) > 1.30:
-            reasons.append("配当上振れ")
-
-        # ワイドは配当データがないため、候補性は「低評価側の複勝状態」と2車複側の過熱回避で見る。
-        overheat = False
-        if place_stat == "来すぎ":
-            overheat = True
-        if pair_diff is not None and float(pair_diff) >= 10.0:
-            overheat = True
-        if actual_roi is not None and float(actual_roi) >= 180.0:
-            overheat = True
-
+        # ワイドは配当データがないため、2車複の平均配当・回収率では判定しない。
+        # 使うのは、推定ワイド率からの内部下限と、相手評価の複勝状態だけ。
+        overheat = place_stat == "来すぎ"
         score = 1000.0
         if not overheat:
             score = 0.0
@@ -2446,19 +2402,9 @@ with tabs[2]:
             else:
                 score += 20.0
 
-            # 2車複側が未回収・安すぎ・回収不足なら、ワイド参考候補としては上にする。
-            if avg_pay is None or pd.isna(avg_pay):
-                score -= 2.0
-            if pay_coef is not None:
-                score += abs(float(pay_coef) - 0.8) * 4.0
-            if roi_diff is not None:
-                if float(roi_diff) < 0:
-                    score += max(-6.0, float(roi_diff) / 15.0)
-                else:
-                    score += float(roi_diff) / 25.0
-            # 低評価寄りほど的中スパンが伸びるため、軽く減点。
+            # 低評価寄りほど的中スパンが伸びるため軽く減点。
             score += max(0, low_eval - 5) * 0.6
-            # ただし、購入目安倍が高い候補は穴ワイドとしての価値を少し残す。
+            # ただし、内部下限が高い候補は穴ワイドとしての妙味を少し残す。
             if target_wide_odds is not None:
                 score -= min(3.0, max(0.0, float(target_wide_odds) - WIDE_MIN_TARGET_ODDS) * 0.12)
 
@@ -2466,39 +2412,25 @@ with tabs[2]:
             "判定": "",
             "ワイド候補": pair_key,
             "想定ワイド率%": base_wide_rate,
-            "理論下限倍": fair_wide_odds,
-            "購入目安倍": target_wide_odds,
-            "低評価側": low_eval,
             "現在複勝率%": cur_place,
             "基準複勝率%": base_place,
             "複勝差": place_diff,
             "複勝状態": place_stat,
             "参考理由": "／".join(reasons),
-            "2車複的中率%": hit_rate,
-            "想定ペア的%": expected_pair,
-            "想定差": pair_diff,
-            "平均配当": avg_pay,
-            "ペア基準配当": pair_base_pay,
-            "配当係数": pay_coef,
-            "配当位置": pay_pos,
-            "想定回収率%": expected_roi,
-            "2車複回収率%": actual_roi,
-            "回収差": roi_diff,
             "_score": score,
             "_overheat": overheat,
             "_target_ok": bool(target_wide_odds is not None and float(target_wide_odds) >= WIDE_MIN_TARGET_ODDS),
+            "_target_wide_odds": target_wide_odds,
         })
 
     df_wide = pd.DataFrame(wide_rows)
     if not df_wide.empty:
         # ワイド候補の順位は、最大点数スライダーとは独立して一度だけ確定する。
-        # これにより、最大点数を1→2に変えても「1点目が入れ替わる」ような挙動を防ぐ。
         wide_ranked_idx = []
         cand_wide = df_wide.loc[(~df_wide["_overheat"]) & (df_wide["_target_ok"])].copy()
         if not cand_wide.empty:
-            # 同点時も毎回同じ並びになるよう、候補名まで含めて安定ソートする。
             cand_wide = cand_wide.sort_values(
-                ["_score", "購入目安倍", "ワイド候補"],
+                ["_score", "_target_wide_odds", "ワイド候補"],
                 ascending=[True, False, True],
                 kind="mergesort",
             )
@@ -2508,8 +2440,7 @@ with tabs[2]:
 
         selected_wide_idx = wide_ranked_idx[:int(wide_pick_n)] if int(wide_pick_n) > 0 else []
 
-        # 上部の＜購入候補＞は、ワイド参考候補のうち同じ確定順位の先頭1点だけを表示する。
-        # ここを別ロジックにしないことで、下の参考候補と上部表示のズレを防ぐ。
+        # 上部の＜購入候補＞は、同じ確定順位の先頭1点だけを表示。
         top_wide_idx = wide_ranked_idx[:1]
         if top_wide_idx:
             _top_wide_labels = []
@@ -2531,9 +2462,8 @@ with tabs[2]:
             st.caption("ワイド参考候補はありません。")
 
         wide_cols = [
-            "判定", "ワイド候補", "想定ワイド率%", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
-            "2車複的中率%", "想定ペア的%", "想定差", "平均配当", "ペア基準配当", "配当係数", "配当位置",
-            "2車複回収率%", "想定回収率%", "回収差",
+            "判定", "候補順位", "ワイド候補", "想定ワイド率%",
+            "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
         ]
         df_wide_show = df_wide[[c for c in wide_cols if c in df_wide.columns]]
         df_wide_show = drop_blank_display_columns(df_wide_show)
