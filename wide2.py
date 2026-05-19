@@ -2695,24 +2695,69 @@ with tabs[2]:
     with purchase_candidate_slot.container():
         st.markdown("### ＜購入候補｜EV1.10最低必要オッズ＞")
         if not df_need_detail.empty:
-            st.caption("現在オッズがこの最低オッズ以上なら検討、未満なら購入対象外です。")
-            st.dataframe(
-                df_need_detail,
-                use_container_width=True,
-                hide_index=True,
-                height=table_auto_height(df_need_detail),
-            )
+            st.caption("現在オッズが最低必要オッズ以上なら検討、未満なら購入対象外です。")
 
-            main_rows = df_need_detail[
-                (df_need_detail["券種"].astype(str).eq("2車複"))
-                & (df_need_detail["判定"].astype(str).eq("本線"))
+            def _fmt_need(v) -> str:
+                x = _safe_float(v, None)
+                return "—" if x is None else f"{x:.2f}倍以上"
+
+            def _escape_html(s) -> str:
+                return (
+                    str(s)
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace('"', "&quot;")
+                )
+
+            def _card_html(title: str, rows: list[str], bg: str, fg: str) -> str:
+                body = "<br>".join(_escape_html(r) for r in rows) if rows else "—"
+                return f"""
+                <div style="
+                    background:{bg};
+                    color:{fg};
+                    border-radius:8px;
+                    padding:14px 16px;
+                    min-height:76px;
+                    border:1px solid rgba(0,0,0,0.04);
+                    font-size:16px;
+                    line-height:1.75;
+                    font-weight:600;
+                ">
+                    <div style="font-size:15px; opacity:0.92; margin-bottom:6px;">{_escape_html(title)}</div>
+                    <div>{body}</div>
+                </div>
+                """
+
+            card_defs = [
+                ("2車複 本線", "2車複", "本線", "#e8f7ec", "#057333"),
+                ("2車複 注", "2車複", "注", "#eaf3ff", "#055a9c"),
+                ("3連複 推奨", "3連複", "推奨", "#e8f7ec", "#057333"),
             ]
-            if not main_rows.empty:
-                row = main_rows.iloc[0]
-                need = _safe_float(row.get("EV1.10最低オッズ"), None)
-                bet = str(row.get("買い目", "本線"))
-                if need is not None:
-                    st.info(f"2車複本線（{bet}）は、EV1.10基準で最低 {need:.2f}倍 が必要です。")
+            cols = st.columns(3)
+            for col, (title, bet_type, judge, bg, fg) in zip(cols, card_defs):
+                g = df_need_detail[
+                    df_need_detail["券種"].astype(str).eq(bet_type)
+                    & df_need_detail["判定"].astype(str).eq(judge)
+                ].copy()
+                if not g.empty:
+                    g = g.sort_values("買い目")
+                    rows = [
+                        f"{str(r.get('買い目', '—'))}：{_fmt_need(r.get('EV1.10最低オッズ'))}"
+                        for _, r in g.iterrows()
+                    ]
+                else:
+                    rows = ["候補なし"]
+                with col:
+                    st.markdown(_card_html(title, rows, bg, fg), unsafe_allow_html=True)
+
+            with st.expander("根拠数値を確認", expanded=False):
+                st.dataframe(
+                    df_need_detail,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=table_auto_height(df_need_detail),
+                )
         else:
             st.info("投資EV診断の対象となる既存推奨買い目がありません。")
 
