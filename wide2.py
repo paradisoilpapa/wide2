@@ -2335,11 +2335,11 @@ with tabs[2]:
         )
 
 
-    st.markdown("#### ワイド参考候補｜全21ペア方式")
+    st.markdown("#### ワイド参考候補｜全21ペア・複勝35%以上中央値方式")
     st.caption(
-        "ワイド配当データは使わず、全21ペアから複勝率バランスの良い候補を参考表示します。"
-        "表示は候補順位5位まで。資金が少ない時に、3連複の代替・延命用として上位1〜2点だけ確認する欄です。"
-        "ワイドは2車複とは別券種なので、2車複の想定回収・平均配当は表示・順位計算に使いません。"
+        "ワイド配当データは使わず、全21ペアから現在複勝率が2車とも35%以上の組だけを対象にします。"
+        "その中で合成複勝率が中央値に近い候補を上位表示します。"
+        "低評価同士の薄い穴へ寄せすぎず、的中スパン維持用の参考候補として確認する欄です。"
     )
     wide_pick_n = st.number_input(
         "ワイド 最大点数",
@@ -2350,9 +2350,8 @@ with tabs[2]:
         step=1,
         help="0にすると候補表示のみ。1〜2で参考候補を上位順に表示します。上部の購入候補欄は常に最上位1点だけ表示します。",
     )
-    WIDE_ODDS_SAFETY_RATE = 1.10  # 内部足切り用。画面には表示しない。
-    WIDE_MIN_TARGET_ODDS = 3.0    # 安すぎるワイドを避けるための内部下限。
-    WIDE_SHOW_TOP_N = 5           # 表示は上位5位まで。
+    WIDE_PLACE_MIN_RATE = 35.0     # 2車ともこの現在複勝率以上を対象にする。
+    WIDE_SHOW_TOP_N = 5            # 表示は上位5位まで。
 
     def _current_place_rate(eval_rank: int):
         rec_rank = rank_total.get(eval_rank, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
@@ -2370,11 +2369,12 @@ with tabs[2]:
 
     wide_pairs = [(a, b) for a in range(1, FIELD_SIZE + 1) for b in range(a + 1, FIELD_SIZE + 1)]
     wide_rows = []
+    eligible_composites = []
+    tmp_wide_rows = []
+
     for a, b in wide_pairs:
         pair_key = f"{a}-{b}"
         base_wide_rate = WIDE_BASE_HIT_RATES.get(pair_key)
-        fair_wide_odds = WIDE_BASE_FAIR_ODDS.get(pair_key)
-        target_wide_odds = round(float(fair_wide_odds) * WIDE_ODDS_SAFETY_RATE, 1) if fair_wide_odds is not None else None
 
         cur_a = _current_place_rate(a)
         cur_b = _current_place_rate(b)
@@ -2388,67 +2388,75 @@ with tabs[2]:
 
         current_balance = round(abs(float(cur_a) - float(cur_b)), 1) if cur_a is not None and cur_b is not None else None
         base_balance = round(abs(float(base_a) - float(base_b)), 1) if base_a is not None and base_b is not None else None
+        composite = round((float(cur_a) + float(cur_b)) / 2.0, 1) if cur_a is not None and cur_b is not None else None
+        base_composite = round((float(base_a) + float(base_b)) / 2.0, 1) if base_a is not None and base_b is not None else None
+        composite_diff = round(float(composite) - float(base_composite), 1) if composite is not None and base_composite is not None else None
+
         avg_diff = None
         if diff_a is not None and diff_b is not None:
             avg_diff = round((float(diff_a) + float(diff_b)) / 2.0, 1)
 
-        reasons = []
-        if stat_a == "来すぎ" or stat_b == "来すぎ":
-            reasons.append("来すぎ含む")
-        elif stat_a == "基準未満" or stat_b == "基準未満":
-            reasons.append("戻り含む")
-        else:
-            reasons.append("複勝中庸")
+        eligible = bool(
+            cur_a is not None
+            and cur_b is not None
+            and float(cur_a) >= WIDE_PLACE_MIN_RATE
+            and float(cur_b) >= WIDE_PLACE_MIN_RATE
+        )
+        if eligible and composite is not None:
+            eligible_composites.append(float(composite))
 
-        # ワイドは、単純に高評価へ低評価をぶら下げるより、2車の複勝率バランスを重視する。
-        # そのため全21ペアから、内部下限3倍以上・来すぎを含まない候補を順位化する。
-        # 片方でも「来すぎ」を含むワイドは、的中スパン目的の参考候補からは外す。
-        overheat = (stat_a == "来すぎ" or stat_b == "来すぎ")
-        score = 1000.0
-        if not overheat:
-            score = 0.0
-            # 2車の現在複勝率が近いほど、ワイドとしてのバランスを高評価。
-            if current_balance is not None:
-                score += float(current_balance) * 0.16
-            if base_balance is not None:
-                score += float(base_balance) * 0.10
-
-            # どちらかが基準未満なら戻り余地として少し加点。
-            if stat_a == "基準未満" or stat_b == "基準未満":
-                score -= 2.5
-            # 来すぎを含む候補は上で除外するため、ここでは減点処理しない。
-
-            # ワイド率が低すぎる候補は的中スパンが伸びすぎるため減点。
-            if target_wide_odds is not None and float(target_wide_odds) > 14.0:
-                score += (float(target_wide_odds) - 14.0) * 0.45
-            # 安すぎる候補は内部足切りで除外するが、3〜8倍帯は実戦向きとして軽く評価。
-            if target_wide_odds is not None:
-                score += abs(float(target_wide_odds) - 7.0) * 0.08
-
-        wide_rows.append({
+        tmp_wide_rows.append({
             "判定": "",
             "候補順位": None,
             "ワイド候補": pair_key,
+            "現在複勝率A%": cur_a,
+            "現在複勝率B%": cur_b,
+            "合成複勝率%": composite,
+            "中央値差": None,
+            "基準合成率%": base_composite,
+            "合成基準差": composite_diff,
             "想定ワイド率%": base_wide_rate,
-            "複勝差平均": avg_diff,
             "バランス差": current_balance,
             "基準バランス差": base_balance,
+            "複勝差平均": avg_diff,
             "複勝状態": " / ".join([s for s in [stat_a, stat_b] if s]),
-            "参考理由": "／".join(reasons),
-            "_score": score,
-            "_overheat": overheat,
-            "_target_ok": bool(target_wide_odds is not None and float(target_wide_odds) >= WIDE_MIN_TARGET_ODDS),
-            "_target_wide_odds": target_wide_odds,
+            "参考理由": "対象" if eligible else "35%未満あり",
+            "_eligible": eligible,
+            "_composite": composite,
         })
+
+    median_composite = _median(eligible_composites)
+
+    for row in tmp_wide_rows:
+        score = 1000.0
+        if row["_eligible"] and median_composite is not None and row["_composite"] is not None:
+            med_diff = round(abs(float(row["_composite"]) - float(median_composite)), 1)
+            row["中央値差"] = med_diff
+            score = med_diff
+
+            # 中央値差が同じ場合は、複勝バランスが極端に崩れていないものを少し優先。
+            if row.get("バランス差") is not None:
+                score += float(row["バランス差"]) * 0.03
+
+            # 基準から極端に上振れた合成率は、安すぎ/来すぎ寄りとして少し減点。
+            if row.get("合成基準差") is not None and float(row["合成基準差"]) > 5.0:
+                score += (float(row["合成基準差"]) - 5.0) * 0.10
+
+            # 小倉基準のワイド率が高い組を同点時に少し優先。
+            if row.get("想定ワイド率%") is not None:
+                score -= float(row["想定ワイド率%"]) * 0.01
+
+            row["参考理由"] = "中央値寄り"
+        row["_score"] = score
+        wide_rows.append(row)
 
     df_wide = pd.DataFrame(wide_rows)
     if not df_wide.empty:
-        # ワイド候補の順位は、最大点数スライダーとは独立して一度だけ確定する。
         wide_ranked_idx = []
-        cand_wide = df_wide.loc[(~df_wide["_overheat"]) & (df_wide["_target_ok"])].copy()
+        cand_wide = df_wide.loc[df_wide["_eligible"]].copy()
         if not cand_wide.empty:
             cand_wide = cand_wide.sort_values(
-                ["_score", "_target_wide_odds", "ワイド候補"],
+                ["_score", "合成複勝率%", "ワイド候補"],
                 ascending=[True, True, True],
                 kind="mergesort",
             )
@@ -2480,8 +2488,10 @@ with tabs[2]:
             st.caption("ワイド参考候補はありません。")
 
         wide_cols = [
-            "判定", "候補順位", "ワイド候補", "想定ワイド率%",
-            "複勝差平均", "バランス差", "基準バランス差", "複勝状態", "参考理由",
+            "判定", "候補順位", "ワイド候補", "合成複勝率%", "中央値差",
+            "現在複勝率A%", "現在複勝率B%",
+            "基準合成率%", "合成基準差", "想定ワイド率%",
+            "バランス差", "複勝状態", "参考理由",
         ]
         df_wide_show = df_wide[[c for c in wide_cols if c in df_wide.columns]].copy()
         df_wide_show = df_wide_show[df_wide_show["候補順位"].notna() & (df_wide_show["候補順位"].astype(float) <= float(WIDE_SHOW_TOP_N))]
