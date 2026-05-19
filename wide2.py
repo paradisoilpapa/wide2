@@ -2633,100 +2633,114 @@ with tabs[2]:
         )
 
 
-    # 評価別テーブル直下の枠に、各ロジックで出た購入候補をまとめて表示。
-    # 元の位置の表示は残したまま、スクロールしなくても最初に確認できるようにする。
+    # 評価別テーブル直下に、購入候補と必要オッズを1つの導線で表示する。
+    # ここでは「診断詳細表」と「必要オッズ表」を二重表示しない。
+    def _display_bet_key(rr) -> str:
+        for col in ("ペアキー", "目", "型"):
+            v = rr.get(col)
+            if v is None:
+                continue
+            try:
+                if pd.isna(v):
+                    continue
+            except Exception:
+                pass
+            text = str(v).strip()
+            if text and text.lower() != "nan" and text != "None":
+                return text.replace("2車複 ", "").replace("3連複 ", "")
+        return "—"
+
+    def _format_need_text(df_need: pd.DataFrame, kubun: str) -> str:
+        """カード表示用：買い目とEV1.10必要オッズを短く連結する。"""
+        if df_need is None or df_need.empty:
+            return "—"
+        g = df_need[df_need["区分"].astype(str).eq(kubun)].copy()
+        if g.empty:
+            return "—"
+        parts = []
+        for _, r in g.iterrows():
+            bet = str(r.get("買い目", "—"))
+            need = _safe_float(r.get("必要odds_EV1.10"), None)
+            if need is None:
+                parts.append(f"{bet}：—")
+            else:
+                parts.append(f"{bet}：{need:.2f}倍以上")
+        return " / ".join(parts)
+
+    df_ev_diag = pd.DataFrame()
+    df_need_detail = pd.DataFrame()
+
+    if ev_diagnosis_frames:
+        df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
+        df_ev_diag["stake"] = 100.0
+
+        group_order = [
+            ("2車複", "本線", 1),
+            ("2車複", "注", 2),
+            ("3連複", "推奨", 3),
+        ]
+        detail_rows = []
+        for bet_type, judge, sort_no in group_order:
+            g = df_ev_diag[
+                df_ev_diag["券種"].astype(str).eq(bet_type)
+                & df_ev_diag["判定"].astype(str).eq(judge)
+            ].copy()
+            if g.empty:
+                continue
+            for _, rr in g.iterrows():
+                need100 = _safe_float(rr.get("必要odds_EV1.00"), None)
+                need105 = _safe_float(rr.get("必要odds_EV1.05"), None)
+                need110 = _safe_float(rr.get("必要odds_EV1.10"), None)
+                pay110 = _safe_float(rr.get("必要払戻_EV1.10"), None)
+                detail_rows.append({
+                    "_sort": sort_no,
+                    "区分": f"{bet_type} {judge}",
+                    "買い目": _display_bet_key(rr),
+                    "必要odds_EV1.00": round(need100, 2) if need100 is not None else None,
+                    "必要odds_EV1.05": round(need105, 2) if need105 is not None else None,
+                    "必要odds_EV1.10": round(need110, 2) if need110 is not None else None,
+                    "必要払戻_EV1.10": int(pay110) if pay110 is not None else None,
+                    "p_safe%": rr.get("p_safe%"),
+                    "Confidence": rr.get("Confidence"),
+                    "EV判定": rr.get("EV判定"),
+                })
+
+        if detail_rows:
+            df_need_detail = (
+                pd.DataFrame(detail_rows)
+                .sort_values(["_sort", "買い目"])
+                .drop(columns=["_sort"])
+            )
+
     with purchase_candidate_slot.container():
         st.markdown("### ＜購入候補＞")
         c_buy1, c_buy2, c_buy3 = st.columns(3)
-        c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku_main', '—')}")
-        c_buy2.info(f"2車複注：{purchase_candidate_summary.get('nishafuku_note', '—')}")
-        c_buy3.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
+        main_text = _format_need_text(df_need_detail, "2車複 本線")
+        note_text = _format_need_text(df_need_detail, "2車複 注")
+        trio_text = _format_need_text(df_need_detail, "3連複 推奨")
+        c_buy1.success(f"2車複本線：{main_text}")
+        c_buy2.info(f"2車複注：{note_text}")
+        c_buy3.success(f"3連複：{trio_text}")
 
     with ev_diagnosis_slot.container():
         st.markdown("### 投資EV診断｜買い目別 必要オッズ")
         st.caption("現在オッズ未入力のため、EV1.10到達に必要な最低オッズを買い目別に表示します。")
-        if ev_diagnosis_frames:
-            df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
-            df_ev_diag["stake"] = 100.0
-
-            def _display_bet_key(rr) -> str:
-                for col in ("ペアキー", "目", "型"):
-                    v = rr.get(col)
-                    if v is None:
-                        continue
-                    try:
-                        if pd.isna(v):
-                            continue
-                    except Exception:
-                        pass
-                    text = str(v).strip()
-                    if text and text.lower() != "nan" and text != "None":
-                        return text.replace("2車複 ", "").replace("3連複 ", "")
-                return "—"
-
-            group_order = [
-                ("2車複", "本線", 1),
-                ("2車複", "注", 2),
-                ("3連複", "推奨", 3),
-            ]
-            detail_rows = []
-            for bet_type, judge, sort_no in group_order:
-                g = df_ev_diag[
-                    df_ev_diag["券種"].astype(str).eq(bet_type)
-                    & df_ev_diag["判定"].astype(str).eq(judge)
-                ].copy()
-                if g.empty:
-                    continue
-                for _, rr in g.iterrows():
-                    need110 = _safe_float(rr.get("必要odds_EV1.10"), None)
-                    need100 = _safe_float(rr.get("必要odds_EV1.00"), None)
-                    pay110 = _safe_float(rr.get("必要払戻_EV1.10"), None)
-                    detail_rows.append({
-                        "_sort": sort_no,
-                        "区分": f"{bet_type} {judge}",
-                        "買い目": _display_bet_key(rr),
-                        "必要odds_EV1.00": round(need100, 2) if need100 is not None else None,
-                        "必要odds_EV1.10": round(need110, 2) if need110 is not None else None,
-                        "必要払戻_EV1.10": int(pay110) if pay110 is not None else None,
-                        "p_safe%": rr.get("p_safe%"),
-                        "Confidence": rr.get("Confidence"),
-                        "参考odds": rr.get("参考odds"),
-                        "基準odds": rr.get("基準odds"),
-                        "odds_ratio": rr.get("odds_ratio"),
-                        "EV判定": rr.get("EV判定"),
-                    })
-
-            if detail_rows:
-                df_need_detail = pd.DataFrame(detail_rows).sort_values(["_sort", "買い目"]).drop(columns=["_sort"])
-                st.markdown("#### 購入候補別 必要オッズ")
-                st.dataframe(
-                    df_need_detail,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=table_auto_height(df_need_detail),
-                )
-
-            anchor_mask = df_ev_diag.get("is_anchor", pd.Series([False] * len(df_ev_diag))).fillna(False).astype(bool)
-            if anchor_mask.any():
-                anchor_df = df_ev_diag.loc[anchor_mask].copy()
-                anchor_need = _safe_float(anchor_df.iloc[0].get("必要odds_EV1.10"), None) if not anchor_df.empty else None
-                if anchor_need is not None:
-                    st.info(f"保険目（1-2）は、EV1.10基準なら最低 {anchor_need:.2f}倍 が必要です。現在オッズがこれ未満なら保険としても投資EVは不足します。")
-
-            diag_cols = [
-                "券種", "判定", "EV判定", "型", "目", "対象N", "的中H",
-                "p_adj%", "p_safe%",
-                "必要odds_EV1.00", "必要odds_EV1.05", "必要odds_EV1.10", "必要odds_EV1.20", "必要払戻_EV1.10",
-                "参考odds", "基準odds", "odds_ratio", "参考EV",
-                "Confidence", "heat_penalty", "Score", "資産枠", "総合候補理由",
-            ]
-            df_ev_show = df_ev_diag[[c for c in diag_cols if c in df_ev_diag.columns]]
+        if not df_need_detail.empty:
             st.dataframe(
-                df_ev_show,
+                df_need_detail,
                 use_container_width=True,
                 hide_index=True,
-                height=table_auto_height(df_ev_show),
+                height=table_auto_height(df_need_detail),
             )
+
+            anchor_rows = df_need_detail[
+                (df_need_detail["区分"].astype(str).eq("2車複 本線"))
+                & (df_need_detail["買い目"].astype(str).eq("1-2"))
+            ]
+            if not anchor_rows.empty:
+                anchor_need = _safe_float(anchor_rows.iloc[0].get("必要odds_EV1.10"), None)
+                if anchor_need is not None:
+                    st.info(f"保険目（1-2）は、EV1.10基準なら最低 {anchor_need:.2f}倍 が必要です。")
         else:
             st.info("投資EV診断の対象となる既存推奨買い目がありません。")
 
