@@ -894,11 +894,20 @@ with tabs[0]:
                 }
             )
 
+    st.divider()
+    st.markdown("### 入力後リンク")
+    st.markdown(
+        "[前日までの集計（累積）へ](#prev-aggregate)　｜　"
+        "[分析結果へ](#analysis-result)"
+    )
+    st.caption("日次入力後に、下部から次の確認欄へ移動するためのリンクです。")
+
 
 # =========================
 # B. 前日までの集計（累積）
 # =========================
 with tabs[1]:
+    st.markdown('<a id="prev-aggregate"></a>', unsafe_allow_html=True)
     st.subheader("前日までの集計（累積・全体）")
     st.caption("入力中の白化を抑えるため、フォーム送信式です。入力後に下のボタンを押してください。")
 
@@ -1398,6 +1407,7 @@ for label in payout_sanrenpuku12_individual_total.keys():
 # 出力：分析結果
 # =========================
 with tabs[2]:
+    st.markdown('<a id="analysis-result"></a>', unsafe_allow_html=True)
     st.subheader("1→2 着評価分布（全体累積）｜1着が評価1〜7のとき（欠車対応）")
     st.caption("欠車レースでは存在しない下位評価はNに含まれません。")
 
