@@ -129,6 +129,45 @@ TRIO_FULL_BASE_COUNTS = {
     "4-5-6": 2,
     "5-6-7": 1,
 }
+# 小倉ミッドナイトA級7車・直近2年の3連複平均配当（100円あたり）。
+TRIO_FULL_BASE_AVG_PAYS = {
+    "1-2-3": 378,
+    "1-2-4": 537,
+    "1-2-5": 1053,
+    "1-3-5": 985,
+    "1-2-6": 1136,
+    "1-3-4": 619,
+    "1-2-7": 1545,
+    "1-4-5": 2019,
+    "1-3-6": 2749,
+    "2-4-5": 2441,
+    "2-3-4": 2258,
+    "2-3-5": 1824,
+    "1-4-7": 3296,
+    "1-5-6": 3177,
+    "1-4-6": 1519,
+    "3-4-5": 2789,
+    "2-3-6": 4772,
+    "2-4-6": 2102,
+    "1-6-7": 6155,
+    "2-5-6": 4138,
+    "1-3-7": 2146,
+    "2-3-7": 5106,
+    "3-4-7": 5373,
+    "3-4-6": 2188,
+    "4-5-7": 6251,
+    "2-4-7": 3241,
+    "1-5-7": 3550,
+    "2-5-7": 3524,
+    "2-6-7": 5575,
+    "3-5-6": 1102,
+    "3-5-7": 0,
+    "4-6-7": 19765,
+    "3-6-7": 7830,
+    "4-5-6": 3250,
+    "5-6-7": 14080,
+}
+
 # 小倉2年分の3連複集計母数。
 # 2車複基準と揃えるため738Rを基準にします。
 TRIO_BASE_TOTAL_RACES = 738
@@ -181,6 +220,16 @@ TRIO_12_INDIVIDUAL_EXPECTED_ROIS = {
     k: round(TRIO_12_INDIVIDUAL_EXPECTED_HIT_RATES[k] * TRIO_12_ALL_BASE_AVG_PAYS[k] / 100.0, 1)
     for k in TRIO_12_ALL_BASE_COUNTS
 }
+
+TRIO_FULL_EXPECTED_HIT_RATES = {
+    k: round(100.0 * v / TRIO_BASE_TOTAL_RACES, 1)
+    for k, v in TRIO_FULL_BASE_COUNTS.items()
+}
+TRIO_FULL_EXPECTED_ROIS = {
+    k: round(TRIO_FULL_EXPECTED_HIT_RATES[k] * TRIO_FULL_BASE_AVG_PAYS.get(k, 0) / 100.0, 1)
+    for k in TRIO_FULL_BASE_COUNTS
+}
+
 
 
 RANK_SYMBOLS = {
@@ -336,6 +385,102 @@ def hit_sanrenpuku_12_individual(target: int, vorder: List[str], finish: List[st
     car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
     finish_ranks = {car_to_rank.get(car) for car in finish[:3]}
     return {1, 2, int(target)}.issubset(finish_ranks)
+
+
+def ksum_sanrenpuku_key(key: str, field_n: int) -> int:
+    """3連複：評価キー（例 2-4-7）の1点。欠車時は存在する評価だけ有効。"""
+    try:
+        vals = [int(x) for x in str(key).split("-")]
+        field_n = int(field_n)
+    except Exception:
+        return 0
+    if len(vals) != 3 or len(set(vals)) != 3:
+        return 0
+    if field_n < 3:
+        return 0
+    if any(v < 1 or v > field_n for v in vals):
+        return 0
+    return 1
+
+
+def hit_sanrenpuku_key(key: str, vorder: List[str], finish: List[str], field_n: int) -> bool:
+    """3連複：指定評価3つが3着内にそろえば的中。"""
+    if ksum_sanrenpuku_key(key, field_n) <= 0:
+        return False
+    if not vorder or len(finish) < 3:
+        return False
+    try:
+        vals = {int(x) for x in str(key).split("-")}
+    except Exception:
+        return False
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+    finish_ranks = {car_to_rank.get(car) for car in finish[:3]}
+    return vals.issubset(finish_ranks)
+
+
+def sanrenpuku_individual_row(label: str, rec: Dict[str, int], key: str) -> Dict:
+    """任意3連複個別用の表示行。小倉基準で想定差・回収差を見る。"""
+    row = payout_row(label, rec)
+    exp_rate = TRIO_FULL_EXPECTED_HIT_RATES.get(key)
+    exp_avg_pay = TRIO_FULL_BASE_AVG_PAYS.get(key)
+    exp_roi = TRIO_FULL_EXPECTED_ROIS.get(key)
+
+    row["目"] = key
+    row["想定的中率%"] = exp_rate
+    row["基準平均配当"] = exp_avg_pay
+    row["想定回収率%"] = exp_roi
+
+    hit_rate = row.get("的中率%")
+    avg_pay = row.get("平均配当")
+    roi = row.get("回収率%")
+
+    if hit_rate is not None and pd.notna(hit_rate) and exp_rate is not None:
+        row["想定差"] = round(float(hit_rate) - float(exp_rate), 1)
+    else:
+        row["想定差"] = None
+    row["状態"] = diff_status(row.get("想定差"), exp_rate)
+
+    if avg_pay is not None and pd.notna(avg_pay) and exp_avg_pay:
+        row["配当係数"] = round(float(avg_pay) / float(exp_avg_pay), 2)
+        row["平均配当差"] = round(float(avg_pay) - float(exp_avg_pay), 1)
+        if row["配当係数"] < 0.80:
+            row["配当位置"] = "安すぎ"
+            row["配当戻り余地"] = "あり"
+        elif row["配当係数"] <= 1.30:
+            row["配当位置"] = "基準付近"
+            row["配当戻り余地"] = "中庸"
+        else:
+            row["配当位置"] = "高すぎ"
+            row["配当戻り余地"] = "上振れ警戒"
+    else:
+        row["配当係数"] = None
+        row["平均配当差"] = None
+        row["配当位置"] = "未回収"
+        row["配当戻り余地"] = ""
+
+    if roi is not None and pd.notna(roi) and exp_roi is not None:
+        row["回収差"] = round(float(roi) - float(exp_roi), 1)
+    else:
+        row["回収差"] = None
+
+    reasons = []
+    if row.get("的中H", 0) == 0:
+        reasons.append("未回収除外")
+    if row.get("状態") == "当たりすぎ":
+        reasons.append("的中率過熱除外")
+    if row.get("配当位置") == "高すぎ":
+        reasons.append("配当上振れ警戒")
+    if row.get("回収差") is not None and row.get("回収差") > 20:
+        reasons.append("後追い除外")
+    if not reasons:
+        if row.get("配当位置") == "安すぎ":
+            reasons.append("歪み枠")
+        elif row.get("状態") == "中庸":
+            reasons.append("中庸枠")
+        else:
+            reasons.append("候補")
+    row["総合候補理由"] = "／".join(reasons)
+    return row
 
 
 def sanrenpuku12_individual_row(label: str, rec: Dict[str, int], key: str) -> Dict:
@@ -806,7 +951,7 @@ agg_payout_sanrenpuku12_all_manual: Dict[str, Dict[str, int]] = {
 
 # 前日まで：3連複 1-2 個別（1-2-3～1-2-7）
 agg_payout_sanrenpuku12_individual_manual: Dict[str, Dict[str, Dict[str, int]]] = {
-    "仮想全体": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
+    "仮想全体": {k: new_payout_rec() for k in TRIO_FULL_BASE_COUNTS},
 }
 
 
@@ -1042,7 +1187,7 @@ with tabs[1]:
             sanrenpuku12_inputs.append((label, int(N), int(SUM), int(H)))
 
         st.markdown("## 3連複 1-2 個別 引継ぎ入力（累積）")
-        st.caption("1-2-3～1-2-7を個別に転記します。2車複と同じように、対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
+        st.caption("小倉基準の全35通りを個別に転記できます。通常は日次入力で自動加算されます。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
         sanrenpuku12_individual_inputs = []
         for label in ["仮想全体"]:
             st.markdown(f"**{label}**")
@@ -1051,7 +1196,7 @@ with tabs[1]:
             h_tri[1].markdown("**N**")
             h_tri[2].markdown("**SUM**")
             h_tri[3].markdown("**H**")
-            for key in TRIO_12_ALL_BASE_COUNTS:
+            for key in TRIO_FULL_BASE_COUNTS:
                 safe_label = label.replace(" ", "_")
                 safe_key = key.replace("-", "_")
                 c0, c1, c2, c3 = st.columns([1.2, 0.85, 1.05, 0.75])
@@ -1337,7 +1482,7 @@ payout_sanrenpuku12_all_daily: Dict[str, Dict[str, int]] = {
     "仮想全体": new_payout_rec(),
 }
 payout_sanrenpuku12_individual_daily: Dict[str, Dict[str, Dict[str, int]]] = {
-    "仮想全体": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
+    "仮想全体": {k: new_payout_rec() for k in TRIO_FULL_BASE_COUNTS},
 }
 
 for row in byrace_rows:
@@ -1362,13 +1507,12 @@ for row in byrace_rows:
         rec_all["H"] += 1
         rec_all["SUM"] += pay_3f
 
-    # 個別 1-2-3～1-2-7。全体は存在する評価だけ毎回1点仮想購入。
-    for target in range(3, 8):
-        key = sanrenpuku12_key(1, 2, target)
-        one_ksum = ksum_sanrenpuku_12_individual(target, field_n)
-        if one_ksum <= 0 or key not in TRIO_12_ALL_BASE_COUNTS:
+    # 個別3連複。小倉基準の全35通りを、存在する評価だけ毎回1点仮想購入。
+    for key in TRIO_FULL_BASE_COUNTS:
+        one_ksum = ksum_sanrenpuku_key(key, field_n)
+        if one_ksum <= 0:
             continue
-        one_hit = hit_sanrenpuku_12_individual(target, vorder, finish, field_n)
+        one_hit = hit_sanrenpuku_key(key, vorder, finish, field_n)
 
         rec_ind_all = payout_sanrenpuku12_individual_daily["仮想全体"][key]
         rec_ind_all["N"] += 1
@@ -1414,10 +1558,10 @@ for label in payout_sanrenpuku12_all_total.keys():
     add_rec(payout_sanrenpuku12_all_total[label], agg_payout_sanrenpuku12_all_manual[label])
 
 payout_sanrenpuku12_individual_total: Dict[str, Dict[str, Dict[str, int]]] = {
-    "仮想全体": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
+    "仮想全体": {k: new_payout_rec() for k in TRIO_FULL_BASE_COUNTS},
 }
 for label in payout_sanrenpuku12_individual_total.keys():
-    for key in TRIO_12_ALL_BASE_COUNTS:
+    for key in TRIO_FULL_BASE_COUNTS:
         add_rec(payout_sanrenpuku12_individual_total[label][key], payout_sanrenpuku12_individual_daily[label][key])
         add_rec(payout_sanrenpuku12_individual_total[label][key], agg_payout_sanrenpuku12_individual_manual[label][key])
 
@@ -1986,34 +2130,60 @@ with tabs[2]:
     ]
     st.dataframe(df_sp12[[c for c in sp_cols if c in df_sp12.columns]], use_container_width=True, hide_index=True)
 
-    st.markdown("#### 3連複 1-2 個別候補｜2車複方式")
-    st.caption("1-2-3～1-2-7を個別に判定します。2車複表と同じく、想定差・配当係数・回収差で過熱目を避け、中庸/歪み枠を推奨します。")
+    st.markdown("#### 3連複 個別候補｜2車複上位2軸方式")
+    st.caption("2車複表の本線ペアを最大2セット使い、各軸の3連複候補を小倉基準で個別判定します。最大4点までに抑えます。")
     trio_pick_n = st.number_input(
         "推奨3連複 最大点数",
-        key="trio12_pick_n",
+        key="trio_axis_pick_n",
         min_value=1,
-        max_value=5,
-        value=3,
+        max_value=4,
+        value=4,
+        step=1,
+    )
+    trio_axis_n = st.number_input(
+        "3連複 軸ペア最大数",
+        key="trio_axis_pair_n",
+        min_value=1,
+        max_value=2,
+        value=2,
         step=1,
     )
 
+    # 2車複表の本線ペアを3連複軸に採用。なければ1-2を暫定表示。
+    axis_pairs = []
+    try:
+        if "判定" in df_pairs.columns and "ペアキー" in df_pairs.columns:
+            axis_pairs = [str(x) for x in df_pairs.loc[df_pairs["判定"].eq("本線"), "ペアキー"].dropna().tolist()]
+    except Exception:
+        axis_pairs = []
+    if not axis_pairs:
+        axis_pairs = ["1-2"]
+    axis_pairs = axis_pairs[: int(trio_axis_n)]
+
     trio_rows = []
-    for key in TRIO_12_ALL_BASE_COUNTS:
-        rec = payout_sanrenpuku12_individual_total["仮想全体"].get(key, new_payout_rec())
-        trio_rows.append(sanrenpuku12_individual_row(f"3連複 {key}", rec, key))
+    for axis_key in axis_pairs:
+        try:
+            a, b = [int(x) for x in axis_key.split("-")]
+        except Exception:
+            continue
+        for target in range(1, FIELD_SIZE + 1):
+            if target in (a, b):
+                continue
+            key = sanrenpuku12_key(a, b, target)
+            if key not in TRIO_FULL_BASE_COUNTS:
+                continue
+            rec = payout_sanrenpuku12_individual_total["仮想全体"].get(key, new_payout_rec())
+            row = sanrenpuku_individual_row(f"3連複 {key}", rec, key)
+            row["軸"] = axis_key
+            row["評価"] = target
+            trio_rows.append(row)
+
     df_trio_ind = pd.DataFrame(trio_rows)
 
     if not df_trio_ind.empty:
-        # 評価（3～7）の複勝率補正。
-        # 1・2は軸として固定済みなので、多重評価を避けるため補正対象にしない。
         for idx in df_trio_ind.index:
-            try:
-                target_eval = int(str(df_trio_ind.loc[idx, "目"]).split("-")[-1])
-            except Exception:
-                target_eval = None
-
-            df_trio_ind.loc[idx, "評価"] = target_eval
-            base_place = TRIO_BASE_PLACE_RATES.get(target_eval) if target_eval is not None else None
+            target_eval = int(df_trio_ind.loc[idx, "評価"])
+            base_place = TRIO_BASE_PLACE_RATES.get(target_eval)
             df_trio_ind.loc[idx, "基準複勝率%"] = base_place
 
             cur_place = None
@@ -2031,10 +2201,6 @@ with tabs[2]:
             df_trio_ind.loc[idx, "複勝差"] = place_diff
             df_trio_ind.loc[idx, "複勝状態"] = place_state(place_diff)
 
-        # 推奨判定：未回収・明確な過熱・大幅上振れは除外。
-        # さらに評価の波を加味する。
-        # 来すぎなら後追い警戒で除外。
-        # 評価6・7が基準未満なら「低評価不振」として除外し、ただ高配当だから買う形を避ける。
         df_trio_ind["_place_over"] = df_trio_ind["複勝状態"].eq("来すぎ")
         df_trio_ind["_low_rank_cold"] = (
             df_trio_ind["評価"].fillna(0).astype(float).ge(6)
@@ -2052,7 +2218,7 @@ with tabs[2]:
 
         df_trio_ind["_eligible"] = (
             (df_trio_ind["的中H"].fillna(0).astype(float) > 0)
-            & ~(df_trio_ind["総合候補理由"].isin(["未回収除外", "的中率過熱除外", "後追い除外", "配当上振れ警戒"]))
+            & ~(df_trio_ind["総合候補理由"].astype(str).str.contains("未回収除外|的中率過熱除外|後追い除外|配当上振れ警戒", regex=True, na=False))
             & ~df_trio_ind["_place_over"]
             & ~df_trio_ind["_low_rank_cold"]
         )
@@ -2084,7 +2250,7 @@ with tabs[2]:
 
         selected_trio_idx = list(
             df_trio_ind.loc[df_trio_ind["_eligible"]]
-            .sort_values(["_score", "目"])
+            .sort_values(["_score", "軸", "目"])
             .head(int(trio_pick_n))
             .index
         )
@@ -2093,10 +2259,10 @@ with tabs[2]:
         if recommended_trio:
             st.success("現在の推奨3連複：" + " / ".join(recommended_trio))
         else:
-            st.warning("現在の推奨3連複はありません。1-2-全ではなくケン寄りです。")
+            st.warning("現在の推奨3連複はありません。ケン寄りです。")
 
         trio_cols = [
-            "判定", "目", "評価", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "補正理由",
+            "判定", "軸", "目", "評価", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "補正理由",
             "対象N", "的中H", "的中率%", "想定的中率%", "想定差",
             "平均配当", "基準平均配当", "平均配当差", "配当係数", "配当位置", "配当戻り余地",
             "回収率%", "想定回収率%", "回収差", "状態", "総合候補理由",
@@ -2105,7 +2271,7 @@ with tabs[2]:
             df_trio_ind[[c for c in trio_cols if c in df_trio_ind.columns]],
             use_container_width=True,
             hide_index=True,
-            height=260,
+            height=360,
         )
 
     st.markdown("#### 3連複 1-2-全 引継ぎ用累積表")
@@ -2131,7 +2297,7 @@ with tabs[2]:
     st.markdown("#### 3連複 1-2 個別 引継ぎ用累積表")
     tri_carry_rows = []
     for label in ["仮想全体"]:
-        for key in TRIO_12_ALL_BASE_COUNTS:
+        for key in TRIO_FULL_BASE_COUNTS:
             rec = payout_sanrenpuku12_individual_total[label].get(key, new_payout_rec())
             row = sanrenpuku12_individual_row(label, rec, key)
             tri_carry_rows.append({
