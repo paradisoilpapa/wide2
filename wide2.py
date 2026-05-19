@@ -582,8 +582,6 @@ with tabs[0]:
                     "pay_2f": pay_2f,
                     "pay_3f": pay_3f,
                     "buy_12_all": buy_12_all,
-                    "pay_3f": pay_3f,
-                    "buy_12_all": buy_12_all,
                 }
             )
 
@@ -624,6 +622,8 @@ with tabs[0]:
                     "finish": finish,
                     "pay_2t": pay_2t,
                     "pay_2f": pay_2f,
+                    "pay_3f": pay_3f,
+                    "buy_12_all": buy_12_all,
                 }
             )
 
