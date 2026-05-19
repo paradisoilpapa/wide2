@@ -2401,8 +2401,9 @@ with tabs[2]:
             reasons.append("複勝中庸")
 
         # ワイドは、単純に高評価へ低評価をぶら下げるより、2車の複勝率バランスを重視する。
-        # そのため全21ペアから、内部下限3倍以上・来すぎ過多ではない候補を順位化する。
-        overheat = (stat_a == "来すぎ" and stat_b == "来すぎ")
+        # そのため全21ペアから、内部下限3倍以上・来すぎを含まない候補を順位化する。
+        # 片方でも「来すぎ」を含むワイドは、的中スパン目的の参考候補からは外す。
+        overheat = (stat_a == "来すぎ" or stat_b == "来すぎ")
         score = 1000.0
         if not overheat:
             score = 0.0
@@ -2415,9 +2416,7 @@ with tabs[2]:
             # どちらかが基準未満なら戻り余地として少し加点。
             if stat_a == "基準未満" or stat_b == "基準未満":
                 score -= 2.5
-            # 片方だけ来すぎなら軽く減点、両方来すぎは上で除外寄り。
-            if stat_a == "来すぎ" or stat_b == "来すぎ":
-                score += 5.0
+            # 来すぎを含む候補は上で除外するため、ここでは減点処理しない。
 
             # ワイド率が低すぎる候補は的中スパンが伸びすぎるため減点。
             if target_wide_odds is not None and float(target_wide_odds) > 14.0:
@@ -2486,6 +2485,8 @@ with tabs[2]:
         ]
         df_wide_show = df_wide[[c for c in wide_cols if c in df_wide.columns]].copy()
         df_wide_show = df_wide_show[df_wide_show["候補順位"].notna() & (df_wide_show["候補順位"].astype(float) <= float(WIDE_SHOW_TOP_N))]
+        if not df_wide_show.empty:
+            df_wide_show = df_wide_show.sort_values("候補順位", ascending=True, kind="mergesort")
         df_wide_show = drop_blank_display_columns(df_wide_show)
         render_sortable_table(df_wide_show)
 
