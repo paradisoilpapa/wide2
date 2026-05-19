@@ -2063,7 +2063,7 @@ with tabs[2]:
         "総合候補理由",
     ]
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
-    render_sortable_table(df_pairs, height=470)
+    render_sortable_table(df_pairs, height=650)
 
     st.markdown("### 1-2ゾーン基礎集計")
     st.caption("全体に対して、2車複1-2そのものがどれくらい機能しているかを確認します。3連複個別表は、この1-2ゾーンの上に乗せる買い目選別です。")
@@ -2284,16 +2284,17 @@ with tabs[2]:
             st.warning("現在の推奨3連複はありません。ケン寄りです。")
 
         trio_cols = [
-            "判定", "軸", "目", "評価", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "補正理由",
+            "判定", "目", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "補正理由",
             "対象N", "的中H", "的中率%", "想定的中率%", "想定差",
             "平均配当", "基準平均配当", "平均配当差", "配当係数", "配当位置", "配当戻り余地",
             "回収率%", "想定回収率%", "回収差", "状態", "総合候補理由",
         ]
+        df_trio_show = df_trio_ind[[c for c in trio_cols if c in df_trio_ind.columns]]
         st.dataframe(
-            df_trio_ind[[c for c in trio_cols if c in df_trio_ind.columns]],
+            df_trio_show,
             use_container_width=True,
             hide_index=True,
-            height=360,
+            height=max(420, 38 * (len(df_trio_show) + 1) + 20),
         )
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
