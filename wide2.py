@@ -385,6 +385,40 @@ def sanrenpuku12_row(label: str, rec: Dict[str, int]) -> Dict:
     return row
 
 
+def nishafuku12_base_row(label: str, rec: Dict[str, int]) -> Dict:
+    """2車複1-2そのものの基礎集計。1-2ゾーンの土台確認用。"""
+    row = payout_row(label, rec)
+
+    exp_rate = float(PAIR_BASE_HIT_RATE_DEFAULTS.get("1-2", 0.0))
+    exp_avg_pay = float(PAIR_BASE_AVG_PAY_DEFAULTS.get("1-2", 0.0))
+    exp_roi = round(exp_rate * exp_avg_pay / 100.0, 1) if exp_avg_pay > 0 else None
+
+    row["想定的中率%"] = round(exp_rate, 1)
+    row["基準平均配当"] = round(exp_avg_pay, 1)
+    row["想定回収率%"] = exp_roi
+
+    hit_rate = row.get("的中率%")
+    avg_pay = row.get("平均配当")
+    roi = row.get("回収率%")
+
+    if hit_rate is not None and pd.notna(hit_rate):
+        row["的中率差"] = round(float(hit_rate) - exp_rate, 1)
+    else:
+        row["的中率差"] = None
+
+    if avg_pay is not None and pd.notna(avg_pay):
+        row["平均配当差"] = round(float(avg_pay) - exp_avg_pay, 1)
+    else:
+        row["平均配当差"] = None
+
+    if roi is not None and pd.notna(roi) and exp_roi is not None:
+        row["回収差"] = round(float(roi) - float(exp_roi), 1)
+    else:
+        row["回収差"] = None
+
+    return row
+
+
 def targets_for_pattern(axis: int, field_n: int) -> List[int]:
     """
     2車単固定型の相手評価。
@@ -696,16 +730,14 @@ agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
 for a, b in NISHAFUKU_EXTRA_PAIRS:
     agg_payout_nishafuku_manual[nishafuku_label(a, b)] = new_payout_rec()
 
-# 前日まで：3連複 1-2-全（仮想全体／実購入）
+# 前日まで：3連複 1-2-全（仮想全体）
 agg_payout_sanrenpuku12_all_manual: Dict[str, Dict[str, int]] = {
     "仮想全体": new_payout_rec(),
-    "実購入": new_payout_rec(),
 }
 
 # 前日まで：3連複 1-2 個別（1-2-3～1-2-7）
 agg_payout_sanrenpuku12_individual_manual: Dict[str, Dict[str, Dict[str, int]]] = {
     "仮想全体": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
-    "実購入": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
 }
 
 
@@ -722,19 +754,18 @@ with tabs[0]:
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([0.8, 0.9, 2.5, 1.05, 1.0, 1.0, 0.9])
+        cols_hdr = st.columns([0.8, 0.9, 2.8, 1.05, 1.0, 1.0])
         cols_hdr[0].markdown("**R**")
         cols_hdr[1].markdown("**頭数**")
         cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
         cols_hdr[3].markdown("**着順(～3桁)**")
         cols_hdr[4].markdown("**2車複**")
         cols_hdr[5].markdown("**3連複**")
-        cols_hdr[6].markdown("**1-2-全購入**")
 
         daily_inputs = []
 
         for i in range(1, 37):
-            c1, c2, c3, c4, c5, c6, c7 = st.columns([0.8, 0.9, 2.5, 1.05, 1.0, 1.0, 0.9])
+            c1, c2, c3, c4, c5, c6 = st.columns([0.8, 0.9, 2.8, 1.05, 1.0, 1.0])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
@@ -742,7 +773,6 @@ with tabs[0]:
             fin = c4.text_input("", key=f"fin_{i}", value="")
             pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
             pay_3f = c6.number_input("", key=f"pay3f_{i}", min_value=0, value=0, step=10)
-            buy_12_all = c7.checkbox("", key=f"buy12all_{i}")
             pay_2t = 0
 
             daily_inputs.append(
@@ -754,7 +784,6 @@ with tabs[0]:
                     "pay_2t": pay_2t,
                     "pay_2f": pay_2f,
                     "pay_3f": pay_3f,
-                    "buy_12_all": buy_12_all,
                 }
             )
 
@@ -768,12 +797,10 @@ with tabs[0]:
         pay_2t = int(item["pay_2t"])
         pay_2f = int(item["pay_2f"])
         pay_3f = int(item.get("pay_3f", 0))
-        buy_12_all = bool(item.get("buy_12_all", False))
-
         vorder = parse_rankline(vline, field_n)
         finish = parse_finish(fin)
 
-        any_input = any([vline.strip(), fin.strip(), pay_2f > 0, pay_3f > 0, buy_12_all])
+        any_input = any([vline.strip(), fin.strip(), pay_2f > 0, pay_3f > 0])
         if any_input:
             if not vorder:
                 st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
@@ -796,7 +823,6 @@ with tabs[0]:
                     "pay_2t": pay_2t,
                     "pay_2f": pay_2f,
                     "pay_3f": pay_3f,
-                    "buy_12_all": buy_12_all,
                 }
             )
 
@@ -903,14 +929,14 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 3連複 1-2-全 引継ぎ入力（累積）")
-        st.caption("仮想全体＝全レースで1-2-全を買った想定。実購入＝横チェックを入れて買ったレースだけ。7車は1R=5点なので、KSUMはN×5で自動計算します。")
+        st.caption("全レースで1-2-全を買った仮想集計です。7車は1R=5点なので、KSUMはN×5で自動計算します。")
         sanrenpuku12_inputs = []
         h_sp = st.columns([1.4, 0.9, 1.1, 0.8])
         h_sp[0].markdown("**区分**")
         h_sp[1].markdown("**N**")
         h_sp[2].markdown("**SUM**")
         h_sp[3].markdown("**H**")
-        for label in ["仮想全体", "実購入"]:
+        for label in ["仮想全体"]:
             safe = label.replace(" ", "_")
             c0, c1, c2, c3 = st.columns([1.4, 0.9, 1.1, 0.8])
             c0.write(label)
@@ -922,7 +948,7 @@ with tabs[1]:
         st.markdown("## 3連複 1-2 個別 引継ぎ入力（累積）")
         st.caption("1-2-3～1-2-7を個別に転記します。2車複と同じように、対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
         sanrenpuku12_individual_inputs = []
-        for label in ["仮想全体", "実購入"]:
+        for label in ["仮想全体"]:
             st.markdown(f"**{label}**")
             h_tri = st.columns([1.2, 0.85, 1.05, 0.75])
             h_tri[0].markdown("**目**")
@@ -1213,11 +1239,9 @@ for row in byrace_rows:
 # --- 3連複 1-2-全（日次） ---
 payout_sanrenpuku12_all_daily: Dict[str, Dict[str, int]] = {
     "仮想全体": new_payout_rec(),
-    "実購入": new_payout_rec(),
 }
 payout_sanrenpuku12_individual_daily: Dict[str, Dict[str, Dict[str, int]]] = {
     "仮想全体": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
-    "実購入": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
 }
 
 for row in byrace_rows:
@@ -1242,14 +1266,6 @@ for row in byrace_rows:
         rec_all["H"] += 1
         rec_all["SUM"] += pay_3f
 
-    if bool(row.get("buy_12_all", False)):
-        rec_buy = payout_sanrenpuku12_all_daily["実購入"]
-        rec_buy["N"] += 1
-        rec_buy["KSUM"] += ksum
-        if is_hit:
-            rec_buy["H"] += 1
-            rec_buy["SUM"] += pay_3f
-
     # 個別 1-2-3～1-2-7。全体は存在する評価だけ毎回1点仮想購入。
     for target in range(3, 8):
         key = sanrenpuku12_key(1, 2, target)
@@ -1264,14 +1280,6 @@ for row in byrace_rows:
         if one_hit:
             rec_ind_all["H"] += 1
             rec_ind_all["SUM"] += pay_3f
-
-        if bool(row.get("buy_12_all", False)):
-            rec_ind_buy = payout_sanrenpuku12_individual_daily["実購入"][key]
-            rec_ind_buy["N"] += 1
-            rec_ind_buy["KSUM"] += one_ksum
-            if one_hit:
-                rec_ind_buy["H"] += 1
-                rec_ind_buy["SUM"] += pay_3f
 
 
 payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
@@ -1304,7 +1312,6 @@ for label in payout_nishafuku_total.keys():
 
 payout_sanrenpuku12_all_total: Dict[str, Dict[str, int]] = {
     "仮想全体": new_payout_rec(),
-    "実購入": new_payout_rec(),
 }
 for label in payout_sanrenpuku12_all_total.keys():
     add_rec(payout_sanrenpuku12_all_total[label], payout_sanrenpuku12_all_daily[label])
@@ -1312,7 +1319,6 @@ for label in payout_sanrenpuku12_all_total.keys():
 
 payout_sanrenpuku12_individual_total: Dict[str, Dict[str, Dict[str, int]]] = {
     "仮想全体": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
-    "実購入": {k: new_payout_rec() for k in TRIO_12_ALL_BASE_COUNTS},
 }
 for label in payout_sanrenpuku12_individual_total.keys():
     for key in TRIO_12_ALL_BASE_COUNTS:
@@ -1786,8 +1792,58 @@ with tabs[2]:
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
     render_sortable_table(df_pairs, height=470)
 
+    st.markdown("### 1-2ゾーン基礎集計")
+    st.caption("全体に対して、2車複1-2そのものがどれくらい機能しているかを確認します。3連複個別表は、この1-2ゾーンの上に乗せる買い目選別です。")
+
+    rec_12_base = payout_nishafuku_total.get(nishafuku_label(1, 2), new_payout_rec())
+    rec_12_trio_all = payout_sanrenpuku12_all_total.get("仮想全体", new_payout_rec())
+    base_rows = [
+        nishafuku12_base_row("2車複 1-2｜全体", rec_12_base),
+        sanrenpuku12_row("3連複 1-2-全｜全体", rec_12_trio_all),
+    ]
+    df_12_base = pd.DataFrame(base_rows)
+    base_cols = [
+        "型",
+        "対象N",
+        "総点数KSUM",
+        "投資額換算",
+        "払戻合計SUM",
+        "的中H",
+        "的中率%",
+        "想定的中率%",
+        "想定1-2両方3着内率%",
+        "的中率差",
+        "平均配当",
+        "基準平均配当",
+        "想定平均配当",
+        "平均配当差",
+        "回収率%",
+        "想定回収率%",
+        "ゾーン想定回収率%",
+        "回収差",
+        "ゾーン回収差",
+    ]
+    st.dataframe(
+        df_12_base[[c for c in base_cols if c in df_12_base.columns]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # 1-2の土台を、短い文章でも確認できるようにする
+    try:
+        n_all = int(rec_12_base.get("N", 0))
+        h_2f = int(rec_12_base.get("H", 0))
+        h_3f = int(rec_12_trio_all.get("H", 0))
+        if n_all > 0:
+            st.caption(
+                f"1-2基礎：全体{n_all}R中、2車複1-2は{h_2f}R、"
+                f"3連複1-2-全条件（1と2が両方3着内）は{h_3f}Rです。"
+            )
+    except Exception:
+        pass
+
     st.markdown("### 3連複 1-2-全 ゾーン検証")
-    st.caption("仮想全体＝入力済み全レースで3連複1-2-全を買った想定。実購入＝日次入力で『1-2-全購入』にチェックしたレースだけ。想定平均配当は小倉2年分3連複全集計の1-2-全加重平均756円を使用します。")
+    st.caption("入力済み全レースで3連複1-2-全を買った仮想集計です。想定平均配当は小倉2年分3連複全集計の1-2-全加重平均756円を使用します。")
 
     with st.expander("3連複1-2-全 固定想定値", expanded=False):
         st.write(
@@ -1809,9 +1865,9 @@ with tabs[2]:
         )
 
     sp_rows = []
-    for label in ["仮想全体", "実購入"]:
+    for label in ["仮想全体"]:
         rec = payout_sanrenpuku12_all_total.get(label, new_payout_rec())
-        sp_rows.append(sanrenpuku12_row(f"3連複 1-2-全｜{label}", rec))
+        sp_rows.append(sanrenpuku12_row("3連複 1-2-全｜全体", rec))
     df_sp12 = pd.DataFrame(sp_rows)
     sp_cols = [
         "型",
@@ -1902,22 +1958,9 @@ with tabs[2]:
             height=260,
         )
 
-        st.markdown("#### 3連複 1-2 個別｜実購入成績")
-        buy_rows = []
-        for key in TRIO_12_ALL_BASE_COUNTS:
-            rec = payout_sanrenpuku12_individual_total["実購入"].get(key, new_payout_rec())
-            buy_rows.append(sanrenpuku12_individual_row(f"3連複 {key}", rec, key))
-        df_trio_buy = pd.DataFrame(buy_rows)
-        st.dataframe(
-            df_trio_buy[[c for c in trio_cols if c in df_trio_buy.columns]],
-            use_container_width=True,
-            hide_index=True,
-            height=230,
-        )
-
     st.markdown("#### 3連複 1-2-全 引継ぎ用累積表")
     sp_carry_rows = []
-    for label in ["仮想全体", "実購入"]:
+    for label in ["仮想全体"]:
         rec = payout_sanrenpuku12_all_total.get(label, new_payout_rec())
         row = sanrenpuku12_row(label, rec)
         sp_carry_rows.append({
@@ -1937,7 +1980,7 @@ with tabs[2]:
 
     st.markdown("#### 3連複 1-2 個別 引継ぎ用累積表")
     tri_carry_rows = []
-    for label in ["仮想全体", "実購入"]:
+    for label in ["仮想全体"]:
         for key in TRIO_12_ALL_BASE_COUNTS:
             rec = payout_sanrenpuku12_individual_total[label].get(key, new_payout_rec())
             row = sanrenpuku12_individual_row(label, rec, key)
