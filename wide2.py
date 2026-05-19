@@ -2335,10 +2335,10 @@ with tabs[2]:
         )
 
 
-    st.markdown("#### ワイド参考候補｜12-34567")
+    st.markdown("#### ワイド参考候補｜全21ペア方式")
     st.caption(
-        "ワイド配当データは使わず、12-34567（1-3〜1-7 / 2-3〜2-7）を参考候補化します。"
-        "資金が少ない時に、3連複の代替・延命用として最大2点まで確認する欄です。"
+        "ワイド配当データは使わず、全21ペアから複勝率バランスの良い候補を参考表示します。"
+        "表示は候補順位5位まで。資金が少ない時に、3連複の代替・延命用として上位1〜2点だけ確認する欄です。"
         "ワイドは2車複とは別券種なので、2車複の想定回収・平均配当は表示・順位計算に使いません。"
     )
     wide_pick_n = st.number_input(
@@ -2352,8 +2352,23 @@ with tabs[2]:
     )
     WIDE_ODDS_SAFETY_RATE = 1.10  # 内部足切り用。画面には表示しない。
     WIDE_MIN_TARGET_ODDS = 3.0    # 安すぎるワイドを避けるための内部下限。
+    WIDE_SHOW_TOP_N = 5           # 表示は上位5位まで。
 
-    wide_pairs = [(1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7)]
+    def _current_place_rate(eval_rank: int):
+        rec_rank = rank_total.get(eval_rank, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+        n_rank = int(rec_rank.get("N", 0))
+        if n_rank <= 0:
+            return None
+        return round(
+            100.0 * (
+                int(rec_rank.get("C1", 0))
+                + int(rec_rank.get("C2", 0))
+                + int(rec_rank.get("C3", 0))
+            ) / n_rank,
+            1,
+        )
+
+    wide_pairs = [(a, b) for a in range(1, FIELD_SIZE + 1) for b in range(a + 1, FIELD_SIZE + 1)]
     wide_rows = []
     for a, b in wide_pairs:
         pair_key = f"{a}-{b}"
@@ -2361,61 +2376,65 @@ with tabs[2]:
         fair_wide_odds = WIDE_BASE_FAIR_ODDS.get(pair_key)
         target_wide_odds = round(float(fair_wide_odds) * WIDE_ODDS_SAFETY_RATE, 1) if fair_wide_odds is not None else None
 
-        # ワイド表で見るのは、相手側（大きい評価番号）の複勝状態。
-        # 表示名は出さないが、内部では 1-6 なら評価6、2-7なら評価7として見る。
-        low_eval = max(a, b)
-        cur_place = None
-        if low_eval in rank_total:
-            rec_rank = rank_total.get(low_eval, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-            n_rank = int(rec_rank.get("N", 0))
-            if n_rank > 0:
-                cur_place = round(
-                    100.0 * (
-                        int(rec_rank.get("C1", 0))
-                        + int(rec_rank.get("C2", 0))
-                        + int(rec_rank.get("C3", 0))
-                    ) / n_rank,
-                    1,
-                )
-        base_place = TRIO_BASE_PLACE_RATES.get(low_eval)
-        place_diff = round(float(cur_place) - float(base_place), 1) if cur_place is not None and base_place is not None else None
-        place_stat = place_state(place_diff)
+        cur_a = _current_place_rate(a)
+        cur_b = _current_place_rate(b)
+        base_a = TRIO_BASE_PLACE_RATES.get(a)
+        base_b = TRIO_BASE_PLACE_RATES.get(b)
+
+        diff_a = round(float(cur_a) - float(base_a), 1) if cur_a is not None and base_a is not None else None
+        diff_b = round(float(cur_b) - float(base_b), 1) if cur_b is not None and base_b is not None else None
+        stat_a = place_state(diff_a)
+        stat_b = place_state(diff_b)
+
+        current_balance = round(abs(float(cur_a) - float(cur_b)), 1) if cur_a is not None and cur_b is not None else None
+        base_balance = round(abs(float(base_a) - float(base_b)), 1) if base_a is not None and base_b is not None else None
+        avg_diff = None
+        if diff_a is not None and diff_b is not None:
+            avg_diff = round((float(diff_a) + float(diff_b)) / 2.0, 1)
 
         reasons = []
-        if place_stat == "基準未満":
-            reasons.append("複勝戻り")
-        elif place_stat == "来すぎ":
-            reasons.append("複勝来すぎ")
+        if stat_a == "来すぎ" or stat_b == "来すぎ":
+            reasons.append("来すぎ含む")
+        elif stat_a == "基準未満" or stat_b == "基準未満":
+            reasons.append("戻り含む")
         else:
             reasons.append("複勝中庸")
 
-        # ワイドは配当データがないため、2車複の平均配当・回収率では判定しない。
-        # 使うのは、推定ワイド率からの内部下限と、相手評価の複勝状態だけ。
-        overheat = place_stat == "来すぎ"
+        # ワイドは、単純に高評価へ低評価をぶら下げるより、2車の複勝率バランスを重視する。
+        # そのため全21ペアから、内部下限3倍以上・来すぎ過多ではない候補を順位化する。
+        overheat = (stat_a == "来すぎ" and stat_b == "来すぎ")
         score = 1000.0
         if not overheat:
             score = 0.0
-            if place_stat == "基準未満":
-                score -= 4.0
-            elif place_stat == "中庸":
-                score += 0.0
-            else:
-                score += 20.0
+            # 2車の現在複勝率が近いほど、ワイドとしてのバランスを高評価。
+            if current_balance is not None:
+                score += float(current_balance) * 0.16
+            if base_balance is not None:
+                score += float(base_balance) * 0.10
 
-            # 低評価寄りほど的中スパンが伸びるため軽く減点。
-            score += max(0, low_eval - 5) * 0.6
-            # ただし、内部下限が高い候補は穴ワイドとしての妙味を少し残す。
+            # どちらかが基準未満なら戻り余地として少し加点。
+            if stat_a == "基準未満" or stat_b == "基準未満":
+                score -= 2.5
+            # 片方だけ来すぎなら軽く減点、両方来すぎは上で除外寄り。
+            if stat_a == "来すぎ" or stat_b == "来すぎ":
+                score += 5.0
+
+            # ワイド率が低すぎる候補は的中スパンが伸びすぎるため減点。
+            if target_wide_odds is not None and float(target_wide_odds) > 14.0:
+                score += (float(target_wide_odds) - 14.0) * 0.45
+            # 安すぎる候補は内部足切りで除外するが、3〜8倍帯は実戦向きとして軽く評価。
             if target_wide_odds is not None:
-                score -= min(3.0, max(0.0, float(target_wide_odds) - WIDE_MIN_TARGET_ODDS) * 0.12)
+                score += abs(float(target_wide_odds) - 7.0) * 0.08
 
         wide_rows.append({
             "判定": "",
+            "候補順位": None,
             "ワイド候補": pair_key,
             "想定ワイド率%": base_wide_rate,
-            "現在複勝率%": cur_place,
-            "基準複勝率%": base_place,
-            "複勝差": place_diff,
-            "複勝状態": place_stat,
+            "複勝差平均": avg_diff,
+            "バランス差": current_balance,
+            "基準バランス差": base_balance,
+            "複勝状態": " / ".join([s for s in [stat_a, stat_b] if s]),
             "参考理由": "／".join(reasons),
             "_score": score,
             "_overheat": overheat,
@@ -2431,7 +2450,7 @@ with tabs[2]:
         if not cand_wide.empty:
             cand_wide = cand_wide.sort_values(
                 ["_score", "_target_wide_odds", "ワイド候補"],
-                ascending=[True, False, True],
+                ascending=[True, True, True],
                 kind="mergesort",
             )
             wide_ranked_idx = list(cand_wide.index)
@@ -2463,9 +2482,10 @@ with tabs[2]:
 
         wide_cols = [
             "判定", "候補順位", "ワイド候補", "想定ワイド率%",
-            "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
+            "複勝差平均", "バランス差", "基準バランス差", "複勝状態", "参考理由",
         ]
-        df_wide_show = df_wide[[c for c in wide_cols if c in df_wide.columns]]
+        df_wide_show = df_wide[[c for c in wide_cols if c in df_wide.columns]].copy()
+        df_wide_show = df_wide_show[df_wide_show["候補順位"].notna() & (df_wide_show["候補順位"].astype(float) <= float(WIDE_SHOW_TOP_N))]
         df_wide_show = drop_blank_display_columns(df_wide_show)
         render_sortable_table(df_wide_show)
 
