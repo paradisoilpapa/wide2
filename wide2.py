@@ -970,6 +970,222 @@ def render_sortable_table(df: pd.DataFrame, height: int | None = None):
 
 
 # =========================
+# 投資EV診断（既存推奨買い目を変えずに診断だけ行う）
+# =========================
+EV_K_MAP = {
+    "2車複": 75,
+    "3連複": 125,
+}
+EV_N0_MAP = {
+    "2車複": 50,
+    "3連複": 40,
+}
+EV_H0_MAP = {
+    "2車複": 5,
+    "3連複": 3,
+}
+
+
+def _safe_float(v, default=None):
+    try:
+        if v is None or pd.isna(v):
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
+def _pct_to_prob(v):
+    x = _safe_float(v, None)
+    if x is None:
+        return None
+    # 既存表は%表記なので、1.0を超える値は%として扱う。
+    return x / 100.0 if x > 1.0 else x
+
+
+def _odds_from_pay(v):
+    """100円あたり払戻金を倍率に変換。例：315円→3.15倍。"""
+    x = _safe_float(v, None)
+    if x is None or x <= 0:
+        return None
+    return x / 100.0
+
+
+def _heat_penalty_from_ratio(odds_ratio):
+    r = _safe_float(odds_ratio, None)
+    if r is None:
+        return 1.0
+    if r >= 0.90:
+        return 1.00
+    if r >= 0.75:
+        return 0.85
+    if r >= 0.60:
+        return 0.65
+    return 0.00
+
+
+def _single_ev_label(ev, confidence, odds_ratio, is_anchor=False):
+    ev = _safe_float(ev, 0.0)
+    conf = _safe_float(confidence, 0.0)
+    ratio = _safe_float(odds_ratio, 1.0)
+
+    if is_anchor:
+        if ev >= 1.00 and ratio >= 0.85:
+            return "保険採用"
+        if ev >= 0.90:
+            return "低比重保険"
+        return "保険除外"
+
+    if ev >= 1.20 and conf >= 0.70 and ratio >= 0.90:
+        return "強推奨"
+    if ev >= 1.10 and conf >= 0.60 and ratio >= 0.85:
+        return "推奨"
+    if ev >= 1.00:
+        return "監視"
+    return "除外"
+
+
+def calculate_ev_metrics(df: pd.DataFrame, bet_type: str, condition_margin: float = 0.90, duplicate_penalty: float = 1.0) -> pd.DataFrame:
+    """
+    既存の集計表にEV診断列を追加する。
+    重要：ConfidenceはEVに掛けない。Scoreは採用順位用。
+    """
+    if df is None or df.empty:
+        return df
+
+    out = df.copy()
+    K = float(EV_K_MAP.get(bet_type, 100))
+    N0 = float(EV_N0_MAP.get(bet_type, 50))
+    H0 = float(EV_H0_MAP.get(bet_type, 3))
+
+    p_adj_list = []
+    p_safe_list = []
+    odds_list = []
+    base_odds_list = []
+    odds_ratio_list = []
+    ev_list = []
+    conf_list = []
+    heat_list = []
+    score_list = []
+    label_list = []
+    anchor_list = []
+
+    for _, row in out.iterrows():
+        N = _safe_float(row.get("対象N"), 0.0) or 0.0
+        hits = _safe_float(row.get("的中H"), 0.0) or 0.0
+
+        p_current = _pct_to_prob(row.get("的中率%"))
+        if p_current is None:
+            p_current = 0.0
+
+        if bet_type == "2車複":
+            p_base = _pct_to_prob(row.get("想定ペア的%"))
+            base_pay = row.get("ペア基準配当")
+        else:
+            p_base = _pct_to_prob(row.get("想定的中率%"))
+            base_pay = row.get("基準平均配当")
+
+        if p_base is None:
+            p_base = p_current
+
+        w = N / (N + K) if (N + K) > 0 else 0.0
+        p_adj = w * p_current + (1.0 - w) * p_base
+        p_safe = p_adj * float(condition_margin)
+
+        odds = _odds_from_pay(row.get("平均配当"))
+        # 未回収・平均配当なしの場合は、初期診断では基準配当を仮oddsにする。
+        # 実オッズ入力を追加した後は、ここを現在オッズに差し替える。
+        if odds is None:
+            odds = _odds_from_pay(base_pay)
+
+        base_odds = _odds_from_pay(base_pay)
+        odds_ratio = (odds / base_odds) if (odds is not None and base_odds is not None and base_odds > 0) else None
+        heat_penalty = _heat_penalty_from_ratio(odds_ratio)
+
+        ev = (p_safe * odds) if odds is not None else None
+        confidence = min(1.0, N / N0) * min(1.0, hits / H0) if N0 > 0 and H0 > 0 else 0.0
+        score = (ev * heat_penalty * float(duplicate_penalty)) if ev is not None else None
+
+        key = str(row.get("ペアキー") or row.get("目") or "").strip()
+        is_anchor = (bet_type == "2車複" and key == "1-2")
+        ev_label = _single_ev_label(ev, confidence, odds_ratio, is_anchor=is_anchor)
+
+        p_adj_list.append(round(p_adj * 100.0, 2))
+        p_safe_list.append(round(p_safe * 100.0, 2))
+        odds_list.append(round(odds, 2) if odds is not None else None)
+        base_odds_list.append(round(base_odds, 2) if base_odds is not None else None)
+        odds_ratio_list.append(round(odds_ratio, 2) if odds_ratio is not None else None)
+        ev_list.append(round(ev, 3) if ev is not None else None)
+        conf_list.append(round(confidence, 3))
+        heat_list.append(round(heat_penalty, 2))
+        score_list.append(round(score, 3) if score is not None else None)
+        label_list.append(ev_label)
+        anchor_list.append(bool(is_anchor))
+
+    out["p_adj%"] = p_adj_list
+    out["p_safe%"] = p_safe_list
+    out["診断odds"] = odds_list
+    out["基準odds"] = base_odds_list
+    out["odds_ratio"] = odds_ratio_list
+    out["EV"] = ev_list
+    out["Confidence"] = conf_list
+    out["heat_penalty"] = heat_list
+    out["Score"] = score_list
+    out["EV判定"] = label_list
+    out["is_anchor"] = anchor_list
+    out["券種"] = bet_type
+    return out
+
+
+def race_ev_summary(df: pd.DataFrame, stake_col: str = "stake") -> dict:
+    """選ばれた買い目群のRaceEV/RaceConfidenceを計算する。"""
+    if df is None or df.empty:
+        return {"RaceEV": None, "RaceConfidence": None, "総点数": 0, "投資額": 0, "race_label": "ケン"}
+
+    work = df.copy()
+    if stake_col not in work.columns:
+        work[stake_col] = 100.0
+
+    total_stake = 0.0
+    ev_weighted = 0.0
+    conf_weighted = 0.0
+    count = 0
+
+    for _, r in work.iterrows():
+        stake = _safe_float(r.get(stake_col), 0.0) or 0.0
+        ev = _safe_float(r.get("EV"), None)
+        conf = _safe_float(r.get("Confidence"), 0.0) or 0.0
+        if stake <= 0 or ev is None:
+            continue
+        total_stake += stake
+        ev_weighted += stake * ev
+        conf_weighted += stake * conf
+        count += 1
+
+    if total_stake <= 0:
+        return {"RaceEV": None, "RaceConfidence": None, "総点数": 0, "投資額": 0, "race_label": "ケン"}
+
+    race_ev = ev_weighted / total_stake
+    race_conf = conf_weighted / total_stake
+
+    if race_ev >= 1.10 and race_conf >= 0.70:
+        label = "買い"
+    elif race_ev >= 1.05 and race_conf >= 0.60:
+        label = "小口買い"
+    else:
+        label = "ケン"
+
+    return {
+        "RaceEV": round(race_ev, 3),
+        "RaceConfidence": round(race_conf, 3),
+        "総点数": count,
+        "投資額": int(total_stake),
+        "race_label": label,
+    }
+
+
+
+# =========================
 # Tabs
 # =========================
 tabs = st.tabs(["日次手入力（最大36R）", "前日までの集計（累積）", "分析結果"])
@@ -1645,6 +1861,26 @@ with tabs[2]:
         "nishafuku": "—",
         "trio": "—",
     }
+    ev_diagnosis_frames = []
+
+    st.markdown("#### 投資EV診断設定")
+    c_ev1, c_ev2 = st.columns([1.2, 3])
+    condition_label = c_ev1.selectbox(
+        "condition_margin",
+        options=["同条件=0.95", "他場=0.90", "デイ/9車=0.85"],
+        index=1,
+        key="ev_condition_margin_label",
+    )
+    condition_margin_map = {
+        "同条件=0.95": 0.95,
+        "他場=0.90": 0.90,
+        "デイ/9車=0.85": 0.85,
+    }
+    diagnosis_condition_margin = float(condition_margin_map.get(condition_label, 0.90))
+    c_ev2.caption(
+        "初期実装は既存推奨買い目を変えず、p_adj / p_safe / EV / Confidence / RaceEV を診断表示するだけです。"
+        " EVは純粋期待値、Confidenceは根拠信頼度、Scoreは採用優先度です。"
+    )
 
     st.divider()
     st.divider()
@@ -2048,6 +2284,16 @@ with tabs[2]:
     else:
         st.info("候補を出すには、個別2車複データが必要です。")
 
+    if not df_pairs.empty:
+        df_pairs = calculate_ev_metrics(
+            df_pairs,
+            bet_type="2車複",
+            condition_margin=diagnosis_condition_margin,
+        )
+        _pair_pick_mask = df_pairs["判定"].astype(str).isin(["本線", "注"])
+        if _pair_pick_mask.any():
+            ev_diagnosis_frames.append(df_pairs.loc[_pair_pick_mask].copy())
+
     preferred_pair_cols = [
         "判定",
         "型",
@@ -2073,6 +2319,16 @@ with tabs[2]:
         "配当戻り余地",
         "資産枠",
         "総合候補理由",
+        "p_adj%",
+        "p_safe%",
+        "診断odds",
+        "基準odds",
+        "odds_ratio",
+        "EV",
+        "Confidence",
+        "heat_penalty",
+        "Score",
+        "EV判定",
     ]
     df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
     df_pairs = drop_blank_display_columns(df_pairs)
@@ -2312,11 +2568,22 @@ with tabs[2]:
             purchase_candidate_summary["trio"] = "なし（ケン寄り）"
             st.warning("現在の推奨3連複はありません。ケン寄りです。")
 
+        df_trio_ind = calculate_ev_metrics(
+            df_trio_ind,
+            bet_type="3連複",
+            condition_margin=diagnosis_condition_margin,
+        )
+        _trio_pick_mask = df_trio_ind["判定"].astype(str).eq("推奨")
+        if _trio_pick_mask.any():
+            ev_diagnosis_frames.append(df_trio_ind.loc[_trio_pick_mask].copy())
+
         trio_cols = [
             "判定", "目", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "補正理由",
             "対象N", "的中H", "的中率%", "想定的中率%", "想定差",
             "平均配当", "基準平均配当", "平均配当差", "配当係数", "配当位置", "配当戻り余地",
             "回収率%", "想定回収率%", "回収差", "状態", "総合候補理由",
+            "p_adj%", "p_safe%", "診断odds", "基準odds", "odds_ratio",
+            "EV", "Confidence", "heat_penalty", "Score", "EV判定",
         ]
         df_trio_show = df_trio_ind[[c for c in trio_cols if c in df_trio_ind.columns]]
         df_trio_show = drop_blank_display_columns(df_trio_show)
@@ -2335,6 +2602,64 @@ with tabs[2]:
         c_buy1, c_buy2 = st.columns(2)
         c_buy1.success(f"2車複本線：{purchase_candidate_summary.get('nishafuku', '—')}")
         c_buy2.success(f"3連複：{purchase_candidate_summary.get('trio', '—')}")
+
+    st.markdown("### 投資EV診断（既存推奨買い目）")
+    if ev_diagnosis_frames:
+        df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
+        df_ev_diag["stake"] = 100.0
+
+        race_summary = race_ev_summary(df_ev_diag)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("RaceEV", "—" if race_summary["RaceEV"] is None else f'{race_summary["RaceEV"]:.3f}')
+        m2.metric("RaceConfidence", "—" if race_summary["RaceConfidence"] is None else f'{race_summary["RaceConfidence"]:.3f}')
+        m3.metric("点数", race_summary["総点数"])
+        m4.metric("診断", race_summary["race_label"])
+
+        if race_summary["race_label"] == "買い":
+            st.success("診断：買い条件を満たしています。")
+        elif race_summary["race_label"] == "小口買い":
+            st.info("診断：小口買い条件です。厚く張る段階ではありません。")
+        else:
+            st.warning("診断：RaceEVまたはRaceConfidence不足のため、ケン寄りです。")
+
+        anchor_mask = df_ev_diag.get("is_anchor", pd.Series([False] * len(df_ev_diag))).fillna(False).astype(bool)
+        if anchor_mask.any() and len(df_ev_diag) > int(anchor_mask.sum()):
+            summary_without_anchor = race_ev_summary(df_ev_diag.loc[~anchor_mask].copy())
+            c_a1, c_a2 = st.columns(2)
+            c_a1.caption(
+                "保険込み："
+                f'RaceEV={race_summary["RaceEV"]} / '
+                f'Conf={race_summary["RaceConfidence"]} / '
+                f'{race_summary["race_label"]}'
+            )
+            c_a2.caption(
+                "保険除外："
+                f'RaceEV={summary_without_anchor["RaceEV"]} / '
+                f'Conf={summary_without_anchor["RaceConfidence"]} / '
+                f'{summary_without_anchor["race_label"]}'
+            )
+            if (
+                summary_without_anchor["RaceEV"] is not None
+                and race_summary["RaceEV"] is not None
+                and float(summary_without_anchor["RaceEV"]) > float(race_summary["RaceEV"])
+                and float(race_summary["RaceEV"]) < 1.05
+            ):
+                st.warning("保険目がRaceEVを毀損しています。保険除外推奨です。")
+
+        diag_cols = [
+            "券種", "判定", "EV判定", "型", "目", "対象N", "的中H",
+            "p_adj%", "p_safe%", "診断odds", "基準odds", "odds_ratio",
+            "EV", "Confidence", "heat_penalty", "Score", "資産枠", "総合候補理由",
+        ]
+        df_ev_show = df_ev_diag[[c for c in diag_cols if c in df_ev_diag.columns]]
+        st.dataframe(
+            df_ev_show,
+            use_container_width=True,
+            hide_index=True,
+            height=table_auto_height(df_ev_show),
+        )
+    else:
+        st.info("EV診断対象の推奨買い目がありません。")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
