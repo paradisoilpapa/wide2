@@ -2339,9 +2339,9 @@ with tabs[2]:
     st.caption(
         "ワイド配当データは使わず、12-567（1-5 / 1-6 / 1-7 / 2-5 / 2-6 / 2-7）だけを参考候補化します。"
         "資金が少ない時に、3連複の代替・延命用として最大2点まで確認する欄です。"
+        "購入目安倍は、小倉3連複データから逆算した想定ワイド率ごとに個別算出します。"
     )
-    c_wide_opt1, c_wide_opt2 = st.columns([1, 1])
-    wide_pick_n = c_wide_opt1.number_input(
+    wide_pick_n = st.number_input(
         "穴ワイド 最大点数",
         key="hole_wide_pick_n",
         min_value=0,
@@ -2350,16 +2350,7 @@ with tabs[2]:
         step=1,
         help="0にすると候補表示のみ。1〜2で参考候補を上位から表示します。",
     )
-    wide_min_odds = c_wide_opt2.number_input(
-        "穴ワイド 最低確認オッズ",
-        key="hole_wide_min_odds",
-        min_value=1.0,
-        max_value=50.0,
-        value=2.0,
-        step=0.1,
-        format="%.1f",
-        help="実オッズ確認用の下限です。配当データは未入力のため、候補の足切りではなく目安表示に使います。",
-    )
+    WIDE_ODDS_SAFETY_RATE = 1.10  # 理論下限に10%上乗せした実戦確認目安
 
     hole_wide_pairs = [(1, 5), (1, 6), (1, 7), (2, 5), (2, 6), (2, 7)]
     wide_rows = []
@@ -2372,9 +2363,9 @@ with tabs[2]:
         base_wide_rate = WIDE_BASE_HIT_RATES.get(pair_key)
         fair_wide_odds = WIDE_BASE_FAIR_ODDS.get(pair_key)
         if fair_wide_odds is not None:
-            target_wide_odds = round(max(float(wide_min_odds), float(fair_wide_odds)), 1)
+            target_wide_odds = round(float(fair_wide_odds) * WIDE_ODDS_SAFETY_RATE, 1)
         else:
-            target_wide_odds = round(float(wide_min_odds), 1)
+            target_wide_odds = None
 
         low_eval = max(a, b)
         cur_place = None
@@ -2470,9 +2461,9 @@ with tabs[2]:
         wide_rows.append({
             "判定": "",
             "ワイド候補": pair_key,
-            "基準ワイド率%": base_wide_rate,
+            "想定ワイド率%": base_wide_rate,
             "理論下限倍": fair_wide_odds,
-            "最低確認倍": target_wide_odds,
+            "購入目安倍": target_wide_odds,
             "低評価側": low_eval,
             "現在複勝率%": cur_place,
             "基準複勝率%": base_place,
@@ -2512,18 +2503,34 @@ with tabs[2]:
             if len(top_wide_idx) >= 2:
                 break
         if top_wide_idx:
-            purchase_candidate_summary["holewide"] = " / ".join(df_wide.loc[top_wide_idx, "ワイド候補"].tolist())
+            _top_wide_labels = []
+            for _idx in top_wide_idx:
+                _pair = str(df_wide.loc[_idx, "ワイド候補"])
+                _odds = df_wide.loc[_idx, "購入目安倍"] if "購入目安倍" in df_wide.columns else None
+                if _odds is not None and pd.notna(_odds):
+                    _top_wide_labels.append(f"{_pair}（{float(_odds):.1f}倍以上）")
+                else:
+                    _top_wide_labels.append(_pair)
+            purchase_candidate_summary["holewide"] = " / ".join(_top_wide_labels)
         else:
             purchase_candidate_summary["holewide"] = "なし"
 
         if selected_wide_idx:
             df_wide.loc[selected_wide_idx, "判定"] = "参考"
-            st.info("穴ワイド参考候補：" + " / ".join(df_wide.loc[selected_wide_idx, "ワイド候補"].tolist()))
+            _sel_wide_labels = []
+            for _idx in selected_wide_idx:
+                _pair = str(df_wide.loc[_idx, "ワイド候補"])
+                _odds = df_wide.loc[_idx, "購入目安倍"] if "購入目安倍" in df_wide.columns else None
+                if _odds is not None and pd.notna(_odds):
+                    _sel_wide_labels.append(f"{_pair}（{float(_odds):.1f}倍以上）")
+                else:
+                    _sel_wide_labels.append(_pair)
+            st.info("穴ワイド参考候補：" + " / ".join(_sel_wide_labels))
         else:
             st.caption("穴ワイド参考候補はありません。")
 
         wide_cols = [
-            "判定", "ワイド候補", "基準ワイド率%", "理論下限倍", "最低確認倍", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
+            "判定", "ワイド候補", "想定ワイド率%", "理論下限倍", "購入目安倍", "低評価側", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "参考理由",
             "2車複的中率%", "想定ペア的%", "想定差", "平均配当", "ペア基準配当", "配当係数", "配当位置",
             "2車複回収率%", "想定回収率%", "回収差",
         ]
