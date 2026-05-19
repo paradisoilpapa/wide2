@@ -2283,50 +2283,6 @@ with tabs[2]:
             height=360,
         )
 
-    st.markdown("#### 3連複 1-2-全 引継ぎ用累積表")
-    sp_carry_rows = []
-    for label in ["仮想全体"]:
-        rec = payout_sanrenpuku12_all_total.get(label, new_payout_rec())
-        row = sanrenpuku12_row(label, rec)
-        sp_carry_rows.append({
-            "区分": label,
-            "対象N": row.get("対象N"),
-            "払戻合計SUM": row.get("払戻合計SUM"),
-            "的中H": row.get("的中H"),
-            "的中率%": row.get("的中率%"),
-            "平均配当": row.get("平均配当"),
-            "想定平均配当": row.get("想定平均配当"),
-            "平均配当差": row.get("平均配当差"),
-            "回収率%": row.get("回収率%"),
-            "ゾーン想定回収率%": row.get("ゾーン想定回収率%"),
-            "ゾーン回収差": row.get("ゾーン回収差"),
-        })
-    st.dataframe(pd.DataFrame(sp_carry_rows), use_container_width=True, hide_index=True, height=130)
-
-    st.markdown("#### 3連複 個別 引継ぎ用累積表｜1・2絡み")
-    tri_carry_rows = []
-    for label in ["仮想全体"]:
-        for key in TRIO_USED_KEYS:
-            rec = payout_sanrenpuku12_individual_total[label].get(key, new_payout_rec())
-            row = sanrenpuku12_individual_row(label, rec, key)
-            tri_carry_rows.append({
-                "区分": label,
-                "目": key,
-                "対象N": row.get("対象N"),
-                "払戻合計SUM": row.get("払戻合計SUM"),
-                "的中H": row.get("的中H"),
-                "的中率%": row.get("的中率%"),
-                "平均配当": row.get("平均配当"),
-                "基準平均配当": row.get("基準平均配当"),
-                "想定的中率%": row.get("想定的中率%"),
-                "想定回収率%": row.get("想定回収率%"),
-                "回収率%": row.get("回収率%"),
-                "回収差": row.get("回収差"),
-            })
-    st.dataframe(pd.DataFrame(tri_carry_rows), use_container_width=True, hide_index=True, height=260)
-
-    st.divider()
-
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
 
@@ -2348,7 +2304,71 @@ with tabs[2]:
             "回収率%": row.get("回収率%"),
             "回収差": round(float(row.get("回収率%")) - (float(PAIR_BASE_HIT_RATE_DEFAULTS.get(f"{a}-{b}", 0)) * float(PAIR_BASE_AVG_PAY_DEFAULTS.get(f"{a}-{b}", 0)) / 100.0), 1) if row.get("回収率%") is not None else None,
         })
-    st.dataframe(pd.DataFrame(carry_rows), use_container_width=True, hide_index=True, height=430)
+    df_carry = pd.DataFrame(carry_rows)
+    st.dataframe(
+        df_carry,
+        use_container_width=True,
+        hide_index=True,
+        height=max(120, 38 * (len(df_carry) + 1)),
+    )
+
+    st.divider()
+
+    st.markdown("#### 3連複 1-2-全 引継ぎ用累積表")
+    sp_carry_rows = []
+    for label in ["仮想全体"]:
+        rec = payout_sanrenpuku12_all_total.get(label, new_payout_rec())
+        row = sanrenpuku12_row(label, rec)
+        sp_carry_rows.append({
+            "区分": label,
+            "対象N": row.get("対象N"),
+            "払戻合計SUM": row.get("払戻合計SUM"),
+            "的中H": row.get("的中H"),
+            "的中率%": row.get("的中率%"),
+            "平均配当": row.get("平均配当"),
+            "想定平均配当": row.get("想定平均配当"),
+            "平均配当差": row.get("平均配当差"),
+            "回収率%": row.get("回収率%"),
+            "ゾーン想定回収率%": row.get("ゾーン想定回収率%"),
+            "ゾーン回収差": row.get("ゾーン回収差"),
+        })
+    df_sp_carry = pd.DataFrame(sp_carry_rows)
+    st.dataframe(
+        df_sp_carry,
+        use_container_width=True,
+        hide_index=True,
+        height=max(90, 38 * (len(df_sp_carry) + 1)),
+    )
+
+    st.markdown("#### 3連複 個別 引継ぎ用累積表｜1・2絡み")
+    tri_carry_rows = []
+    for label in ["仮想全体"]:
+        for key in TRIO_USED_KEYS:
+            rec = payout_sanrenpuku12_individual_total[label].get(key, new_payout_rec())
+            row = sanrenpuku12_individual_row(label, rec, key)
+            tri_carry_rows.append({
+                "区分": label,
+                "目": key,
+                "対象N": row.get("対象N"),
+                "払戻合計SUM": row.get("払戻合計SUM"),
+                "的中H": row.get("的中H"),
+                "的中率%": row.get("的中率%"),
+                "平均配当": row.get("平均配当"),
+                "基準平均配当": row.get("基準平均配当"),
+                "想定的中率%": row.get("想定的中率%"),
+                "想定回収率%": row.get("想定回収率%"),
+                "回収率%": row.get("回収率%"),
+                "回収差": row.get("回収差"),
+            })
+    df_tri_carry = pd.DataFrame(tri_carry_rows)
+    st.dataframe(
+        df_tri_carry,
+        use_container_width=True,
+        hide_index=True,
+        height=max(120, 38 * (len(df_tri_carry) + 1)),
+    )
+
+    st.divider()
 
     st.markdown("### 買い目確認")
     st.write("今日入力の個別2車複：評価1・評価2軸に必要なペアを自動集計")
