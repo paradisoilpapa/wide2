@@ -87,9 +87,77 @@ TRIO_12_ALL_BASE_AVG_PAYS = {
     "1-2-6": 1136,
     "1-2-7": 1545,
 }
+
+# 小倉ミッドナイトA級7車・直近2年の3連複全集計。
+# 3着目候補（評価3～7）の基準複勝率を作るために使用します。
+# 3-5-7は表に出ていないため0回として扱います。
+TRIO_FULL_BASE_COUNTS = {
+    "1-2-3": 101,
+    "1-2-4": 88,
+    "1-2-5": 57,
+    "1-3-5": 48,
+    "1-2-6": 44,
+    "1-3-4": 43,
+    "1-2-7": 30,
+    "1-4-5": 29,
+    "1-3-6": 24,
+    "2-4-5": 23,
+    "2-3-4": 21,
+    "2-3-5": 20,
+    "1-4-7": 19,
+    "1-5-6": 19,
+    "1-4-6": 19,
+    "3-4-5": 16,
+    "2-3-6": 13,
+    "2-4-6": 13,
+    "1-6-7": 11,
+    "2-5-6": 11,
+    "1-3-7": 11,
+    "2-3-7": 10,
+    "3-4-7": 9,
+    "3-4-6": 9,
+    "4-5-7": 8,
+    "2-4-7": 8,
+    "1-5-7": 7,
+    "2-5-7": 7,
+    "2-6-7": 6,
+    "3-5-6": 5,
+    "3-5-7": 0,
+    "4-6-7": 2,
+    "3-6-7": 2,
+    "4-5-6": 2,
+    "5-6-7": 1,
+}
 # 小倉2年分の3連複集計母数。
 # 2車複基準と揃えるため738Rを基準にします。
 TRIO_BASE_TOTAL_RACES = 738
+
+TRIO_BASE_PLACE_COUNTS = {r: 0 for r in range(1, FIELD_SIZE + 1)}
+for _trio_key, _cnt in TRIO_FULL_BASE_COUNTS.items():
+    for _r in [int(x) for x in _trio_key.split("-")]:
+        TRIO_BASE_PLACE_COUNTS[_r] += int(_cnt)
+
+# 小倉2年分3連複全集計から逆算した評価別基準複勝率。
+# 3連複1-2個別表では、1・2は軸として固定済みなので、3着目評価3～7だけ補正に使います。
+TRIO_BASE_PLACE_RATES = {
+    r: round(100.0 * cnt / TRIO_BASE_TOTAL_RACES, 1)
+    for r, cnt in TRIO_BASE_PLACE_COUNTS.items()
+}
+
+
+def place_state(diff) -> str:
+    """評価別3着内率の基準差を状態表示する。"""
+    if diff is None:
+        return ""
+    try:
+        d = float(diff)
+    except Exception:
+        return ""
+    if d >= 5.0:
+        return "来すぎ"
+    if d <= -5.0:
+        return "基準未満"
+    return "中庸"
 
 TRIO_12_ALL_EXPECTED_AVG_PAY = round(
     sum(TRIO_12_ALL_BASE_COUNTS[k] * TRIO_12_ALL_BASE_AVG_PAYS[k] for k in TRIO_12_ALL_BASE_COUNTS)
@@ -1907,10 +1975,57 @@ with tabs[2]:
     df_trio_ind = pd.DataFrame(trio_rows)
 
     if not df_trio_ind.empty:
+        # 3着目評価（3～7）の複勝率補正。
+        # 1・2は軸として固定済みなので、多重評価を避けるため補正対象にしない。
+        for idx in df_trio_ind.index:
+            try:
+                target_eval = int(str(df_trio_ind.loc[idx, "目"]).split("-")[-1])
+            except Exception:
+                target_eval = None
+
+            df_trio_ind.loc[idx, "3着目評価"] = target_eval
+            base_place = TRIO_BASE_PLACE_RATES.get(target_eval) if target_eval is not None else None
+            df_trio_ind.loc[idx, "3着目基準複勝率%"] = base_place
+
+            cur_place = None
+            if target_eval in rank_total:
+                rec_rank = rank_total.get(target_eval, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
+                n_rank = int(rec_rank.get("N", 0))
+                if n_rank > 0:
+                    cur_place = round(100.0 * (int(rec_rank.get("C1", 0)) + int(rec_rank.get("C2", 0)) + int(rec_rank.get("C3", 0))) / n_rank, 1)
+            df_trio_ind.loc[idx, "3着目現在複勝率%"] = cur_place
+
+            if cur_place is not None and base_place is not None:
+                place_diff = round(float(cur_place) - float(base_place), 1)
+            else:
+                place_diff = None
+            df_trio_ind.loc[idx, "3着目複勝差"] = place_diff
+            df_trio_ind.loc[idx, "3着目複勝状態"] = place_state(place_diff)
+
         # 推奨判定：未回収・明確な過熱・大幅上振れは除外。
+        # さらに3着目評価の波を加味する。
+        # 3着目が来すぎなら後追い警戒で除外。
+        # 評価6・7が基準未満なら「低評価不振」として除外し、ただ高配当だから買う形を避ける。
+        df_trio_ind["_place_over"] = df_trio_ind["3着目複勝状態"].eq("来すぎ")
+        df_trio_ind["_low_rank_cold"] = (
+            df_trio_ind["3着目評価"].fillna(0).astype(float).ge(6)
+            & df_trio_ind["3着目複勝状態"].eq("基準未満")
+        )
+        df_trio_ind["_place_bonus"] = (
+            df_trio_ind["3着目評価"].fillna(0).astype(float).between(3, 5)
+            & df_trio_ind["3着目複勝状態"].eq("基準未満")
+        )
+
+        df_trio_ind["3着目補正理由"] = ""
+        df_trio_ind.loc[df_trio_ind["_place_over"], "3着目補正理由"] = "3着目来すぎ"
+        df_trio_ind.loc[df_trio_ind["_low_rank_cold"], "3着目補正理由"] = "低評価不振"
+        df_trio_ind.loc[df_trio_ind["_place_bonus"], "3着目補正理由"] = "3着目戻り余地"
+
         df_trio_ind["_eligible"] = (
             (df_trio_ind["的中H"].fillna(0).astype(float) > 0)
             & ~(df_trio_ind["総合候補理由"].isin(["未回収除外", "的中率過熱除外", "後追い除外", "配当上振れ警戒"]))
+            & ~df_trio_ind["_place_over"]
+            & ~df_trio_ind["_low_rank_cold"]
         )
         df_trio_ind["_score"] = 9999.0
         for idx in df_trio_ind.index:
@@ -1931,6 +2046,11 @@ with tabs[2]:
                     score += float(roi_diff) / 20.0
             except Exception:
                 pass
+            try:
+                if bool(df_trio_ind.loc[idx, "_place_bonus"]):
+                    score -= 2.0
+            except Exception:
+                pass
             df_trio_ind.loc[idx, "_score"] = score
 
         selected_trio_idx = list(
@@ -1947,7 +2067,8 @@ with tabs[2]:
             st.warning("現在の推奨3連複はありません。1-2-全ではなくケン寄りです。")
 
         trio_cols = [
-            "判定", "目", "対象N", "的中H", "的中率%", "想定的中率%", "想定差",
+            "判定", "目", "3着目評価", "3着目現在複勝率%", "3着目基準複勝率%", "3着目複勝差", "3着目複勝状態", "3着目補正理由",
+            "対象N", "的中H", "的中率%", "想定的中率%", "想定差",
             "平均配当", "基準平均配当", "平均配当差", "配当係数", "配当位置", "配当戻り余地",
             "回収率%", "想定回収率%", "回収差", "状態", "総合候補理由",
         ]
