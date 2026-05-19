@@ -89,7 +89,7 @@ TRIO_12_ALL_BASE_AVG_PAYS = {
 }
 
 # 小倉ミッドナイトA級7車・直近2年の3連複全集計。
-# 3着目候補（評価3～7）の基準複勝率を作るために使用します。
+# 候補（評価3～7）の基準複勝率を作るために使用します。
 # 3-5-7は表に出ていないため0回として扱います。
 TRIO_FULL_BASE_COUNTS = {
     "1-2-3": 101,
@@ -138,7 +138,7 @@ for _trio_key, _cnt in TRIO_FULL_BASE_COUNTS.items():
         TRIO_BASE_PLACE_COUNTS[_r] += int(_cnt)
 
 # 小倉2年分3連複全集計から逆算した評価別基準複勝率。
-# 3連複1-2個別表では、1・2は軸として固定済みなので、3着目評価3～7だけ補正に使います。
+# 3連複1-2個別表では、1・2は軸として固定済みなので、評価3～7だけ補正に使います。
 TRIO_BASE_PLACE_RATES = {
     r: round(100.0 * cnt / TRIO_BASE_TOTAL_RACES, 1)
     for r, cnt in TRIO_BASE_PLACE_COUNTS.items()
@@ -1975,7 +1975,7 @@ with tabs[2]:
     df_trio_ind = pd.DataFrame(trio_rows)
 
     if not df_trio_ind.empty:
-        # 3着目評価（3～7）の複勝率補正。
+        # 評価（3～7）の複勝率補正。
         # 1・2は軸として固定済みなので、多重評価を避けるため補正対象にしない。
         for idx in df_trio_ind.index:
             try:
@@ -1983,9 +1983,9 @@ with tabs[2]:
             except Exception:
                 target_eval = None
 
-            df_trio_ind.loc[idx, "3着目評価"] = target_eval
+            df_trio_ind.loc[idx, "評価"] = target_eval
             base_place = TRIO_BASE_PLACE_RATES.get(target_eval) if target_eval is not None else None
-            df_trio_ind.loc[idx, "3着目基準複勝率%"] = base_place
+            df_trio_ind.loc[idx, "基準複勝率%"] = base_place
 
             cur_place = None
             if target_eval in rank_total:
@@ -1993,33 +1993,33 @@ with tabs[2]:
                 n_rank = int(rec_rank.get("N", 0))
                 if n_rank > 0:
                     cur_place = round(100.0 * (int(rec_rank.get("C1", 0)) + int(rec_rank.get("C2", 0)) + int(rec_rank.get("C3", 0))) / n_rank, 1)
-            df_trio_ind.loc[idx, "3着目現在複勝率%"] = cur_place
+            df_trio_ind.loc[idx, "現在複勝率%"] = cur_place
 
             if cur_place is not None and base_place is not None:
                 place_diff = round(float(cur_place) - float(base_place), 1)
             else:
                 place_diff = None
-            df_trio_ind.loc[idx, "3着目複勝差"] = place_diff
-            df_trio_ind.loc[idx, "3着目複勝状態"] = place_state(place_diff)
+            df_trio_ind.loc[idx, "複勝差"] = place_diff
+            df_trio_ind.loc[idx, "複勝状態"] = place_state(place_diff)
 
         # 推奨判定：未回収・明確な過熱・大幅上振れは除外。
-        # さらに3着目評価の波を加味する。
-        # 3着目が来すぎなら後追い警戒で除外。
+        # さらに評価の波を加味する。
+        # 来すぎなら後追い警戒で除外。
         # 評価6・7が基準未満なら「低評価不振」として除外し、ただ高配当だから買う形を避ける。
-        df_trio_ind["_place_over"] = df_trio_ind["3着目複勝状態"].eq("来すぎ")
+        df_trio_ind["_place_over"] = df_trio_ind["複勝状態"].eq("来すぎ")
         df_trio_ind["_low_rank_cold"] = (
-            df_trio_ind["3着目評価"].fillna(0).astype(float).ge(6)
-            & df_trio_ind["3着目複勝状態"].eq("基準未満")
+            df_trio_ind["評価"].fillna(0).astype(float).ge(6)
+            & df_trio_ind["複勝状態"].eq("基準未満")
         )
         df_trio_ind["_place_bonus"] = (
-            df_trio_ind["3着目評価"].fillna(0).astype(float).between(3, 5)
-            & df_trio_ind["3着目複勝状態"].eq("基準未満")
+            df_trio_ind["評価"].fillna(0).astype(float).between(3, 5)
+            & df_trio_ind["複勝状態"].eq("基準未満")
         )
 
-        df_trio_ind["3着目補正理由"] = ""
-        df_trio_ind.loc[df_trio_ind["_place_over"], "3着目補正理由"] = "3着目来すぎ"
-        df_trio_ind.loc[df_trio_ind["_low_rank_cold"], "3着目補正理由"] = "低評価不振"
-        df_trio_ind.loc[df_trio_ind["_place_bonus"], "3着目補正理由"] = "3着目戻り余地"
+        df_trio_ind["補正理由"] = ""
+        df_trio_ind.loc[df_trio_ind["_place_over"], "補正理由"] = "来すぎ"
+        df_trio_ind.loc[df_trio_ind["_low_rank_cold"], "補正理由"] = "低評価不振"
+        df_trio_ind.loc[df_trio_ind["_place_bonus"], "補正理由"] = "戻り余地"
 
         df_trio_ind["_eligible"] = (
             (df_trio_ind["的中H"].fillna(0).astype(float) > 0)
@@ -2067,7 +2067,7 @@ with tabs[2]:
             st.warning("現在の推奨3連複はありません。1-2-全ではなくケン寄りです。")
 
         trio_cols = [
-            "判定", "目", "3着目評価", "3着目現在複勝率%", "3着目基準複勝率%", "3着目複勝差", "3着目複勝状態", "3着目補正理由",
+            "判定", "目", "評価", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "補正理由",
             "対象N", "的中H", "的中率%", "想定的中率%", "想定差",
             "平均配当", "基準平均配当", "平均配当差", "配当係数", "配当位置", "配当戻り余地",
             "回収率%", "想定回収率%", "回収差", "状態", "総合候補理由",
