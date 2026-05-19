@@ -5,6 +5,7 @@ from typing import List, Dict, Tuple
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
 st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v10.0｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応")
@@ -895,12 +896,30 @@ with tabs[0]:
             )
 
     st.divider()
-    st.markdown("### 入力後リンク")
-    st.markdown(
-        "[前日までの集計（累積）へ](#prev-aggregate)　｜　"
-        "[分析結果へ](#analysis-result)"
+    st.markdown("### 入力後操作")
+    components.html(
+        """
+        <div style="padding: 6px 0 12px 0;">
+          <button
+            onclick="window.parent.scrollTo({top: 0, behavior: 'smooth'});"
+            style="
+              font-size: 16px;
+              font-weight: 700;
+              padding: 10px 18px;
+              border-radius: 10px;
+              border: 1px solid #c9c9c9;
+              background: #ffffff;
+              cursor: pointer;
+              box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+            "
+          >
+            ページトップに戻る
+          </button>
+        </div>
+        """,
+        height=64,
     )
-    st.caption("日次入力後に、下部から次の確認欄へ移動するためのリンクです。")
+    st.caption("入力後はこのボタンでページ上部へ戻り、上部タブから『前日までの集計（累積）』『分析結果』へ移動してください。")
 
 
 # =========================
