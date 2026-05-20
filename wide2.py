@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.1｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜3連複5軸限定")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.3｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1479,25 +1479,24 @@ with tabs[0]:
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([0.8, 0.9, 2.8, 1.05, 1.0, 1.0])
+        cols_hdr = st.columns([0.8, 0.9, 2.8, 1.05, 1.0])
         cols_hdr[0].markdown("**R**")
         cols_hdr[1].markdown("**頭数**")
         cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
         cols_hdr[3].markdown("**着順(～3桁)**")
         cols_hdr[4].markdown("**2車複**")
-        cols_hdr[5].markdown("**3連複**")
 
         daily_inputs = []
 
         for i in range(1, 37):
-            c1, c2, c3, c4, c5, c6 = st.columns([0.8, 0.9, 2.8, 1.05, 1.0, 1.0])
+            c1, c2, c3, c4, c5 = st.columns([0.8, 0.9, 2.8, 1.05, 1.0])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
             vline = c3.text_input("", key=f"vline_{i}", value="")
             fin = c4.text_input("", key=f"fin_{i}", value="")
             pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
-            pay_3f = c6.number_input("", key=f"pay3f_{i}", min_value=0, value=0, step=10)
+            pay_3f = 0
             pay_2t = 0
 
             daily_inputs.append(
@@ -1654,42 +1653,9 @@ with tabs[1]:
 
         st.divider()
 
-        st.markdown("## 3連複 1-2-全 引継ぎ入力（累積）")
-        st.caption("全レースで1-2-全を買った仮想集計です。7車は1R=5点なので、KSUMはN×5で自動計算します。")
+        # 3連複入力はクロスフォーメーション運用では使用しないため非表示。
         sanrenpuku12_inputs = []
-        h_sp = st.columns([1.4, 0.9, 1.1, 0.8])
-        h_sp[0].markdown("**区分**")
-        h_sp[1].markdown("**N**")
-        h_sp[2].markdown("**SUM**")
-        h_sp[3].markdown("**H**")
-        for label in ["仮想全体"]:
-            safe = label.replace(" ", "_")
-            c0, c1, c2, c3 = st.columns([1.4, 0.9, 1.1, 0.8])
-            c0.write(label)
-            N = c1.number_input("", key=f"prev_sp12_{safe}_N", min_value=0, value=0, label_visibility="collapsed")
-            SUM = c2.number_input("", key=f"prev_sp12_{safe}_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
-            H = c3.number_input("", key=f"prev_sp12_{safe}_H", min_value=0, value=0, label_visibility="collapsed")
-            sanrenpuku12_inputs.append((label, int(N), int(SUM), int(H)))
-
-        st.markdown("## 3連複 個別 引継ぎ入力（累積｜対象5軸）")
-        st.caption("対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）から派生する3連複だけを転記します。通常は日次入力で自動加算されます。対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じです。")
         sanrenpuku12_individual_inputs = []
-        for label in ["仮想全体"]:
-            st.markdown(f"**{label}**")
-            h_tri = st.columns([1.2, 0.85, 1.05, 0.75])
-            h_tri[0].markdown("**目**")
-            h_tri[1].markdown("**N**")
-            h_tri[2].markdown("**SUM**")
-            h_tri[3].markdown("**H**")
-            for key in TRIO_USED_KEYS:
-                safe_label = label.replace(" ", "_")
-                safe_key = key.replace("-", "_")
-                c0, c1, c2, c3 = st.columns([1.2, 0.85, 1.05, 0.75])
-                c0.write(key)
-                N = c1.number_input("", key=f"prev_tri12ind_{safe_label}_{safe_key}_N", min_value=0, value=0, label_visibility="collapsed")
-                SUM = c2.number_input("", key=f"prev_tri12ind_{safe_label}_{safe_key}_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
-                H = c3.number_input("", key=f"prev_tri12ind_{safe_label}_{safe_key}_H", min_value=0, value=0, label_visibility="collapsed")
-                sanrenpuku12_individual_inputs.append((label, key, int(N), int(SUM), int(H)))
 
         st.divider()
 
@@ -2101,24 +2067,9 @@ with tabs[2]:
     ev_diagnosis_frames = []
     cross_formation_summary = None
 
-    st.markdown("#### 投資EV診断設定")
-    c_ev1, c_ev2 = st.columns([1.2, 3])
-    condition_label = c_ev1.selectbox(
-        "condition_margin",
-        options=["同条件=0.95", "他場=0.90", "デイ/9車=0.85"],
-        index=1,
-        key="ev_condition_margin_label",
-    )
-    condition_margin_map = {
-        "同条件=0.95": 0.95,
-        "他場=0.90": 0.90,
-        "デイ/9車=0.85": 0.85,
-    }
-    diagnosis_condition_margin = float(condition_margin_map.get(condition_label, 0.90))
-    c_ev2.caption(
-        "初期実装は既存推奨買い目を変えず、p_adj / p_safe / 必要オッズ / Confidence を診断表示するだけです。"
-        " 現在オッズ未入力のためEV/RaceEVは確定せず、必要オッズを逆算します。参考EVは過去平均配当ベースです。"
-    )
+    # クロスフォーメーション診断では、通常画面に投資EV設定UIを出さない。
+    # 初期値は他場想定の安全係数0.90で固定し、必要なら後続版で詳細設定へ戻す。
+    diagnosis_condition_margin = 0.90
 
     st.divider()
     st.divider()
@@ -2574,13 +2525,11 @@ with tabs[2]:
     render_sortable_table(df_pairs)
 
     st.markdown("### 1-2ゾーン基礎集計")
-    st.caption("全体に対して、2車複1-2そのものがどれくらい機能しているかを確認します。3連複個別表は、この1-2ゾーンの上に乗せる買い目選別です。")
+    st.caption("全体に対して、2車複1-2そのものがどれくらい機能しているかを確認します。")
 
     rec_12_base = payout_nishafuku_total.get(nishafuku_label(1, 2), new_payout_rec())
-    rec_12_trio_all = payout_sanrenpuku12_all_total.get("仮想全体", new_payout_rec())
     base_rows = [
         nishafuku12_base_row("2車複 1-2｜全体", rec_12_base),
-        sanrenpuku12_row("3連複 1-2-全｜全体", rec_12_trio_all),
     ]
     df_12_base = pd.DataFrame(base_rows)
     base_cols = [
@@ -2614,224 +2563,12 @@ with tabs[2]:
     try:
         n_all = int(rec_12_base.get("N", 0))
         h_2f = int(rec_12_base.get("H", 0))
-        h_3f = int(rec_12_trio_all.get("H", 0))
         if n_all > 0:
-            st.caption(
-                f"1-2基礎：全体{n_all}R中、2車複1-2は{h_2f}R、"
-                f"3連複1-2-全条件（1と2が両方3着内）は{h_3f}Rです。"
-            )
+            st.caption(f"1-2基礎：全体{n_all}R中、2車複1-2は{h_2f}Rです。")
     except Exception:
         pass
 
-    st.markdown("### 3連複 1-2-全 ゾーン検証")
-    st.caption("入力済み全レースで3連複1-2-全を買った仮想集計です。想定平均配当は小倉2年分3連複全集計の1-2-全加重平均756円を使用します。")
-
-    with st.expander("3連複1-2-全 固定想定値", expanded=False):
-        st.write(
-            f"想定的中率：{TRIO_12_ALL_EXPECTED_HIT_RATE:.1f}% ／ "
-            f"想定平均配当：{TRIO_12_ALL_EXPECTED_AVG_PAY:.1f}円 ／ "
-            f"ゾーン想定回収率：{TRIO_12_ALL_EXPECTED_ROI:.1f}%"
-        )
-        st.dataframe(
-            pd.DataFrame([
-                {
-                    "目": k,
-                    "回数": TRIO_12_ALL_BASE_COUNTS[k],
-                    "平均配当": TRIO_12_ALL_BASE_AVG_PAYS[k],
-                }
-                for k in TRIO_12_ALL_BASE_COUNTS
-            ]),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    sp_rows = []
-    for label in ["仮想全体"]:
-        rec = payout_sanrenpuku12_all_total.get(label, new_payout_rec())
-        sp_rows.append(sanrenpuku12_row("3連複 1-2-全｜全体", rec))
-    df_sp12 = pd.DataFrame(sp_rows)
-    sp_cols = [
-        "型",
-        "対象N",
-        "総点数KSUM",
-        "投資額換算",
-        "払戻合計SUM",
-        "的中H",
-        "的中率%",
-        "平均配当",
-        "想定平均配当",
-        "平均配当差",
-        "的中率差",
-        "回収率%",
-        "想定1-2両方3着内率%",
-        "7車5点_損益分岐平均配当",
-        "ゾーン想定回収率%",
-        "ゾーン回収差",
-    ]
-    st.dataframe(df_sp12[[c for c in sp_cols if c in df_sp12.columns]], use_container_width=True, hide_index=True)
-
-    st.markdown("#### 3連複 個別候補｜対象5軸独立方式")
-    st.caption("対象5軸（1-2 / 1-3 / 1-4 / 2-3 / 2-4）を、2車複本線とは連動させず常時チェックします。各軸の3連複候補を小倉基準で個別判定し、最大4点までに抑えます。")
-    trio_pick_n = st.number_input(
-        "推奨3連複 最大点数",
-        key="trio_axis_pick_n",
-        min_value=1,
-        max_value=4,
-        value=4,
-        step=1,
-    )
-    st.caption("3連複軸候補は 1-2 / 1-3 / 1-4 / 2-3 / 2-4 の5つ固定です。2車複本線に出ているかどうかとは切り離して判定します。")
-
-    # 3連複は2車複本線と連動させず、対象5軸を常時チェックする。
-    axis_pairs = list(TRIO_AXIS_ALLOWED_KEYS)
-
-    trio_rows = []
-    for axis_key in axis_pairs:
-        try:
-            a, b = [int(x) for x in axis_key.split("-")]
-        except Exception:
-            continue
-        for target in range(1, FIELD_SIZE + 1):
-            if target in (a, b):
-                continue
-            key = sanrenpuku12_key(a, b, target)
-            if key not in TRIO_FULL_BASE_COUNTS:
-                continue
-            rec = payout_sanrenpuku12_individual_total["仮想全体"].get(key, new_payout_rec())
-            row = sanrenpuku_individual_row(f"3連複 {key}", rec, key)
-            row["軸"] = axis_key
-            row["評価"] = target
-            trio_rows.append(row)
-
-    df_trio_ind = pd.DataFrame(trio_rows)
-
-    # 対象5軸を独立チェックすると、例：1-2-3 が 1-2軸 / 1-3軸 / 2-3軸の
-    # 複数ルートから生成される。表示・推奨では同じ3連複目を重複させない。
-    # 軸優先順は TRIO_AXIS_ALLOWED_KEYS の並びを採用し、最初に出たものだけ残す。
-    if not df_trio_ind.empty:
-        axis_priority = {axis: i for i, axis in enumerate(TRIO_AXIS_ALLOWED_KEYS)}
-        df_trio_ind["_axis_priority"] = df_trio_ind["軸"].map(axis_priority).fillna(9999).astype(int)
-        df_trio_ind = (
-            df_trio_ind
-            .sort_values(["目", "_axis_priority"])
-            .drop_duplicates(subset=["目"], keep="first")
-            .sort_values(["_axis_priority", "目"])
-            .reset_index(drop=True)
-        )
-
-    if not df_trio_ind.empty:
-        for idx in df_trio_ind.index:
-            target_eval = int(df_trio_ind.loc[idx, "評価"])
-            base_place = TRIO_BASE_PLACE_RATES.get(target_eval)
-            df_trio_ind.loc[idx, "基準複勝率%"] = base_place
-
-            cur_place = None
-            if target_eval in rank_total:
-                rec_rank = rank_total.get(target_eval, {"N": 0, "C1": 0, "C2": 0, "C3": 0})
-                n_rank = int(rec_rank.get("N", 0))
-                if n_rank > 0:
-                    cur_place = round(100.0 * (int(rec_rank.get("C1", 0)) + int(rec_rank.get("C2", 0)) + int(rec_rank.get("C3", 0))) / n_rank, 1)
-            df_trio_ind.loc[idx, "現在複勝率%"] = cur_place
-
-            if cur_place is not None and base_place is not None:
-                place_diff = round(float(cur_place) - float(base_place), 1)
-            else:
-                place_diff = None
-            df_trio_ind.loc[idx, "複勝差"] = place_diff
-            df_trio_ind.loc[idx, "複勝状態"] = place_state(place_diff)
-
-        df_trio_ind["_place_over"] = df_trio_ind["複勝状態"].eq("来すぎ")
-        df_trio_ind["_low_rank_cold"] = (
-            df_trio_ind["評価"].fillna(0).astype(float).ge(6)
-            & df_trio_ind["複勝状態"].eq("基準未満")
-        )
-        df_trio_ind["_place_bonus"] = (
-            df_trio_ind["評価"].fillna(0).astype(float).between(3, 5)
-            & df_trio_ind["複勝状態"].eq("基準未満")
-        )
-
-        df_trio_ind["補正理由"] = ""
-        df_trio_ind.loc[df_trio_ind["_place_over"], "補正理由"] = "来すぎ"
-        df_trio_ind.loc[df_trio_ind["_low_rank_cold"], "補正理由"] = "低評価不振"
-        df_trio_ind.loc[df_trio_ind["_place_bonus"], "補正理由"] = "戻り余地"
-
-        df_trio_ind["_eligible"] = (
-            (df_trio_ind["的中H"].fillna(0).astype(float) > 0)
-            & ~(df_trio_ind["総合候補理由"].astype(str).str.contains("未回収除外|的中率過熱除外|後追い除外|配当上振れ警戒", regex=True, na=False))
-            & ~df_trio_ind["_place_over"]
-            & ~df_trio_ind["_low_rank_cold"]
-        )
-        df_trio_ind["_score"] = 9999.0
-        for idx in df_trio_ind.index:
-            diff = df_trio_ind.loc[idx, "想定差"]
-            coef = df_trio_ind.loc[idx, "配当係数"]
-            roi_diff = df_trio_ind.loc[idx, "回収差"]
-            score = 0.0
-            try:
-                score += abs(float(diff)) if pd.notna(diff) else 20.0
-            except Exception:
-                score += 20.0
-            try:
-                score += abs(float(coef) - 1.0) * 8.0 if pd.notna(coef) else 10.0
-            except Exception:
-                score += 10.0
-            try:
-                if pd.notna(roi_diff) and float(roi_diff) > 0:
-                    score += float(roi_diff) / 20.0
-            except Exception:
-                pass
-            try:
-                if bool(df_trio_ind.loc[idx, "_place_bonus"]):
-                    score -= 2.0
-            except Exception:
-                pass
-            df_trio_ind.loc[idx, "_score"] = score
-
-        selected_trio_idx = []
-        used_trio_keys = set()
-        for idx, r in df_trio_ind.loc[df_trio_ind["_eligible"]].sort_values(["_score", "軸", "目"]).iterrows():
-            trio_key = str(r.get("目"))
-            if trio_key in used_trio_keys:
-                continue
-            selected_trio_idx.append(idx)
-            used_trio_keys.add(trio_key)
-            if len(selected_trio_idx) >= int(trio_pick_n):
-                break
-
-        df_trio_ind.loc[selected_trio_idx, "判定"] = "推奨"
-        recommended_trio = df_trio_ind.loc[selected_trio_idx, "目"].tolist()
-        if recommended_trio:
-            purchase_candidate_summary["trio"] = " / ".join(recommended_trio)
-            st.success("現在の推奨3連複：" + " / ".join(recommended_trio))
-        else:
-            purchase_candidate_summary["trio"] = "なし（ケン寄り）"
-            st.warning("現在の推奨3連複はありません。ケン寄りです。")
-
-        df_trio_ind = calculate_ev_metrics(
-            df_trio_ind,
-            bet_type="3連複",
-            condition_margin=diagnosis_condition_margin,
-        )
-        _trio_pick_mask = df_trio_ind["判定"].astype(str).eq("推奨")
-        if _trio_pick_mask.any():
-            ev_diagnosis_frames.append(df_trio_ind.loc[_trio_pick_mask].copy())
-
-        trio_cols = [
-            "判定", "目", "現在複勝率%", "基準複勝率%", "複勝差", "複勝状態", "補正理由",
-            "対象N", "的中H", "的中率%", "想定的中率%", "想定差",
-            "平均配当", "基準平均配当", "平均配当差", "配当係数", "配当位置", "配当戻り余地",
-            "回収率%", "想定回収率%", "回収差", "状態", "総合候補理由",
-            "p_adj%", "p_safe%", "最低必要オッズ", "最低必要払戻", "Confidence", "参考odds", "基準odds", "odds_ratio", "EV判定",
-        ]
-        df_trio_show = df_trio_ind[[c for c in trio_cols if c in df_trio_ind.columns]]
-        df_trio_show = drop_blank_display_columns(df_trio_show)
-        st.dataframe(
-            df_trio_show,
-            use_container_width=True,
-            hide_index=True,
-            height=table_auto_height(df_trio_show),
-        )
-
+    # 3連複検証・推奨表示はクロスフォーメーション運用では非表示。
 
     # 評価別テーブル直下に、クロスフォーメーションだけを表示する。
     # 2車複本線・注はクロスフォーメーション内に内包されるため、通常表示では出さない。
@@ -2920,59 +2657,7 @@ with tabs[2]:
 
     st.divider()
 
-    st.markdown("#### 3連複 1-2-全 引継ぎ用累積表")
-    sp_carry_rows = []
-    for label in ["仮想全体"]:
-        rec = payout_sanrenpuku12_all_total.get(label, new_payout_rec())
-        row = sanrenpuku12_row(label, rec)
-        sp_carry_rows.append({
-            "区分": label,
-            "対象N": row.get("対象N"),
-            "払戻合計SUM": row.get("払戻合計SUM"),
-            "的中H": row.get("的中H"),
-            "的中率%": row.get("的中率%"),
-            "平均配当": row.get("平均配当"),
-            "想定平均配当": row.get("想定平均配当"),
-            "平均配当差": row.get("平均配当差"),
-            "回収率%": row.get("回収率%"),
-            "ゾーン想定回収率%": row.get("ゾーン想定回収率%"),
-            "ゾーン回収差": row.get("ゾーン回収差"),
-        })
-    df_sp_carry = pd.DataFrame(sp_carry_rows)
-    st.dataframe(
-        df_sp_carry,
-        use_container_width=True,
-        hide_index=True,
-        height=max(90, 38 * (len(df_sp_carry) + 1)),
-    )
-
-    st.markdown("#### 3連複 個別 引継ぎ用累積表｜対象5軸")
-    tri_carry_rows = []
-    for label in ["仮想全体"]:
-        for key in TRIO_USED_KEYS:
-            rec = payout_sanrenpuku12_individual_total[label].get(key, new_payout_rec())
-            row = sanrenpuku12_individual_row(label, rec, key)
-            tri_carry_rows.append({
-                "区分": label,
-                "目": key,
-                "対象N": row.get("対象N"),
-                "払戻合計SUM": row.get("払戻合計SUM"),
-                "的中H": row.get("的中H"),
-                "的中率%": row.get("的中率%"),
-                "平均配当": row.get("平均配当"),
-                "基準平均配当": row.get("基準平均配当"),
-                "想定的中率%": row.get("想定的中率%"),
-                "想定回収率%": row.get("想定回収率%"),
-                "回収率%": row.get("回収率%"),
-                "回収差": row.get("回収差"),
-            })
-    df_tri_carry = pd.DataFrame(tri_carry_rows)
-    st.dataframe(
-        df_tri_carry,
-        use_container_width=True,
-        hide_index=True,
-        height=max(120, 38 * (len(df_tri_carry) + 1)),
-    )
+    # 3連複引継ぎ表は非表示。
 
     st.divider()
 
