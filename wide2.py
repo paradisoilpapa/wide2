@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.3｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.4｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1234,9 +1234,14 @@ def _rank_pair_candidate_row(row: pd.Series) -> float:
 
 def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[PairKey, int]) -> dict | None:
     """
-    既存の2車複本線/注を使い、補助4点のクロスフォーメーション A◯-B△ を1つだけ作る。
-    A-Bは本線優先、なければ注。◯はB側の最有力ヒモ、△はA側の最有力ヒモ。
-    通常表示は型だけにし、買い目展開は確認用に回す。
+    補助4点のクロスフォーメーション A◯-B△ を1つだけ作る。
+
+    v11.4方針：
+    - A-Bは既存の2車複「本線」を優先。なければ「注」。
+    - ◯・△は単品ヒモの順位ではなく、A◯-B△で内部展開される4点全体の
+      想定的中率が最大になる組み合わせを全探索で選ぶ。
+    - 内部4点は A-B / A-△ / B-◯ / ◯-△。
+    - クロスフォーメーションは常に1型だけ。BOX化を避ける。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -1255,87 +1260,71 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         A, B = [int(x) for x in center_key.split("-")]
     except Exception:
         return None
-
-    # 候補母集団：注になり得るヒモを優先しつつ、既存候補理由が残っているものを使う。
-    valid = work.copy()
-    if "的中H" in valid.columns:
-        valid = valid[valid["的中H"].fillna(0).astype(float) > 0]
-    if valid.empty:
+    if A == B:
         return None
 
-    def side_candidates(axis: int, exclude_opp: int) -> list[int]:
-        side = valid[valid.get("軸番号", pd.Series(dtype=float)).fillna(-1).astype(int).eq(int(axis))].copy()
-        if side.empty:
-            # 2車複は昇順表示なので、軸番号列にない場合はペアキーから拾う。
-            rows = []
-            for _, r in valid.iterrows():
-                try:
-                    a, b = [int(x) for x in str(r.get("ペアキー")).split("-")]
-                except Exception:
-                    continue
-                if axis in (a, b):
-                    rr = r.copy()
-                    rr["相手"] = b if a == axis else a
-                    rows.append(rr)
-            side = pd.DataFrame(rows) if rows else pd.DataFrame()
-        if side.empty or "相手" not in side.columns:
-            return []
-        side = side[side["相手"].fillna(-1).astype(int).ne(int(exclude_opp))].copy()
-        side = side[side["相手"].fillna(-1).astype(int).ne(int(axis))].copy()
-        if side.empty:
-            return []
-        side["_cf_score"] = side.apply(_rank_pair_candidate_row, axis=1)
-        out = []
-        for _, r in side.sort_values(["_cf_score", "相手"]).iterrows():
-            try:
-                opp = int(r.get("相手"))
-            except Exception:
-                continue
-            if opp not in out:
-                out.append(opp)
-        return out
+    ranks = [1, 2, 3, 4, 5, 6, 7]
 
-    # ◯ = B側の最有力ヒモ、△ = A側の最有力ヒモ
-    maru_candidates = side_candidates(B, A)
-    delta_candidates = side_candidates(A, B)
-    if not maru_candidates or not delta_candidates:
-        return None
-    maru = maru_candidates[0]
-    delta = delta_candidates[0]
-
-    # 同じ車番ならB側（◯）を次点に落として譲る。
-    if maru == delta:
-        for cand in maru_candidates[1:]:
-            if cand != delta:
-                maru = cand
-                break
-    if maru == delta:
-        for cand in delta_candidates[1:]:
-            if cand != maru:
-                delta = cand
-                break
-    if maru == delta or len({A, B, maru, delta}) < 4:
-        return None
-
-    form_key = f"{A}{maru}-{B}{delta}"
-    pair_keys = [
-        _pair_key_norm(A, B),
-        _pair_key_norm(A, delta),
-        _pair_key_norm(B, maru),
-        _pair_key_norm(maru, delta),
-    ]
-    pair_keys = [x for x in pair_keys if x]
-    # 念のため重複が出たら不採用。4点補助を守る。
-    if len(set(pair_keys)) != 4:
-        return None
-
-    hit_rates = []
-    detail = []
-    for pk in pair_keys:
+    def pair_rate(pk: str) -> float:
         hr = _pair_hit_rate_from_pair12_total(pk, pair12_counts)
-        hit_rates.append(hr if hr is not None else 0.0)
-        detail.append({"買い目": pk, "現在的中率%": hr})
-    total_hit = round(sum(hit_rates), 1) if hit_rates else None
+        return float(hr) if hr is not None else 0.0
+
+    candidates = []
+    for maru in ranks:
+        if maru in (A, B):
+            continue
+        for delta in ranks:
+            if delta in (A, B, maru):
+                continue
+
+            pair_keys = [
+                _pair_key_norm(A, B),       # 中心
+                _pair_key_norm(A, delta),   # A側ズレ
+                _pair_key_norm(B, maru),    # B側ズレ
+                _pair_key_norm(maru, delta) # ズレ同士
+            ]
+            if len(set(pair_keys)) != 4:
+                continue
+
+            detail = []
+            hit_rates = []
+            for pk in pair_keys:
+                hr = pair_rate(pk)
+                hit_rates.append(hr)
+                detail.append({"買い目": pk, "現在的中率%": round(hr, 1)})
+
+            total_hit = round(sum(hit_rates), 1)
+            min_non_center = min(hit_rates[1:]) if len(hit_rates) >= 4 else 0.0
+            # 同点時の優先：合計的中率 → 非中心3点の底上げ → ◯△が近い評価 → 型の安定順
+            closeness_penalty = abs(maru - delta) * 0.01 + (maru + delta) * 0.001
+            sort_score = (
+                total_hit,
+                round(min_non_center, 3),
+                -closeness_penalty,
+            )
+            form_key = f"{A}{maru}-{B}{delta}"
+            candidates.append({
+                "方式": "クロスフォーメーション",
+                "型": form_key,
+                "中心": center_key,
+                "A": A,
+                "B": B,
+                "◯": maru,
+                "△": delta,
+                "買い目": pair_keys,
+                "想定的中率%": total_hit,
+                "非中心最低的中率%": round(min_non_center, 1),
+                "detail": detail,
+                "_sort_score": sort_score,
+            })
+
+    if not candidates:
+        return None
+
+    candidates = sorted(candidates, key=lambda x: x["_sort_score"], reverse=True)
+    best = candidates[0]
+    total_hit = best.get("想定的中率%")
+
     if total_hit is None:
         state = ""
     elif total_hit >= 50.0:
@@ -1347,8 +1336,6 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
     else:
         state = "低め"
 
-    # 2車複4点を100円ずつ買う前提。
-    # 現在オッズ未入力時は、EV1.10に必要な平均払戻だけを表示する。
     if total_hit and total_hit > 0:
         need_avg_pay_ev110 = round(400.0 * 1.10 / (float(total_hit) / 100.0), 0)
         need_avg_odds_ev110 = round(need_avg_pay_ev110 / 100.0, 2)
@@ -1356,21 +1343,28 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         need_avg_pay_ev110 = None
         need_avg_odds_ev110 = None
 
-    return {
-        "方式": "クロスフォーメーション",
-        "型": form_key,
-        "中心": center_key,
-        "A": A,
-        "B": B,
-        "◯": maru,
-        "△": delta,
-        "買い目": pair_keys,
-        "想定的中率%": total_hit,
+    # 上位候補を確認用に残す。通常表示には出さない。
+    top_rows = []
+    for c in candidates[:10]:
+        if c.get("想定的中率%") and c.get("想定的中率%") > 0:
+            need_pay = round(400.0 * 1.10 / (float(c.get("想定的中率%")) / 100.0), 0)
+        else:
+            need_pay = None
+        top_rows.append({
+            "型": c.get("型"),
+            "想定的中率%": c.get("想定的中率%"),
+            "非中心最低的中率%": c.get("非中心最低的中率%"),
+            "EV1.10必要平均払戻": need_pay,
+        })
+
+    best.update({
         "EV1.10必要平均払戻": need_avg_pay_ev110,
         "EV1.10必要平均オッズ": need_avg_odds_ev110,
         "状態": state,
-        "detail": detail,
-    }
+        "candidate_rows": top_rows,
+    })
+    best.pop("_sort_score", None)
+    return best
 
 def race_ev_summary(df: pd.DataFrame, stake_col: str = "stake") -> dict:
     """選ばれた買い目群のRaceEV/RaceConfidenceを計算する。"""
@@ -2623,6 +2617,15 @@ with tabs[2]:
                         "状態": cf.get("状態"),
                     }
                 )
+                cf_candidates = pd.DataFrame(cross_formation_summary.get("candidate_rows", []))
+                if not cf_candidates.empty:
+                    st.caption("全探索した候補の上位です。通常表示は最上位1型だけです。")
+                    st.dataframe(
+                        cf_candidates,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=table_auto_height(cf_candidates),
+                    )
         else:
             st.info("クロスフォーメーション候補がありません。2車複本線または注の候補が必要です。")
 
