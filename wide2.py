@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.4｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.5｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独｜基準補正全探索")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1232,16 +1232,18 @@ def _rank_pair_candidate_row(row: pd.Series) -> float:
     return float(score)
 
 
+
 def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[PairKey, int]) -> dict | None:
     """
     補助4点のクロスフォーメーション A◯-B△ を1つだけ作る。
 
-    v11.4方針：
+    v11.6方針：
+    - 新しい別基準を作らず、既存の2車複本線・注を出すための列に準じる。
     - A-Bは既存の2車複「本線」を優先。なければ「注」。
-    - ◯・△は単品ヒモの順位ではなく、A◯-B△で内部展開される4点全体の
-      想定的中率が最大になる組み合わせを全探索で選ぶ。
+    - A-△、B-◯は既存2車複表の評価列（判定・資産枠・総合候補理由・配当位置・配当戻り余地・枠内順位）で評価する。
+    - ◯-△だけは既存2車複表に無い場合があるため、1→2着評価分布の現在的中率を補助的に使う。
+    - 現在的中率の最大化ではなく、既存推奨ロジックに近い「買い目としての筋」を優先する。
     - 内部4点は A-B / A-△ / B-◯ / ◯-△。
-    - クロスフォーメーションは常に1型だけ。BOX化を避ける。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -1249,12 +1251,16 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
     if "ペアキー" not in work.columns:
         return None
 
-    # A-B中心ペア：本線を優先。なければ注。複数ある場合は表示順・キー順で安定化。
+    # A-B中心ペア：既存の本線→注の順でそのまま採用する。
     center_df = work[work.get("判定", "").astype(str).isin(["本線", "注"])].copy()
     if center_df.empty:
         return None
     center_df["_center_rank"] = center_df["判定"].astype(str).map({"本線": 0, "注": 1}).fillna(9)
-    center_df = center_df.sort_values(["_center_rank", "ペアキー"])
+    sort_cols = ["_center_rank"]
+    if "_枠内順位" in center_df.columns:
+        sort_cols.append("_枠内順位")
+    sort_cols.append("ペアキー")
+    center_df = center_df.sort_values(sort_cols)
     center_key = str(center_df.iloc[0].get("ペアキー", "")).strip()
     try:
         A, B = [int(x) for x in center_key.split("-")]
@@ -1265,11 +1271,196 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
 
     ranks = [1, 2, 3, 4, 5, 6, 7]
 
-    def pair_rate(pk: str) -> float:
+    row_map = {}
+    for _, r in work.iterrows():
+        pk = str(r.get("ペアキー", "")).strip()
+        if pk:
+            row_map[pk] = r
+
+    def current_rate(pk: str) -> float:
         hr = _pair_hit_rate_from_pair12_total(pk, pair12_counts)
         return float(hr) if hr is not None else 0.0
 
+    def _str(row: pd.Series | None, col: str) -> str:
+        if row is None:
+            return ""
+        try:
+            v = row.get(col, "")
+        except Exception:
+            return ""
+        if pd.isna(v):
+            return ""
+        return str(v)
+
+    def _num(row: pd.Series | None, col: str, default=None):
+        if row is None:
+            return default
+        try:
+            v = row.get(col, default)
+            if pd.isna(v):
+                return default
+            return float(v)
+        except Exception:
+            return default
+
+    def pair_display_rate(pk: str) -> float:
+        """表示用の想定的中率。既存EV診断のp_safe%があればそれを使う。"""
+        row = row_map.get(pk)
+        if row is not None:
+            v = _num(row, "p_safe%", None)
+            if v is not None:
+                return round(v, 2)
+            v = _num(row, "想定ペア的%", None)
+            if v is not None:
+                return round(v, 2)
+            v = _num(row, "的中率%", None)
+            if v is not None:
+                return round(v, 2)
+        # 既存表にないペアは現在分布だけ。過信しないよう表示用もやや控えめ。
+        return round(current_rate(pk) * 0.65, 2)
+
+    def pair_rec_score(pk: str, role: str = "side") -> tuple[float, dict]:
+        """
+        既存の推奨買い目判定に準じたペア評価。
+        role: center / side / bridge
+        """
+        row = row_map.get(pk)
+        cur = current_rate(pk)
+        p_disp = pair_display_rate(pk)
+        info = {
+            "買い目": pk,
+            "表示想定的中率%": p_disp,
+            "現在的中率%": round(cur, 1),
+            "判定": "",
+            "資産枠": "",
+            "総合候補理由": "",
+            "配当位置": "",
+            "配当戻り余地": "",
+            "ペア評価点": None,
+            "評価メモ": "",
+        }
+
+        # 既存表にない◯-△は、橋渡し役として軽く評価するだけ。
+        if row is None:
+            score = 8.0 + min(cur, 8.0) * 1.2
+            if role != "bridge":
+                score -= 20.0
+            info["ペア評価点"] = round(score, 3)
+            info["評価メモ"] = "既存2車複表なし・現在分布を割引"
+            return score, info
+
+        judge = _str(row, "判定")
+        asset = _str(row, "資産枠")
+        reason = _str(row, "総合候補理由")
+        pay_pos = _str(row, "配当位置")
+        pay_room = _str(row, "配当戻り余地")
+        ev_label = _str(row, "EV判定")
+        rank_score = _num(row, "_枠内順位", None)
+        p_safe = _num(row, "p_safe%", None)
+        expected = _num(row, "想定ペア的%", None)
+        coef = _num(row, "配当係数", None)
+        deviation = _num(row, "偏差値", None)
+
+        score = 50.0
+        memo = []
+
+        # 既存の本線・注は最優先の情報。
+        if judge == "本線":
+            score += 45.0; memo.append("本線")
+        elif judge == "注":
+            score += 36.0; memo.append("注")
+
+        # 既存の資産枠・理由をそのまま反映。
+        if asset == "安定":
+            score += 18.0; memo.append("安定")
+        elif asset == "中庸":
+            score += 22.0; memo.append("中庸")
+        elif asset == "歪み":
+            score += 14.0; memo.append("歪み")
+
+        if "安定枠" in reason:
+            score += 16.0
+        if "中庸枠" in reason:
+            score += 18.0
+        if "歪み枠" in reason:
+            score += 10.0
+
+        # 除外理由は完全排除ではなく減点。補助4点なので、形として使う余地は残す。
+        if "未回収除外" in reason:
+            score -= 22.0; memo.append("未回収減点")
+        if "回収率過熱除外" in reason:
+            score -= 26.0; memo.append("回収過熱減点")
+        if "的中率過熱除外" in reason:
+            score -= 22.0; memo.append("的中過熱減点")
+        if "配当過熱除外" in reason:
+            score -= 18.0; memo.append("配当過熱減点")
+        if "後追い除外" in reason:
+            score -= 12.0; memo.append("後追い減点")
+
+        # 配当位置・戻り余地。高すぎ/上振れ警戒は後追い化しやすいので落とす。
+        if "基準付近" in pay_pos:
+            score += 14.0; memo.append("基準付近")
+        elif "中庸" in pay_pos:
+            score += 10.0
+        elif "安すぎ" in pay_pos or "低すぎ" in pay_pos:
+            score -= 4.0
+        elif "高すぎ" in pay_pos:
+            score -= 18.0; memo.append("高すぎ減点")
+
+        if "中庸" in pay_room:
+            score += 8.0
+        elif "あり" in pay_room:
+            score += 3.0
+        elif "上振れ警戒" in pay_room:
+            score -= 16.0; memo.append("上振れ警戒")
+
+        # 既存の枠内順位を反映。小さいほど良い。
+        if rank_score is not None:
+            score -= min(max(rank_score, 0.0), 80.0) * 0.45
+
+        # p_safeはテンポ補助として必要。ただし現在値の上振れ追いにならないよう上限を置く。
+        if p_safe is not None:
+            score += min(p_safe, 12.0) * 1.4
+        elif expected is not None:
+            score += min(expected, 12.0) * 1.0
+        else:
+            score += min(cur, 8.0) * 0.6
+
+        # 配当係数は既存ロジック同様、基準付近～中庸を評価し、高すぎ側は落とす。
+        if coef is not None:
+            if 0.80 <= coef <= 1.30:
+                score += 7.0
+            elif coef > 1.30:
+                score -= min((coef - 1.30) * 12.0, 18.0)
+            elif coef < 0.50:
+                score -= 6.0
+
+        if deviation is not None:
+            # 偏差値が中庸に近いほど安定。極端すぎるものは追いにくい。
+            score -= abs(deviation - 52.0) * 0.10
+
+        if role == "center":
+            score += 20.0
+        elif role == "bridge":
+            # ◯-△は橋渡し。ここが強いと良いが、主役にしすぎない。
+            score *= 0.55
+
+        info.update({
+            "判定": judge,
+            "資産枠": asset,
+            "総合候補理由": reason,
+            "配当位置": pay_pos,
+            "配当戻り余地": pay_room,
+            "EV判定": ev_label,
+            "ペア評価点": round(score, 3),
+            "評価メモ": "・".join(memo),
+        })
+        return score, info
+
     candidates = []
+    center_pk = _pair_key_norm(A, B)
+    center_score, center_info = pair_rec_score(center_pk, role="center")
+
     for maru in ranks:
         if maru in (A, B):
             continue
@@ -1277,29 +1468,61 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
             if delta in (A, B, maru):
                 continue
 
-            pair_keys = [
-                _pair_key_norm(A, B),       # 中心
-                _pair_key_norm(A, delta),   # A側ズレ
-                _pair_key_norm(B, maru),    # B側ズレ
-                _pair_key_norm(maru, delta) # ズレ同士
-            ]
+            pk_center = _pair_key_norm(A, B)
+            pk_a_delta = _pair_key_norm(A, delta)
+            pk_b_maru = _pair_key_norm(B, maru)
+            pk_bridge = _pair_key_norm(maru, delta)
+            pair_keys = [pk_center, pk_a_delta, pk_b_maru, pk_bridge]
             if len(set(pair_keys)) != 4:
                 continue
 
-            detail = []
-            hit_rates = []
-            for pk in pair_keys:
-                hr = pair_rate(pk)
-                hit_rates.append(hr)
-                detail.append({"買い目": pk, "現在的中率%": round(hr, 1)})
+            s_center, d_center = pair_rec_score(pk_center, role="center")
+            s_a_delta, d_a_delta = pair_rec_score(pk_a_delta, role="side")
+            s_b_maru, d_b_maru = pair_rec_score(pk_b_maru, role="side")
+            s_bridge, d_bridge = pair_rec_score(pk_bridge, role="bridge")
 
-            total_hit = round(sum(hit_rates), 1)
-            min_non_center = min(hit_rates[1:]) if len(hit_rates) >= 4 else 0.0
-            # 同点時の優先：合計的中率 → 非中心3点の底上げ → ◯△が近い評価 → 型の安定順
-            closeness_penalty = abs(maru - delta) * 0.01 + (maru + delta) * 0.001
+            details = [d_center, d_a_delta, d_b_maru, d_bridge]
+            disp_rates = [float(d.get("表示想定的中率%") or 0.0) for d in details]
+            current_rates = [float(d.get("現在的中率%") or 0.0) for d in details]
+            formation_hit = round(sum(disp_rates), 1)
+            current_total = round(sum(current_rates), 1)
+
+            # 補助4点はテンポが目的。極端に弱い非中心ペアが多い形は落とす。
+            non_center_rates = disp_rates[1:]
+            low_pen = 0.0
+            low_pen += sum(1 for x in non_center_rates if x < 2.0) * 8.0
+            if non_center_rates and min(non_center_rates) < 1.0:
+                low_pen += 10.0
+
+            # 6・7の過剰採用はテンポが悪くなりやすいので控えめに減点。
+            outer_pen = 0.0
+            for r in (maru, delta):
+                if r == 5:
+                    outer_pen += 1.0
+                elif r == 6:
+                    outer_pen += 3.0
+                elif r == 7:
+                    outer_pen += 6.0
+            if maru >= 6 and delta >= 6:
+                outer_pen += 8.0
+
+            # 側面2本（A-△、B-◯）を主に評価。橋渡しは半分以下。
+            selection_score = (
+                s_a_delta * 1.00
+                + s_b_maru * 1.00
+                + s_bridge * 0.55
+                + formation_hit * 0.85
+                - low_pen
+                - outer_pen
+            )
+
+            # 同点時は、表示想定的中率、非中心最低、外側を使いすぎない順。
+            min_non_center = min(non_center_rates) if non_center_rates else 0.0
+            closeness_penalty = (maru + delta) * 0.005 + abs(maru - delta) * 0.02
             sort_score = (
-                total_hit,
-                round(min_non_center, 3),
+                round(selection_score, 3),
+                formation_hit,
+                min_non_center,
                 -closeness_penalty,
             )
             form_key = f"{A}{maru}-{B}{delta}"
@@ -1312,9 +1535,11 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
                 "◯": maru,
                 "△": delta,
                 "買い目": pair_keys,
-                "想定的中率%": total_hit,
+                "想定的中率%": formation_hit,
+                "現在的中率合計%": current_total,
                 "非中心最低的中率%": round(min_non_center, 1),
-                "detail": detail,
+                "選択スコア": round(selection_score, 3),
+                "detail": details,
                 "_sort_score": sort_score,
             })
 
@@ -1343,7 +1568,6 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         need_avg_pay_ev110 = None
         need_avg_odds_ev110 = None
 
-    # 上位候補を確認用に残す。通常表示には出さない。
     top_rows = []
     for c in candidates[:10]:
         if c.get("想定的中率%") and c.get("想定的中率%") > 0:
@@ -1352,8 +1576,11 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
             need_pay = None
         top_rows.append({
             "型": c.get("型"),
-            "想定的中率%": c.get("想定的中率%"),
+            "中心": c.get("中心"),
+            "表示想定的中率%": c.get("想定的中率%"),
+            "現在的中率合計%": c.get("現在的中率合計%"),
             "非中心最低的中率%": c.get("非中心最低的中率%"),
+            "選択スコア": c.get("選択スコア"),
             "EV1.10必要平均払戻": need_pay,
         })
 
