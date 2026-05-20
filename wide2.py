@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.5｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独｜基準補正全探索")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.7｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独｜本線注内包優先")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1233,17 +1233,19 @@ def _rank_pair_candidate_row(row: pd.Series) -> float:
 
 
 
+
 def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[PairKey, int]) -> dict | None:
     """
-    補助4点のクロスフォーメーション A◯-B△ を1つだけ作る。
+    クロスフォーメーション A◯-B△ を1つだけ作る。
 
-    v11.6方針：
-    - 新しい別基準を作らず、既存の2車複本線・注を出すための列に準じる。
-    - A-Bは既存の2車複「本線」を優先。なければ「注」。
-    - A-△、B-◯は既存2車複表の評価列（判定・資産枠・総合候補理由・配当位置・配当戻り余地・枠内順位）で評価する。
-    - ◯-△だけは既存2車複表に無い場合があるため、1→2着評価分布の現在的中率を補助的に使う。
-    - 現在的中率の最大化ではなく、既存推奨ロジックに近い「買い目としての筋」を優先する。
-    - 内部4点は A-B / A-△ / B-◯ / ◯-△。
+    v11.7方針：
+    - クロスフォーメーションの基準は、既存の2車複「本線・注」ロジックに準じる。
+    - 中心ペアは本線を優先。なければ注。
+    - 注ペアが中心と別に存在する場合は、まず「中心ペア」と「注ペア」を両方内包する4点フォーメーションだけを優先比較する。
+      例：本線1-5、注2-3なら、12-35 または 13-25 のように、1-5と2-3を両方含む型を比較する。
+    - もし中心＋注を両方含める型が作れない場合だけ、中心ペアを含む全候補から選ぶ。
+    - 現在的中率最大ではなく、本線・注・資産枠・配当位置・除外理由など既存推奨基準に沿ったスコアで選ぶ。
+    - 通常表示は型だけ。内部4点は detail へ格納する。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -1251,23 +1253,38 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
     if "ペアキー" not in work.columns:
         return None
 
-    # A-B中心ペア：既存の本線→注の順でそのまま採用する。
-    center_df = work[work.get("判定", "").astype(str).isin(["本線", "注"])].copy()
-    if center_df.empty:
+    # 既存の本線・注をそのまま中心情報として使う。
+    cand_df = work[work.get("判定", "").astype(str).isin(["本線", "注"])].copy()
+    if cand_df.empty:
         return None
-    center_df["_center_rank"] = center_df["判定"].astype(str).map({"本線": 0, "注": 1}).fillna(9)
+    cand_df["_center_rank"] = cand_df["判定"].astype(str).map({"本線": 0, "注": 1}).fillna(9)
     sort_cols = ["_center_rank"]
-    if "_枠内順位" in center_df.columns:
+    if "_枠内順位" in cand_df.columns:
         sort_cols.append("_枠内順位")
     sort_cols.append("ペアキー")
-    center_df = center_df.sort_values(sort_cols)
-    center_key = str(center_df.iloc[0].get("ペアキー", "")).strip()
+    cand_df = cand_df.sort_values(sort_cols)
+
+    center_key = str(cand_df.iloc[0].get("ペアキー", "")).strip()
     try:
-        A, B = [int(x) for x in center_key.split("-")]
+        center_a, center_b = [int(x) for x in center_key.split("-")]
     except Exception:
         return None
-    if A == B:
+    if center_a == center_b:
         return None
+
+    # 中心とは別の最上位「注」を拾う。中心が注の場合は、次点注を探す。
+    note_key = None
+    note_df = work[(work.get("判定", "").astype(str) == "注")].copy()
+    if not note_df.empty:
+        if "_枠内順位" in note_df.columns:
+            note_df = note_df.sort_values(["_枠内順位", "ペアキー"])
+        else:
+            note_df = note_df.sort_values(["ペアキー"])
+        for _, nr in note_df.iterrows():
+            pk = str(nr.get("ペアキー", "")).strip()
+            if pk and pk != center_key:
+                note_key = pk
+                break
 
     ranks = [1, 2, 3, 4, 5, 6, 7]
 
@@ -1316,14 +1333,11 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
             v = _num(row, "的中率%", None)
             if v is not None:
                 return round(v, 2)
-        # 既存表にないペアは現在分布だけ。過信しないよう表示用もやや控えめ。
+        # 既存表にないペアは現在分布だけ。過信しないよう表示用も割引。
         return round(current_rate(pk) * 0.65, 2)
 
     def pair_rec_score(pk: str, role: str = "side") -> tuple[float, dict]:
-        """
-        既存の推奨買い目判定に準じたペア評価。
-        role: center / side / bridge
-        """
+        """既存の推奨買い目判定に準じたペア評価。"""
         row = row_map.get(pk)
         cur = current_rate(pk)
         p_disp = pair_display_rate(pk)
@@ -1340,11 +1354,11 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
             "評価メモ": "",
         }
 
-        # 既存表にない◯-△は、橋渡し役として軽く評価するだけ。
         if row is None:
+            # 3-4等、既存2車複表にない橋渡しペア。現在分布だけなので控えめ。
             score = 8.0 + min(cur, 8.0) * 1.2
-            if role != "bridge":
-                score -= 20.0
+            if role not in ("bridge", "note"):
+                score -= 18.0
             info["ペア評価点"] = round(score, 3)
             info["評価メモ"] = "既存2車複表なし・現在分布を割引"
             return score, info
@@ -1364,13 +1378,11 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         score = 50.0
         memo = []
 
-        # 既存の本線・注は最優先の情報。
         if judge == "本線":
             score += 45.0; memo.append("本線")
         elif judge == "注":
             score += 36.0; memo.append("注")
 
-        # 既存の資産枠・理由をそのまま反映。
         if asset == "安定":
             score += 18.0; memo.append("安定")
         elif asset == "中庸":
@@ -1385,7 +1397,7 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         if "歪み枠" in reason:
             score += 10.0
 
-        # 除外理由は完全排除ではなく減点。補助4点なので、形として使う余地は残す。
+        # 除外理由は減点。本線・注を内包するため、完全排除にはしない。
         if "未回収除外" in reason:
             score -= 22.0; memo.append("未回収減点")
         if "回収率過熱除外" in reason:
@@ -1397,7 +1409,6 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         if "後追い除外" in reason:
             score -= 12.0; memo.append("後追い減点")
 
-        # 配当位置・戻り余地。高すぎ/上振れ警戒は後追い化しやすいので落とす。
         if "基準付近" in pay_pos:
             score += 14.0; memo.append("基準付近")
         elif "中庸" in pay_pos:
@@ -1414,11 +1425,9 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         elif "上振れ警戒" in pay_room:
             score -= 16.0; memo.append("上振れ警戒")
 
-        # 既存の枠内順位を反映。小さいほど良い。
         if rank_score is not None:
             score -= min(max(rank_score, 0.0), 80.0) * 0.45
 
-        # p_safeはテンポ補助として必要。ただし現在値の上振れ追いにならないよう上限を置く。
         if p_safe is not None:
             score += min(p_safe, 12.0) * 1.4
         elif expected is not None:
@@ -1426,7 +1435,6 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         else:
             score += min(cur, 8.0) * 0.6
 
-        # 配当係数は既存ロジック同様、基準付近～中庸を評価し、高すぎ側は落とす。
         if coef is not None:
             if 0.80 <= coef <= 1.30:
                 score += 7.0
@@ -1436,14 +1444,14 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
                 score -= 6.0
 
         if deviation is not None:
-            # 偏差値が中庸に近いほど安定。極端すぎるものは追いにくい。
             score -= abs(deviation - 52.0) * 0.10
 
         if role == "center":
-            score += 20.0
+            score += 30.0
+        elif role == "note":
+            score += 24.0
         elif role == "bridge":
-            # ◯-△は橋渡し。ここが強いと良いが、主役にしすぎない。
-            score *= 0.55
+            score *= 0.62
 
         info.update({
             "判定": judge,
@@ -1457,99 +1465,146 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         })
         return score, info
 
+    def edges_from_partition(left: tuple[int, int], right: tuple[int, int]) -> list[str]:
+        """2×2のクロスフォーメーションから内部4点を作る。"""
+        return [
+            _pair_key_norm(left[0], right[0]),
+            _pair_key_norm(left[0], right[1]),
+            _pair_key_norm(left[1], right[0]),
+            _pair_key_norm(left[1], right[1]),
+        ]
+
+    def formation_type(left: tuple[int, int], right: tuple[int, int]) -> str:
+        """表示型。各側は昇順、左右はそのまま。"""
+        l = "".join(str(x) for x in sorted(left))
+        r = "".join(str(x) for x in sorted(right))
+        return f"{l}-{r}"
+
+    # 全2×2分割を作る。ただし重複表示を避けるため、最小値を左側に固定する。
+    partitions = []
+    for a in ranks:
+        for b in ranks:
+            if b <= a:
+                continue
+            left = tuple(sorted((a, b)))
+            remaining = [x for x in ranks if x not in left]
+            for c in remaining:
+                for d in remaining:
+                    if d <= c:
+                        continue
+                    right = tuple(sorted((c, d)))
+                    # left/rightの入れ替え重複を避ける。
+                    if min(left) > min(right):
+                        continue
+                    if set(left) & set(right):
+                        continue
+                    partitions.append((left, right))
+
+    def build_candidate(left: tuple[int, int], right: tuple[int, int]) -> dict | None:
+        pair_keys = edges_from_partition(left, right)
+        if len(set(pair_keys)) != 4:
+            return None
+        if center_key not in pair_keys:
+            return None
+
+        has_note = bool(note_key and note_key in pair_keys)
+        details = []
+        scores = []
+        for pk in pair_keys:
+            if pk == center_key:
+                role = "center"
+            elif note_key and pk == note_key:
+                role = "note"
+            else:
+                # 既存表にないペアは橋渡し、あるものはside。
+                role = "bridge" if pk not in row_map else "side"
+            s, d = pair_rec_score(pk, role=role)
+            scores.append(s)
+            details.append(d)
+
+        disp_rates = [float(d.get("表示想定的中率%") or 0.0) for d in details]
+        current_rates = [float(d.get("現在的中率%") or 0.0) for d in details]
+        formation_hit = round(sum(disp_rates), 1)
+        current_total = round(sum(current_rates), 1)
+        non_center_rates = [r for pk, r in zip(pair_keys, disp_rates) if pk != center_key]
+        min_non_center = min(non_center_rates) if non_center_rates else 0.0
+
+        # 低すぎる枝が多いとテンポ補助にならない。
+        low_pen = sum(1 for x in non_center_rates if x < 2.0) * 8.0
+        if non_center_rates and min_non_center < 1.0:
+            low_pen += 10.0
+
+        # 6・7の過剰採用を減点。ただし本線・注内包の方を優先するため控えめ。
+        used = set(left) | set(right)
+        outer_pen = 0.0
+        for r in used:
+            if r == 5:
+                outer_pen += 0.8
+            elif r == 6:
+                outer_pen += 2.5
+            elif r == 7:
+                outer_pen += 5.0
+        if len([r for r in used if r >= 6]) >= 2:
+            outer_pen += 6.0
+
+        # 本線＋注を内包する型を強く優先。中心だけの型は後段のフォールバック。
+        include_bonus = 80.0 if has_note else 0.0
+
+        # 中心・注はすでに強く評価。その他2点は「枝」として評価。
+        selection_score = sum(scores) + formation_hit * 0.80 + include_bonus - low_pen - outer_pen
+
+        # 12-35 と 13-25 のように本線＋注を両方含む型では、合計的中率と非中心最低を重視。
+        sort_score = (
+            1 if has_note else 0,
+            round(selection_score, 3),
+            formation_hit,
+            min_non_center,
+            -sum(used) * 0.001,
+        )
+
+        return {
+            "方式": "クロスフォーメーション",
+            "型": formation_type(left, right),
+            "中心": center_key,
+            "注内包": has_note,
+            "注": note_key or "",
+            "左": "".join(str(x) for x in sorted(left)),
+            "右": "".join(str(x) for x in sorted(right)),
+            "買い目": pair_keys,
+            "想定的中率%": formation_hit,
+            "現在的中率合計%": current_total,
+            "非中心最低的中率%": round(min_non_center, 1),
+            "選択スコア": round(selection_score, 3),
+            "detail": details,
+            "_sort_score": sort_score,
+        }
+
     candidates = []
-    center_pk = _pair_key_norm(A, B)
-    center_score, center_info = pair_rec_score(center_pk, role="center")
-
-    for maru in ranks:
-        if maru in (A, B):
-            continue
-        for delta in ranks:
-            if delta in (A, B, maru):
-                continue
-
-            pk_center = _pair_key_norm(A, B)
-            pk_a_delta = _pair_key_norm(A, delta)
-            pk_b_maru = _pair_key_norm(B, maru)
-            pk_bridge = _pair_key_norm(maru, delta)
-            pair_keys = [pk_center, pk_a_delta, pk_b_maru, pk_bridge]
-            if len(set(pair_keys)) != 4:
-                continue
-
-            s_center, d_center = pair_rec_score(pk_center, role="center")
-            s_a_delta, d_a_delta = pair_rec_score(pk_a_delta, role="side")
-            s_b_maru, d_b_maru = pair_rec_score(pk_b_maru, role="side")
-            s_bridge, d_bridge = pair_rec_score(pk_bridge, role="bridge")
-
-            details = [d_center, d_a_delta, d_b_maru, d_bridge]
-            disp_rates = [float(d.get("表示想定的中率%") or 0.0) for d in details]
-            current_rates = [float(d.get("現在的中率%") or 0.0) for d in details]
-            formation_hit = round(sum(disp_rates), 1)
-            current_total = round(sum(current_rates), 1)
-
-            # 補助4点はテンポが目的。極端に弱い非中心ペアが多い形は落とす。
-            non_center_rates = disp_rates[1:]
-            low_pen = 0.0
-            low_pen += sum(1 for x in non_center_rates if x < 2.0) * 8.0
-            if non_center_rates and min(non_center_rates) < 1.0:
-                low_pen += 10.0
-
-            # 6・7の過剰採用はテンポが悪くなりやすいので控えめに減点。
-            outer_pen = 0.0
-            for r in (maru, delta):
-                if r == 5:
-                    outer_pen += 1.0
-                elif r == 6:
-                    outer_pen += 3.0
-                elif r == 7:
-                    outer_pen += 6.0
-            if maru >= 6 and delta >= 6:
-                outer_pen += 8.0
-
-            # 側面2本（A-△、B-◯）を主に評価。橋渡しは半分以下。
-            selection_score = (
-                s_a_delta * 1.00
-                + s_b_maru * 1.00
-                + s_bridge * 0.55
-                + formation_hit * 0.85
-                - low_pen
-                - outer_pen
-            )
-
-            # 同点時は、表示想定的中率、非中心最低、外側を使いすぎない順。
-            min_non_center = min(non_center_rates) if non_center_rates else 0.0
-            closeness_penalty = (maru + delta) * 0.005 + abs(maru - delta) * 0.02
-            sort_score = (
-                round(selection_score, 3),
-                formation_hit,
-                min_non_center,
-                -closeness_penalty,
-            )
-            form_key = f"{A}{maru}-{B}{delta}"
-            candidates.append({
-                "方式": "クロスフォーメーション",
-                "型": form_key,
-                "中心": center_key,
-                "A": A,
-                "B": B,
-                "◯": maru,
-                "△": delta,
-                "買い目": pair_keys,
-                "想定的中率%": formation_hit,
-                "現在的中率合計%": current_total,
-                "非中心最低的中率%": round(min_non_center, 1),
-                "選択スコア": round(selection_score, 3),
-                "detail": details,
-                "_sort_score": sort_score,
-            })
+    for left, right in partitions:
+        c = build_candidate(left, right)
+        if c is not None:
+            candidates.append(c)
 
     if not candidates:
         return None
 
-    candidates = sorted(candidates, key=lambda x: x["_sort_score"], reverse=True)
-    best = candidates[0]
-    total_hit = best.get("想定的中率%")
+    # 注がある場合、中心＋注を両方内包する型を優先比較する。
+    if note_key:
+        preferred = [c for c in candidates if c.get("注内包")]
+        if preferred:
+            candidates_for_select = preferred
+        else:
+            candidates_for_select = candidates
+    else:
+        candidates_for_select = candidates
 
+    candidates_for_select = sorted(candidates_for_select, key=lambda x: x["_sort_score"], reverse=True)
+    best = candidates_for_select[0]
+
+    # 根拠表示には、選択対象の上位と、全体上位を混ぜて確認できるようにする。
+    all_ranked = sorted(candidates, key=lambda x: x["_sort_score"], reverse=True)
+
+    total_hit = best.get("想定的中率%")
     if total_hit is None:
         state = ""
     elif total_hit >= 50.0:
@@ -1568,21 +1623,37 @@ def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[Pa
         need_avg_pay_ev110 = None
         need_avg_odds_ev110 = None
 
-    top_rows = []
-    for c in candidates[:10]:
-        if c.get("想定的中率%") and c.get("想定的中率%") > 0:
-            need_pay = round(400.0 * 1.10 / (float(c.get("想定的中率%")) / 100.0), 0)
+    def _candidate_row(c: dict, selected_pool: str) -> dict:
+        hit = c.get("想定的中率%")
+        if hit and hit > 0:
+            need_pay = round(400.0 * 1.10 / (float(hit) / 100.0), 0)
         else:
             need_pay = None
-        top_rows.append({
+        return {
             "型": c.get("型"),
             "中心": c.get("中心"),
+            "注": c.get("注"),
+            "注内包": c.get("注内包"),
             "表示想定的中率%": c.get("想定的中率%"),
             "現在的中率合計%": c.get("現在的中率合計%"),
             "非中心最低的中率%": c.get("非中心最低的中率%"),
             "選択スコア": c.get("選択スコア"),
             "EV1.10必要平均払戻": need_pay,
-        })
+            "比較枠": selected_pool,
+        }
+
+    top_rows = []
+    for c in candidates_for_select[:10]:
+        top_rows.append(_candidate_row(c, "中心＋注内包優先" if note_key and any(x.get("注内包") for x in candidates_for_select) else "中心優先"))
+    # 全体上位も参考として少し残す。ただし重複型は避ける。
+    seen = {r["型"] for r in top_rows}
+    for c in all_ranked[:10]:
+        if c.get("型") in seen:
+            continue
+        top_rows.append(_candidate_row(c, "全体参考"))
+        seen.add(c.get("型"))
+        if len(top_rows) >= 12:
+            break
 
     best.update({
         "EV1.10必要平均払戻": need_avg_pay_ev110,
