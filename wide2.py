@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v10.0｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜3連複5軸限定")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.1｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜3連複5軸限定")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1171,6 +1171,207 @@ def calculate_ev_metrics(df: pd.DataFrame, bet_type: str, condition_margin: floa
     out["券種"] = bet_type
     return out
 
+
+
+def _pair_key_norm(a: int, b: int) -> str:
+    """2車複表示用に評価番号を昇順キーへ整える。"""
+    a, b = int(a), int(b)
+    if a == b:
+        return ""
+    x, y = sorted((a, b))
+    return f"{x}-{y}"
+
+
+def _pair_hit_rate_from_pair12_total(pair_key: str, pair12_counts: Dict[PairKey, int]) -> float | None:
+    """1→2着評価分布から、任意2車複キーの現在的中率%を出す。"""
+    try:
+        a, b = [int(x) for x in str(pair_key).split("-")]
+    except Exception:
+        return None
+    total = sum(int(v) for v in pair12_counts.values())
+    if total <= 0 or a == b:
+        return None
+    hit = int(pair12_counts.get((a, b), 0)) + int(pair12_counts.get((b, a), 0))
+    return round(100.0 * hit / total, 1)
+
+
+def _rank_pair_candidate_row(row: pd.Series) -> float:
+    """クロスフォーメーション用のヒモ候補を軽く順位化する。小さいほど優先。"""
+    score = 100.0
+    judge = str(row.get("判定", ""))
+    asset = str(row.get("資産枠", ""))
+    reason = str(row.get("総合候補理由", ""))
+    if judge == "注":
+        score -= 40.0
+    elif judge == "本線":
+        score -= 20.0
+    if asset == "歪み" or "歪み" in reason:
+        score -= 18.0
+    elif asset == "中庸" or "中庸" in reason:
+        score -= 14.0
+    elif asset == "安定" or "安定" in reason:
+        score -= 8.0
+    try:
+        # 配当が戻りやすいものを少し優先。ただし係数が極端なものは既存ロジック側で弾く前提。
+        coef = float(row.get("配当係数"))
+        if pd.notna(coef):
+            score += abs(coef - 0.85) * 6.0
+    except Exception:
+        pass
+    try:
+        exp = float(row.get("想定ペア的%"))
+        if pd.notna(exp):
+            score -= exp / 10.0
+    except Exception:
+        pass
+    try:
+        opp = int(row.get("相手"))
+        score += opp * 0.05
+    except Exception:
+        pass
+    return float(score)
+
+
+def build_cross_formation_summary(df_pairs: pd.DataFrame, pair12_counts: Dict[PairKey, int]) -> dict | None:
+    """
+    既存の2車複本線/注を使い、補助4点のクロスフォーメーション A◯-B△ を1つだけ作る。
+    A-Bは本線優先、なければ注。◯はB側の最有力ヒモ、△はA側の最有力ヒモ。
+    通常表示は型だけにし、買い目展開は確認用に回す。
+    """
+    if df_pairs is None or df_pairs.empty:
+        return None
+    work = df_pairs.copy()
+    if "ペアキー" not in work.columns:
+        return None
+
+    # A-B中心ペア：本線を優先。なければ注。複数ある場合は表示順・キー順で安定化。
+    center_df = work[work.get("判定", "").astype(str).isin(["本線", "注"])].copy()
+    if center_df.empty:
+        return None
+    center_df["_center_rank"] = center_df["判定"].astype(str).map({"本線": 0, "注": 1}).fillna(9)
+    center_df = center_df.sort_values(["_center_rank", "ペアキー"])
+    center_key = str(center_df.iloc[0].get("ペアキー", "")).strip()
+    try:
+        A, B = [int(x) for x in center_key.split("-")]
+    except Exception:
+        return None
+
+    # 候補母集団：注になり得るヒモを優先しつつ、既存候補理由が残っているものを使う。
+    valid = work.copy()
+    if "的中H" in valid.columns:
+        valid = valid[valid["的中H"].fillna(0).astype(float) > 0]
+    if valid.empty:
+        return None
+
+    def side_candidates(axis: int, exclude_opp: int) -> list[int]:
+        side = valid[valid.get("軸番号", pd.Series(dtype=float)).fillna(-1).astype(int).eq(int(axis))].copy()
+        if side.empty:
+            # 2車複は昇順表示なので、軸番号列にない場合はペアキーから拾う。
+            rows = []
+            for _, r in valid.iterrows():
+                try:
+                    a, b = [int(x) for x in str(r.get("ペアキー")).split("-")]
+                except Exception:
+                    continue
+                if axis in (a, b):
+                    rr = r.copy()
+                    rr["相手"] = b if a == axis else a
+                    rows.append(rr)
+            side = pd.DataFrame(rows) if rows else pd.DataFrame()
+        if side.empty or "相手" not in side.columns:
+            return []
+        side = side[side["相手"].fillna(-1).astype(int).ne(int(exclude_opp))].copy()
+        side = side[side["相手"].fillna(-1).astype(int).ne(int(axis))].copy()
+        if side.empty:
+            return []
+        side["_cf_score"] = side.apply(_rank_pair_candidate_row, axis=1)
+        out = []
+        for _, r in side.sort_values(["_cf_score", "相手"]).iterrows():
+            try:
+                opp = int(r.get("相手"))
+            except Exception:
+                continue
+            if opp not in out:
+                out.append(opp)
+        return out
+
+    # ◯ = B側の最有力ヒモ、△ = A側の最有力ヒモ
+    maru_candidates = side_candidates(B, A)
+    delta_candidates = side_candidates(A, B)
+    if not maru_candidates or not delta_candidates:
+        return None
+    maru = maru_candidates[0]
+    delta = delta_candidates[0]
+
+    # 同じ車番ならB側（◯）を次点に落として譲る。
+    if maru == delta:
+        for cand in maru_candidates[1:]:
+            if cand != delta:
+                maru = cand
+                break
+    if maru == delta:
+        for cand in delta_candidates[1:]:
+            if cand != maru:
+                delta = cand
+                break
+    if maru == delta or len({A, B, maru, delta}) < 4:
+        return None
+
+    form_key = f"{A}{maru}-{B}{delta}"
+    pair_keys = [
+        _pair_key_norm(A, B),
+        _pair_key_norm(A, delta),
+        _pair_key_norm(B, maru),
+        _pair_key_norm(maru, delta),
+    ]
+    pair_keys = [x for x in pair_keys if x]
+    # 念のため重複が出たら不採用。4点補助を守る。
+    if len(set(pair_keys)) != 4:
+        return None
+
+    hit_rates = []
+    detail = []
+    for pk in pair_keys:
+        hr = _pair_hit_rate_from_pair12_total(pk, pair12_counts)
+        hit_rates.append(hr if hr is not None else 0.0)
+        detail.append({"買い目": pk, "現在的中率%": hr})
+    total_hit = round(sum(hit_rates), 1) if hit_rates else None
+    if total_hit is None:
+        state = ""
+    elif total_hit >= 50.0:
+        state = "テンポ良好"
+    elif total_hit >= 45.0:
+        state = "採用候補"
+    elif total_hit >= 40.0:
+        state = "監視"
+    else:
+        state = "低め"
+
+    # 2車複4点を100円ずつ買う前提。
+    # 現在オッズ未入力時は、EV1.10に必要な平均払戻だけを表示する。
+    if total_hit and total_hit > 0:
+        need_avg_pay_ev110 = round(400.0 * 1.10 / (float(total_hit) / 100.0), 0)
+        need_avg_odds_ev110 = round(need_avg_pay_ev110 / 100.0, 2)
+    else:
+        need_avg_pay_ev110 = None
+        need_avg_odds_ev110 = None
+
+    return {
+        "方式": "クロスフォーメーション",
+        "型": form_key,
+        "中心": center_key,
+        "A": A,
+        "B": B,
+        "◯": maru,
+        "△": delta,
+        "買い目": pair_keys,
+        "想定的中率%": total_hit,
+        "EV1.10必要平均払戻": need_avg_pay_ev110,
+        "EV1.10必要平均オッズ": need_avg_odds_ev110,
+        "状態": state,
+        "detail": detail,
+    }
+
 def race_ev_summary(df: pd.DataFrame, stake_col: str = "stake") -> dict:
     """選ばれた買い目群のRaceEV/RaceConfidenceを計算する。"""
     if df is None or df.empty:
@@ -1898,6 +2099,7 @@ with tabs[2]:
         "trio": "—",
     }
     ev_diagnosis_frames = []
+    cross_formation_summary = None
 
     st.markdown("#### 投資EV診断設定")
     c_ev1, c_ev2 = st.columns([1.2, 3])
@@ -2330,6 +2532,7 @@ with tabs[2]:
         _pair_pick_mask = df_pairs["判定"].astype(str).isin(["本線", "注"])
         if _pair_pick_mask.any():
             ev_diagnosis_frames.append(df_pairs.loc[_pair_pick_mask].copy())
+        cross_formation_summary = build_cross_formation_summary(df_pairs, pair12_total)
 
     preferred_pair_cols = [
         "判定",
@@ -2630,136 +2833,61 @@ with tabs[2]:
         )
 
 
-    # 評価別テーブル直下に、購入候補とEV1.10最低必要オッズを1つの表で表示する。
-    # 2車複本線・2車複注・3連複推奨を混ぜず、買い目1つにつき1行で表示する。
-    def _display_bet_key(rr) -> str:
-        for col in ("ペアキー", "目", "型"):
-            v = rr.get(col)
-            if v is None:
-                continue
-            try:
-                if pd.isna(v):
-                    continue
-            except Exception:
-                pass
-            text = str(v).strip()
-            if text and text.lower() != "nan" and text != "None":
-                return text.replace("2車複 ", "").replace("3連複 ", "")
-        return "—"
-
-    df_ev_diag = pd.DataFrame()
-    df_need_detail = pd.DataFrame()
-
-    if ev_diagnosis_frames:
-        df_ev_diag = pd.concat(ev_diagnosis_frames, ignore_index=True, sort=False)
-        df_ev_diag["stake"] = 100.0
-
-        group_order = [
-            ("2車複", "本線", 1),
-            ("2車複", "注", 2),
-            ("3連複", "推奨", 3),
-        ]
-        detail_rows = []
-        for bet_type, judge, sort_no in group_order:
-            g = df_ev_diag[
-                df_ev_diag["券種"].astype(str).eq(bet_type)
-                & df_ev_diag["判定"].astype(str).eq(judge)
-            ].copy()
-            if g.empty:
-                continue
-            for _, rr in g.iterrows():
-                need110 = _safe_float(rr.get("最低必要オッズ"), None)
-                pay110 = _safe_float(rr.get("最低必要払戻"), None)
-                detail_rows.append({
-                    "_sort": sort_no,
-                    "券種": bet_type,
-                    "判定": judge,
-                    "買い目": _display_bet_key(rr),
-                    "EV1.10最低オッズ": round(need110, 2) if need110 is not None else None,
-                    "最低払戻": int(pay110) if pay110 is not None else None,
-                    "p_safe%": rr.get("p_safe%"),
-                    "Confidence": rr.get("Confidence"),
-                    "参考odds": rr.get("参考odds"),
-                    "基準odds": rr.get("基準odds"),
-                    "odds_ratio": rr.get("odds_ratio"),
-                    "EV判定": rr.get("EV判定"),
-                })
-
-        if detail_rows:
-            df_need_detail = (
-                pd.DataFrame(detail_rows)
-                .sort_values(["_sort", "買い目"])
-                .drop(columns=["_sort"])
-            )
+    # 評価別テーブル直下に、クロスフォーメーションだけを表示する。
+    # 2車複本線・注はクロスフォーメーション内に内包されるため、通常表示では出さない。
+    # 3連複推奨も購入候補からは外し、補助4点を主表示にする。
+    def _escape_html(s) -> str:
+        return (
+            str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
 
     with purchase_candidate_slot.container():
-        st.markdown("### ＜購入候補｜EV1.10最低必要オッズ＞")
-        if not df_need_detail.empty:
-            st.caption("現在オッズが最低必要オッズ以上なら検討、未満なら購入対象外です。")
-
-            def _fmt_need(v) -> str:
-                x = _safe_float(v, None)
-                return "—" if x is None else f"{x:.2f}倍以上"
-
-            def _escape_html(s) -> str:
-                return (
-                    str(s)
-                    .replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                    .replace('"', "&quot;")
-                )
-
-            def _card_html(title: str, rows: list[str], bg: str, fg: str) -> str:
-                body = "<br>".join(_escape_html(r) for r in rows) if rows else "—"
-                return f"""
-                <div style="
-                    background:{bg};
-                    color:{fg};
-                    border-radius:8px;
-                    padding:14px 16px;
-                    min-height:76px;
-                    border:1px solid rgba(0,0,0,0.04);
-                    font-size:16px;
-                    line-height:1.75;
-                    font-weight:600;
-                ">
-                    <div style="font-size:15px; opacity:0.92; margin-bottom:6px;">{_escape_html(title)}</div>
-                    <div>{body}</div>
-                </div>
-                """
-
-            card_defs = [
-                ("2車複 本線", "2車複", "本線", "#e8f7ec", "#057333"),
-                ("2車複 注", "2車複", "注", "#eaf3ff", "#055a9c"),
-                ("3連複 推奨", "3連複", "推奨", "#e8f7ec", "#057333"),
-            ]
-            cols = st.columns(3)
-            for col, (title, bet_type, judge, bg, fg) in zip(cols, card_defs):
-                g = df_need_detail[
-                    df_need_detail["券種"].astype(str).eq(bet_type)
-                    & df_need_detail["判定"].astype(str).eq(judge)
-                ].copy()
-                if not g.empty:
-                    g = g.sort_values("買い目")
-                    rows = [
-                        f"{str(r.get('買い目', '—'))}：{_fmt_need(r.get('EV1.10最低オッズ'))}"
-                        for _, r in g.iterrows()
-                    ]
-                else:
-                    rows = ["候補なし"]
-                with col:
-                    st.markdown(_card_html(title, rows, bg, fg), unsafe_allow_html=True)
+        st.markdown("### ＜購入候補｜クロスフォーメーション2車複4点＞")
+        if cross_formation_summary:
+            cf = cross_formation_summary
+            cf_line = f"クロスフォーメーション：{cf.get('型', '—')}"
+            cf_sub = (
+                f"中心：{cf.get('中心', '—')}／"
+                f"想定的中率：{cf.get('想定的中率%', '—')}%／"
+                f"EV1.10必要平均払戻：{cf.get('EV1.10必要平均払戻', '—')}円／"
+                f"{cf.get('状態', '')}"
+            )
+            cf_html = (
+                '<div style="background:#fff7e6;color:#7a4a00;border-radius:8px;'
+                'padding:14px 16px;border:1px solid rgba(0,0,0,0.05);'
+                'font-size:18px;line-height:1.7;font-weight:700;">'
+                f'<div>{_escape_html(cf_line)}</div>'
+                f'<div style="font-size:14px;font-weight:600;opacity:0.88;">{_escape_html(cf_sub)}</div>'
+                '</div>'
+            )
+            st.markdown(cf_html, unsafe_allow_html=True)
 
             with st.expander("根拠数値を確認", expanded=False):
-                st.dataframe(
-                    df_need_detail,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=table_auto_height(df_need_detail),
+                st.caption("通常表示は型だけです。確認用として、内部展開された2車複4点と現在的中率を表示します。")
+                cf_detail = pd.DataFrame(cross_formation_summary.get("detail", []))
+                if not cf_detail.empty:
+                    st.dataframe(
+                        cf_detail,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=table_auto_height(cf_detail),
+                    )
+                st.write(
+                    {
+                        "中心": cf.get("中心"),
+                        "型": cf.get("型"),
+                        "想定的中率%": cf.get("想定的中率%"),
+                        "EV1.10必要平均払戻": cf.get("EV1.10必要平均払戻"),
+                        "EV1.10必要平均オッズ": cf.get("EV1.10必要平均オッズ"),
+                        "状態": cf.get("状態"),
+                    }
                 )
         else:
-            st.info("投資EV診断の対象となる既存推奨買い目がありません。")
+            st.info("クロスフォーメーション候補がありません。2車複本線または注の候補が必要です。")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
