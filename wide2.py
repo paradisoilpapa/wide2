@@ -2777,7 +2777,36 @@ with tabs[2]:
             ev_diagnosis_frames.append(df_pairs.loc[_pair_pick_mask].copy())
         cross_formation_summary = build_cross_formation_summary(df_pairs, pair12_total)
 
-    preferred_pair_cols = [
+    # =========================
+    # 最終2車複候補の表示分離
+    # =========================
+    # ここで混ぜないことが重要。
+    #  - 根拠表：過去累積・的中率・回収率・配当位置を見る
+    #  - 投資判定表：必要オッズ・参考オッズ・EV判定を見る
+    # 同じdf_pairsから作るが、画面上は別表に分ける。
+
+    pair_main_cols = [
+        "判定",
+        "型",
+        "対象N",
+        "的中H",
+        "的中率%",
+        "想定ペア的%",
+        "想定差",
+        "状態",
+        "平均配当",
+        "ペア基準配当",
+        "想定回収率%",
+        "回収率%",
+        "回収差",
+        "配当係数",
+        "配当位置",
+        "配当戻り余地",
+        "資産枠",
+        "総合候補理由",
+    ]
+
+    pair_detail_cols = [
         "判定",
         "型",
         "対象N",
@@ -2802,6 +2831,11 @@ with tabs[2]:
         "配当戻り余地",
         "資産枠",
         "総合候補理由",
+    ]
+
+    pair_invest_cols = [
+        "判定",
+        "型",
         "p_adj%",
         "p_safe%",
         "最低必要オッズ",
@@ -2812,9 +2846,48 @@ with tabs[2]:
         "odds_ratio",
         "EV判定",
     ]
-    df_pairs = df_pairs[[c for c in preferred_pair_cols if c in df_pairs.columns]]
-    df_pairs = drop_blank_display_columns(df_pairs)
-    render_sortable_table(df_pairs)
+
+    pair_invest_detail_cols = [
+        "判定",
+        "型",
+        "p_adj%",
+        "p_safe%",
+        "最低必要オッズ",
+        "最低必要払戻",
+        "Confidence",
+        "参考odds",
+        "基準odds",
+        "odds_ratio",
+        "参考EV",
+        "heat_penalty",
+        "Score",
+        "EV判定",
+    ]
+
+    if df_pairs is not None and not df_pairs.empty:
+        st.markdown("#### 最終2車複候補｜根拠表")
+        st.caption("過去累積・的中率・回収率・配当位置を見る表です。ここでは現在オッズの購入判断は混ぜません。")
+        df_pairs_main = df_pairs[[c for c in pair_main_cols if c in df_pairs.columns]].copy()
+        df_pairs_main = drop_blank_display_columns(df_pairs_main)
+        render_sortable_table(df_pairs_main)
+
+        with st.expander("根拠表の詳細列を確認", expanded=False):
+            df_pairs_detail = df_pairs[[c for c in pair_detail_cols if c in df_pairs.columns]].copy()
+            df_pairs_detail = drop_blank_display_columns(df_pairs_detail)
+            render_sortable_table(df_pairs_detail)
+
+        st.markdown("#### 投資判定｜必要オッズ確認")
+        st.caption("p_safe・最低必要オッズ・参考odds・EV判定を見る表です。買う/ケンの確認はここで行います。")
+        df_pairs_invest = df_pairs[[c for c in pair_invest_cols if c in df_pairs.columns]].copy()
+        df_pairs_invest = drop_blank_display_columns(df_pairs_invest)
+        render_sortable_table(df_pairs_invest)
+
+        with st.expander("投資判定の詳細列を確認", expanded=False):
+            df_pairs_invest_detail = df_pairs[[c for c in pair_invest_detail_cols if c in df_pairs.columns]].copy()
+            df_pairs_invest_detail = drop_blank_display_columns(df_pairs_invest_detail)
+            render_sortable_table(df_pairs_invest_detail)
+    else:
+        st.info("最終2車複候補の表示対象がありません。")
 
     st.markdown("### 1-2ゾーン基礎集計")
     st.caption("全体に対して、2車複1-2そのものがどれくらい機能しているかを確認します。")
