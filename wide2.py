@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8a｜三連複4点候補｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8c｜三連複4点候補｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1715,11 +1715,13 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
     """
     三連複4点候補を作る。
 
-    方針：
+    v11.8c方針：
     - 評価1・2・3は固定する。
-    - 残り1枠Xを、1-4 / 1-5 / 1-6 / 1-7 の総合候補情報から選ぶ。
-    - 的中率だけではなく、判定・資産枠・総合候補理由・配当位置・配当戻り余地を優先する。
-    - 特に大きな動きがなければ、基礎力の高い4が自然に残る。
+    - 第4枠Xは 1-4 / 1-5 / 1-6 / 1-7 だけを見る。
+    - 選抜基準はシンプルに「的中率差と回収率差の絶対値が小さいもの」。
+    - 安定差 = abs(想定差) + abs(回収差)
+    - 安定差が一番小さいXを選び、123XBOXを表示する。
+    - 判定・資産枠・総合候補理由は根拠表示には残すが、選抜の主条件にはしない。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -1755,149 +1757,79 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         except Exception:
             return default
 
-    def score_one(x: int) -> dict:
+    def classify_one(x: int) -> dict:
         key = f"1-{int(x)}"
         row = row_map.get(key)
 
-        # 何も強い動きがなければ4へ戻りやすくする基礎点。
-        # ただし5～7でも、総合候補として浮けば逆転できる幅に抑える。
-        base_score = {4: 46.0, 5: 38.0, 6: 31.0, 7: 24.0}.get(int(x), 0.0)
-        score = base_score
-        reasons = [f"基礎{int(x)}枠"]
+        hit_diff = _num(row, "想定差", None)
+        roi_diff = _num(row, "回収差", None)
+        hit_abs = abs(float(hit_diff)) if hit_diff is not None else None
+        roi_abs = abs(float(roi_diff)) if roi_diff is not None else None
 
-        judge = _str(row, "判定")
-        asset = _str(row, "資産枠")
-        total_reason = _str(row, "総合候補理由")
-        pay_pos = _str(row, "配当位置")
-        pay_room = _str(row, "配当戻り余地")
-        ev_label = _str(row, "EV判定")
-        excluded = False
-
-        if judge == "本線":
-            score += 34.0
-            reasons.append("本線")
-        elif judge == "注":
-            score += 26.0
-            reasons.append("注")
-
-        if asset == "安定":
-            score += 15.0
-            reasons.append("安定")
-        elif asset == "中庸":
-            score += 24.0
-            reasons.append("中庸")
-        elif asset == "歪み":
-            score += 18.0
-            reasons.append("歪み")
-
-        if "安定枠" in total_reason:
-            score += 14.0
-            reasons.append("安定枠")
-        if "中庸枠" in total_reason:
-            score += 24.0
-            reasons.append("中庸枠")
-        if "歪み枠" in total_reason:
-            score += 18.0
-            reasons.append("歪み枠")
-
-        # 除外・過熱は三連複4点候補では選択対象から外す。
-        # ここで選ぶXは「買い候補」なので、後追い除外などを減点だけで残すと、
-        # 基礎点の高い4が除外表示のまま選ばれることがある。
-        if "未回収除外" in total_reason:
-            excluded = True
-            score -= 999.0
-            reasons.append("未回収除外")
-        if "回収率過熱除外" in total_reason:
-            excluded = True
-            score -= 999.0
-            reasons.append("回収過熱除外")
-        if "的中率過熱除外" in total_reason:
-            excluded = True
-            score -= 999.0
-            reasons.append("的中過熱除外")
-        if "配当過熱除外" in total_reason:
-            excluded = True
-            score -= 999.0
-            reasons.append("配当過熱除外")
-        if "後追い除外" in total_reason:
-            excluded = True
-            score -= 999.0
-            reasons.append("後追い除外")
-
-        if "基準付近" in pay_pos:
-            score += 18.0
-            reasons.append("基準付近")
-        elif "安すぎ" in pay_pos:
-            score += 5.0
-            reasons.append("安すぎ")
-        elif "高すぎ" in pay_pos:
-            score -= 18.0
-            reasons.append("高すぎ減点")
-
-        if "中庸" in pay_room:
-            score += 10.0
-            reasons.append("配当中庸")
-        elif "あり" in pay_room:
-            score += 6.0
-            reasons.append("戻り余地")
-        elif "上振れ警戒" in pay_room:
-            score -= 14.0
-            reasons.append("上振れ警戒")
-
-        # 的中率そのものは補助扱い。ここを主因にしない。
-        p_safe = _num(row, "p_safe%", None)
-        expected = _num(row, "想定ペア的%", None)
-        hit_rate = _num(row, "的中率%", None)
-        if p_safe is not None:
-            score += min(p_safe, 12.0) * 0.55
-        elif expected is not None:
-            score += min(expected, 12.0) * 0.45
-        elif hit_rate is not None:
-            score += min(hit_rate, 12.0) * 0.35
-
-        coef = _num(row, "配当係数", None)
-        if coef is not None:
-            if 0.80 <= coef <= 1.30:
-                score += 8.0
-            elif coef > 1.30:
-                score -= min((coef - 1.30) * 10.0, 16.0)
-            elif coef < 0.50:
-                score -= 6.0
-
-        roi = _num(row, "回収率%", None)
-        if roi is not None:
-            # 100%近辺を少し評価し、極端な上下は少し落とす。
-            score += max(0.0, 8.0 - abs(roi - 100.0) / 15.0)
+        if hit_abs is not None and roi_abs is not None:
+            stability_gap = round(hit_abs + roi_abs, 3)
+            selectable = True
+            select_reason = "安定差計算可"
+        else:
+            stability_gap = None
+            selectable = False
+            select_reason = "差分不足"
 
         return {
             "第4枠": int(x),
             "1軸相手": key,
-            "候補点": round(score, 3),
-            "判定": judge,
-            "資産枠": asset,
-            "総合候補理由": total_reason,
-            "配当位置": pay_pos,
-            "配当戻り余地": pay_room,
-            "的中率%": hit_rate,
-            "想定ペア的%": expected,
-            "p_safe%": p_safe,
-            "回収率%": roi,
-            "配当係数": coef,
-            "EV判定": ev_label,
-            "除外": bool(excluded),
-            "選択理由": "／".join([r for r in reasons if r]),
+            "安定差": stability_gap,
+            "的中率差abs": round(hit_abs, 3) if hit_abs is not None else None,
+            "回収差abs": round(roi_abs, 3) if roi_abs is not None else None,
+            "想定差": hit_diff,
+            "回収差": roi_diff,
+            "判定": _str(row, "判定"),
+            "資産枠": _str(row, "資産枠"),
+            "総合候補理由": _str(row, "総合候補理由"),
+            "配当位置": _str(row, "配当位置"),
+            "配当戻り余地": _str(row, "配当戻り余地"),
+            "的中率%": _num(row, "的中率%", None),
+            "想定ペア的%": _num(row, "想定ペア的%", None),
+            "p_safe%": _num(row, "p_safe%", None),
+            "回収率%": _num(row, "回収率%", None),
+            "想定回収率%": _num(row, "想定回収率%", None),
+            "配当係数": _num(row, "配当係数", None),
+            "EV判定": _str(row, "EV判定"),
+            "選択可否": "可" if selectable else "不可",
+            "選択理由": select_reason,
         }
 
-    candidates_all = [score_one(x) for x in (4, 5, 6, 7)]
-    # 除外理由が付いた候補は、原則として三連複4点候補の第4枠には採用しない。
-    # ただし全候補が除外の場合だけ、画面を空にしないため最低限のフォールバックを残す。
-    candidates_available = [c for c in candidates_all if not bool(c.get("除外", False))]
-    candidates = candidates_available if candidates_available else candidates_all
-    candidates = sorted(candidates, key=lambda r: (-float(r.get("候補点", 0.0)), int(r.get("第4枠", 9))))
-    candidates_all = sorted(candidates_all, key=lambda r: (-float(r.get("候補点", 0.0)), int(r.get("第4枠", 9))))
-    best = candidates[0] if candidates else None
-    if not best:
-        return None
+    candidates_all = [classify_one(x) for x in (4, 5, 6, 7)]
+    selectable = [c for c in candidates_all if c.get("選択可否") == "可"]
+
+    if selectable:
+        selectable = sorted(
+            selectable,
+            key=lambda r: (
+                float(r.get("安定差", 999999.0)),
+                float(r.get("的中率差abs", 999999.0)),
+                float(r.get("回収差abs", 999999.0)),
+                int(r.get("第4枠", 9)),
+            ),
+        )
+        best = selectable[0]
+    else:
+        # 差分列がまだ作れない場合だけ、画面を空にせず既定の4へ戻す。
+        fallback = next((c for c in candidates_all if int(c.get("第4枠", 0)) == 4), None)
+        if fallback is None:
+            return None
+        best = fallback
+        best["選択理由"] = "差分不足のため既定4枠"
+
+    candidates_all = sorted(
+        candidates_all,
+        key=lambda r: (
+            float(r.get("安定差") if r.get("安定差") is not None else 999999.0),
+            float(r.get("的中率差abs") if r.get("的中率差abs") is not None else 999999.0),
+            float(r.get("回収差abs") if r.get("回収差abs") is not None else 999999.0),
+            int(r.get("第4枠", 9)),
+        ),
+    )
 
     x = int(best["第4枠"])
     trio_keys = [
@@ -1906,19 +1838,17 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         _trio_key_from_parts(1, 3, x),
         _trio_key_from_parts(2, 3, x),
     ]
-    # x=3は想定しないが、念のため重複除外。
     trio_keys = list(dict.fromkeys(trio_keys))
 
     return {
         "型": f"123{x}BOX",
         "第4枠": x,
         "1軸相手": best.get("1軸相手"),
-        "候補点": best.get("候補点"),
-        "選択理由": best.get("選択理由"),
+        "候補点": best.get("安定差"),
+        "選択理由": "安定差最小（abs(想定差)+abs(回収差)）",
         "買い目": trio_keys,
         "candidate_rows": candidates_all,
     }
-
 
 
 # =========================
@@ -3179,7 +3109,7 @@ with tabs[2]:
             st.markdown(tc_html, unsafe_allow_html=True)
 
             with st.expander("根拠数値を確認", expanded=False):
-                st.caption("評価1・2・3は固定。第4枠は1-4/1-5/1-6/1-7の総合候補情報から選びます。")
+                st.caption("評価1・2・3は固定。第4枠は1-4/1-5/1-6/1-7の中で、abs(想定差)+abs(回収差) が最小のものを選びます。")
                 st.write(
                     {
                         "型": tc.get("型"),
@@ -3192,7 +3122,7 @@ with tabs[2]:
                 )
                 tc_candidates = pd.DataFrame(tc.get("candidate_rows", []))
                 if not tc_candidates.empty:
-                    st.caption("4567の第4枠候補です。的中率だけではなく、判定・資産枠・総合候補理由・配当位置を含めて選びます。")
+                    st.caption("4567の第4枠候補です。安定差＝abs(想定差)+abs(回収差)。小さいほど想定に近い相手です。")
                     st.dataframe(
                         tc_candidates,
                         use_container_width=True,
