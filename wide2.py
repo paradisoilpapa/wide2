@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8｜三連複4点候補｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8a｜三連複4点候補｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1771,6 +1771,7 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         pay_pos = _str(row, "配当位置")
         pay_room = _str(row, "配当戻り余地")
         ev_label = _str(row, "EV判定")
+        excluded = False
 
         if judge == "本線":
             score += 34.0
@@ -1799,22 +1800,29 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
             score += 18.0
             reasons.append("歪み枠")
 
-        # 除外・過熱は強めに減点。ここは「買う理由」ではなく「第4枠の候補選び」なので完全除外にはしない。
+        # 除外・過熱は三連複4点候補では選択対象から外す。
+        # ここで選ぶXは「買い候補」なので、後追い除外などを減点だけで残すと、
+        # 基礎点の高い4が除外表示のまま選ばれることがある。
         if "未回収除外" in total_reason:
-            score -= 28.0
-            reasons.append("未回収減点")
+            excluded = True
+            score -= 999.0
+            reasons.append("未回収除外")
         if "回収率過熱除外" in total_reason:
-            score -= 24.0
-            reasons.append("回収過熱減点")
+            excluded = True
+            score -= 999.0
+            reasons.append("回収過熱除外")
         if "的中率過熱除外" in total_reason:
-            score -= 20.0
-            reasons.append("的中過熱減点")
+            excluded = True
+            score -= 999.0
+            reasons.append("的中過熱除外")
         if "配当過熱除外" in total_reason:
-            score -= 18.0
-            reasons.append("配当過熱減点")
+            excluded = True
+            score -= 999.0
+            reasons.append("配当過熱除外")
         if "後追い除外" in total_reason:
-            score -= 14.0
-            reasons.append("後追い減点")
+            excluded = True
+            score -= 999.0
+            reasons.append("後追い除外")
 
         if "基準付近" in pay_pos:
             score += 18.0
@@ -1876,11 +1884,17 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
             "回収率%": roi,
             "配当係数": coef,
             "EV判定": ev_label,
+            "除外": bool(excluded),
             "選択理由": "／".join([r for r in reasons if r]),
         }
 
-    candidates = [score_one(x) for x in (4, 5, 6, 7)]
+    candidates_all = [score_one(x) for x in (4, 5, 6, 7)]
+    # 除外理由が付いた候補は、原則として三連複4点候補の第4枠には採用しない。
+    # ただし全候補が除外の場合だけ、画面を空にしないため最低限のフォールバックを残す。
+    candidates_available = [c for c in candidates_all if not bool(c.get("除外", False))]
+    candidates = candidates_available if candidates_available else candidates_all
     candidates = sorted(candidates, key=lambda r: (-float(r.get("候補点", 0.0)), int(r.get("第4枠", 9))))
+    candidates_all = sorted(candidates_all, key=lambda r: (-float(r.get("候補点", 0.0)), int(r.get("第4枠", 9))))
     best = candidates[0] if candidates else None
     if not best:
         return None
@@ -1902,7 +1916,7 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         "候補点": best.get("候補点"),
         "選択理由": best.get("選択理由"),
         "買い目": trio_keys,
-        "candidate_rows": candidates,
+        "candidate_rows": candidates_all,
     }
 
 
