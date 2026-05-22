@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.7｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜引継ぎ表つき｜7車固定・欠車対応｜クロスフォーメーション単独｜本線注内包優先")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8｜三連複4点候補｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1711,6 +1711,201 @@ def race_ev_summary(df: pd.DataFrame, stake_col: str = "stake") -> dict:
     }
 
 
+def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | None:
+    """
+    三連複4点候補を作る。
+
+    方針：
+    - 評価1・2・3は固定する。
+    - 残り1枠Xを、1-4 / 1-5 / 1-6 / 1-7 の総合候補情報から選ぶ。
+    - 的中率だけではなく、判定・資産枠・総合候補理由・配当位置・配当戻り余地を優先する。
+    - 特に大きな動きがなければ、基礎力の高い4が自然に残る。
+    """
+    if df_pairs is None or df_pairs.empty:
+        return None
+    if "ペアキー" not in df_pairs.columns:
+        return None
+
+    work = df_pairs.copy()
+    row_map = {}
+    for _, row in work.iterrows():
+        key = str(row.get("ペアキー", "")).strip()
+        if key:
+            row_map[key] = row
+
+    def _str(row: pd.Series | None, col: str) -> str:
+        if row is None:
+            return ""
+        try:
+            v = row.get(col, "")
+        except Exception:
+            return ""
+        if pd.isna(v):
+            return ""
+        return str(v)
+
+    def _num(row: pd.Series | None, col: str, default=None):
+        if row is None:
+            return default
+        try:
+            v = row.get(col, default)
+            if pd.isna(v):
+                return default
+            return float(v)
+        except Exception:
+            return default
+
+    def score_one(x: int) -> dict:
+        key = f"1-{int(x)}"
+        row = row_map.get(key)
+
+        # 何も強い動きがなければ4へ戻りやすくする基礎点。
+        # ただし5～7でも、総合候補として浮けば逆転できる幅に抑える。
+        base_score = {4: 46.0, 5: 38.0, 6: 31.0, 7: 24.0}.get(int(x), 0.0)
+        score = base_score
+        reasons = [f"基礎{int(x)}枠"]
+
+        judge = _str(row, "判定")
+        asset = _str(row, "資産枠")
+        total_reason = _str(row, "総合候補理由")
+        pay_pos = _str(row, "配当位置")
+        pay_room = _str(row, "配当戻り余地")
+        ev_label = _str(row, "EV判定")
+
+        if judge == "本線":
+            score += 34.0
+            reasons.append("本線")
+        elif judge == "注":
+            score += 26.0
+            reasons.append("注")
+
+        if asset == "安定":
+            score += 15.0
+            reasons.append("安定")
+        elif asset == "中庸":
+            score += 24.0
+            reasons.append("中庸")
+        elif asset == "歪み":
+            score += 18.0
+            reasons.append("歪み")
+
+        if "安定枠" in total_reason:
+            score += 14.0
+            reasons.append("安定枠")
+        if "中庸枠" in total_reason:
+            score += 24.0
+            reasons.append("中庸枠")
+        if "歪み枠" in total_reason:
+            score += 18.0
+            reasons.append("歪み枠")
+
+        # 除外・過熱は強めに減点。ここは「買う理由」ではなく「第4枠の候補選び」なので完全除外にはしない。
+        if "未回収除外" in total_reason:
+            score -= 28.0
+            reasons.append("未回収減点")
+        if "回収率過熱除外" in total_reason:
+            score -= 24.0
+            reasons.append("回収過熱減点")
+        if "的中率過熱除外" in total_reason:
+            score -= 20.0
+            reasons.append("的中過熱減点")
+        if "配当過熱除外" in total_reason:
+            score -= 18.0
+            reasons.append("配当過熱減点")
+        if "後追い除外" in total_reason:
+            score -= 14.0
+            reasons.append("後追い減点")
+
+        if "基準付近" in pay_pos:
+            score += 18.0
+            reasons.append("基準付近")
+        elif "安すぎ" in pay_pos:
+            score += 5.0
+            reasons.append("安すぎ")
+        elif "高すぎ" in pay_pos:
+            score -= 18.0
+            reasons.append("高すぎ減点")
+
+        if "中庸" in pay_room:
+            score += 10.0
+            reasons.append("配当中庸")
+        elif "あり" in pay_room:
+            score += 6.0
+            reasons.append("戻り余地")
+        elif "上振れ警戒" in pay_room:
+            score -= 14.0
+            reasons.append("上振れ警戒")
+
+        # 的中率そのものは補助扱い。ここを主因にしない。
+        p_safe = _num(row, "p_safe%", None)
+        expected = _num(row, "想定ペア的%", None)
+        hit_rate = _num(row, "的中率%", None)
+        if p_safe is not None:
+            score += min(p_safe, 12.0) * 0.55
+        elif expected is not None:
+            score += min(expected, 12.0) * 0.45
+        elif hit_rate is not None:
+            score += min(hit_rate, 12.0) * 0.35
+
+        coef = _num(row, "配当係数", None)
+        if coef is not None:
+            if 0.80 <= coef <= 1.30:
+                score += 8.0
+            elif coef > 1.30:
+                score -= min((coef - 1.30) * 10.0, 16.0)
+            elif coef < 0.50:
+                score -= 6.0
+
+        roi = _num(row, "回収率%", None)
+        if roi is not None:
+            # 100%近辺を少し評価し、極端な上下は少し落とす。
+            score += max(0.0, 8.0 - abs(roi - 100.0) / 15.0)
+
+        return {
+            "第4枠": int(x),
+            "1軸相手": key,
+            "候補点": round(score, 3),
+            "判定": judge,
+            "資産枠": asset,
+            "総合候補理由": total_reason,
+            "配当位置": pay_pos,
+            "配当戻り余地": pay_room,
+            "的中率%": hit_rate,
+            "想定ペア的%": expected,
+            "p_safe%": p_safe,
+            "回収率%": roi,
+            "配当係数": coef,
+            "EV判定": ev_label,
+            "選択理由": "／".join([r for r in reasons if r]),
+        }
+
+    candidates = [score_one(x) for x in (4, 5, 6, 7)]
+    candidates = sorted(candidates, key=lambda r: (-float(r.get("候補点", 0.0)), int(r.get("第4枠", 9))))
+    best = candidates[0] if candidates else None
+    if not best:
+        return None
+
+    x = int(best["第4枠"])
+    trio_keys = [
+        _trio_key_from_parts(1, 2, 3),
+        _trio_key_from_parts(1, 2, x),
+        _trio_key_from_parts(1, 3, x),
+        _trio_key_from_parts(2, 3, x),
+    ]
+    # x=3は想定しないが、念のため重複除外。
+    trio_keys = list(dict.fromkeys(trio_keys))
+
+    return {
+        "型": f"123{x}BOX",
+        "第4枠": x,
+        "1軸相手": best.get("1軸相手"),
+        "候補点": best.get("候補点"),
+        "選択理由": best.get("選択理由"),
+        "買い目": trio_keys,
+        "candidate_rows": candidates,
+    }
+
+
 
 # =========================
 # Tabs
@@ -2358,8 +2553,9 @@ with tabs[2]:
     }
     ev_diagnosis_frames = []
     cross_formation_summary = None
+    sanrenpuku_4point_candidate_summary = None
 
-    # クロスフォーメーション診断では、通常画面に投資EV設定UIを出さない。
+    # 三連複4点候補では、通常画面に投資EV設定UIを出さない。
     # 初期値は他場想定の安全係数0.90で固定し、必要なら後続版で詳細設定へ戻す。
     diagnosis_condition_margin = 0.90
 
@@ -2776,6 +2972,7 @@ with tabs[2]:
         if _pair_pick_mask.any():
             ev_diagnosis_frames.append(df_pairs.loc[_pair_pick_mask].copy())
         cross_formation_summary = build_cross_formation_summary(df_pairs, pair12_total)
+        sanrenpuku_4point_candidate_summary = build_sanrenpuku_4point_candidate_summary(df_pairs)
 
     # =========================
     # 最終2車複候補の表示分離
@@ -2933,11 +3130,10 @@ with tabs[2]:
     except Exception:
         pass
 
-    # 3連複検証・推奨表示はクロスフォーメーション運用では非表示。
+    # 3連複検証・推奨表示は、この画面では「三連複4点候補」に一本化する。
 
-    # 評価別テーブル直下に、クロスフォーメーションだけを表示する。
-    # 2車複本線・注はクロスフォーメーション内に内包されるため、通常表示では出さない。
-    # 3連複推奨も購入候補からは外し、補助4点を主表示にする。
+    # 評価別テーブル直下に、三連複4点候補だけを表示する。
+    # 評価1・2・3は固定し、第4枠だけを1-4/1-5/1-6/1-7の総合候補情報で選ぶ。
     def _escape_html(s) -> str:
         return (
             str(s)
@@ -2948,57 +3144,62 @@ with tabs[2]:
         )
 
     with purchase_candidate_slot.container():
-        st.markdown("### ＜購入候補｜クロスフォーメーション2車複4点＞")
-        if cross_formation_summary:
-            cf = cross_formation_summary
-            cf_line = f"クロスフォーメーション：{cf.get('型', '—')}"
-            cf_sub = (
-                f"中心：{cf.get('中心', '—')}／"
-                f"想定的中率：{cf.get('想定的中率%', '—')}%／"
-                f"EV1.10必要平均払戻：{cf.get('EV1.10必要平均払戻', '—')}円／"
-                f"{cf.get('状態', '')}"
+        st.markdown("### ＜購入候補｜三連複4点候補＞")
+        if sanrenpuku_4point_candidate_summary:
+            tc = sanrenpuku_4point_candidate_summary
+            buy_list = " / ".join(tc.get("買い目", []))
+            tc_line = f"三連複4点候補：{tc.get('型', '—')}"
+            tc_sub = (
+                f"第4枠：{tc.get('第4枠', '—')}／"
+                f"1軸相手：{tc.get('1軸相手', '—')}／"
+                f"買い目：{buy_list}"
             )
-            cf_html = (
+            tc_html = (
                 '<div style="background:#fff7e6;color:#7a4a00;border-radius:8px;'
                 'padding:14px 16px;border:1px solid rgba(0,0,0,0.05);'
                 'font-size:18px;line-height:1.7;font-weight:700;">'
-                f'<div>{_escape_html(cf_line)}</div>'
-                f'<div style="font-size:14px;font-weight:600;opacity:0.88;">{_escape_html(cf_sub)}</div>'
+                f'<div>{_escape_html(tc_line)}</div>'
+                f'<div style="font-size:14px;font-weight:600;opacity:0.88;">{_escape_html(tc_sub)}</div>'
                 '</div>'
             )
-            st.markdown(cf_html, unsafe_allow_html=True)
+            st.markdown(tc_html, unsafe_allow_html=True)
 
             with st.expander("根拠数値を確認", expanded=False):
-                st.caption("通常表示は型だけです。確認用として、内部展開された2車複4点と現在的中率を表示します。")
-                cf_detail = pd.DataFrame(cross_formation_summary.get("detail", []))
-                if not cf_detail.empty:
-                    st.dataframe(
-                        cf_detail,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=table_auto_height(cf_detail),
-                    )
+                st.caption("評価1・2・3は固定。第4枠は1-4/1-5/1-6/1-7の総合候補情報から選びます。")
                 st.write(
                     {
-                        "中心": cf.get("中心"),
-                        "型": cf.get("型"),
-                        "想定的中率%": cf.get("想定的中率%"),
-                        "EV1.10必要平均払戻": cf.get("EV1.10必要平均払戻"),
-                        "EV1.10必要平均オッズ": cf.get("EV1.10必要平均オッズ"),
-                        "状態": cf.get("状態"),
+                        "型": tc.get("型"),
+                        "第4枠": tc.get("第4枠"),
+                        "1軸相手": tc.get("1軸相手"),
+                        "候補点": tc.get("候補点"),
+                        "買い目": tc.get("買い目"),
+                        "選択理由": tc.get("選択理由"),
                     }
                 )
-                cf_candidates = pd.DataFrame(cross_formation_summary.get("candidate_rows", []))
-                if not cf_candidates.empty:
-                    st.caption("全探索した候補の上位です。通常表示は最上位1型だけです。")
+                tc_candidates = pd.DataFrame(tc.get("candidate_rows", []))
+                if not tc_candidates.empty:
+                    st.caption("4567の第4枠候補です。的中率だけではなく、判定・資産枠・総合候補理由・配当位置を含めて選びます。")
                     st.dataframe(
-                        cf_candidates,
+                        tc_candidates,
                         use_container_width=True,
                         hide_index=True,
-                        height=table_auto_height(cf_candidates),
+                        height=table_auto_height(tc_candidates),
                     )
+
+                if cross_formation_summary:
+                    with st.expander("参考｜旧クロスフォーメーション", expanded=False):
+                        cf = cross_formation_summary
+                        st.write(
+                            {
+                                "中心": cf.get("中心"),
+                                "型": cf.get("型"),
+                                "想定的中率%": cf.get("想定的中率%"),
+                                "EV1.10必要平均払戻": cf.get("EV1.10必要平均払戻"),
+                                "状態": cf.get("状態"),
+                            }
+                        )
         else:
-            st.info("クロスフォーメーション候補がありません。2車複本線または注の候補が必要です。")
+            st.info("三連複4点候補はありません。1-4/1-5/1-6/1-7の個別2車複データが必要です。")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
