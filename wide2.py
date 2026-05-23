@@ -1721,7 +1721,8 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
     - 選抜基準はシンプルに「的中率差と回収率差の絶対値が小さいもの」。
     - 安定差 = abs(想定差) + abs(回収差)
     - 安定差が一番小さいXを選び、123XBOXを表示する。
-    - 判定・資産枠・総合候補理由は根拠表示には残すが、選抜の主条件にはしない。
+    - 根拠表示は第4枠選定に必要な列だけに絞る。
+    - 投資系の列（資産枠・配当位置・EV判定など）はこの表に混ぜない。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -1783,18 +1784,7 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
             "回収差abs": round(roi_abs, 3) if roi_abs is not None else None,
             "想定差": hit_diff,
             "回収差": roi_diff,
-            "判定": _str(row, "判定"),
-            "資産枠": _str(row, "資産枠"),
-            "総合候補理由": _str(row, "総合候補理由"),
-            "配当位置": _str(row, "配当位置"),
-            "配当戻り余地": _str(row, "配当戻り余地"),
-            "的中率%": _num(row, "的中率%", None),
-            "想定ペア的%": _num(row, "想定ペア的%", None),
-            "p_safe%": _num(row, "p_safe%", None),
-            "回収率%": _num(row, "回収率%", None),
-            "想定回収率%": _num(row, "想定回収率%", None),
-            "配当係数": _num(row, "配当係数", None),
-            "EV判定": _str(row, "EV判定"),
+            "判定": "",
             "選択可否": "可" if selectable else "不可",
             "選択理由": select_reason,
         }
@@ -1821,6 +1811,19 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         best = fallback
         best["選択理由"] = "差分不足のため既定4枠"
 
+    # 採用行を候補表上で明示する。
+    best_x = int(best["第4枠"])
+    for c in candidates_all:
+        if int(c.get("第4枠", 0)) == best_x:
+            c["判定"] = "◎採用"
+            c["選択理由"] = "安定差最小"
+        elif c.get("選択可否") == "可":
+            c["判定"] = ""
+            c["選択理由"] = "比較候補"
+        else:
+            c["判定"] = ""
+            c["選択理由"] = "差分不足"
+
     candidates_all = sorted(
         candidates_all,
         key=lambda r: (
@@ -1831,7 +1834,7 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         ),
     )
 
-    x = int(best["第4枠"])
+    x = best_x
     trio_keys = [
         _trio_key_from_parts(1, 2, 3),
         _trio_key_from_parts(1, 2, x),
@@ -1840,11 +1843,26 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
     ]
     trio_keys = list(dict.fromkeys(trio_keys))
 
+    hit_abs_best = best.get("的中率差abs")
+    roi_abs_best = best.get("回収差abs")
+    hit_diff_best = best.get("想定差")
+    roi_diff_best = best.get("回収差")
+    if hit_abs_best is not None and roi_abs_best is not None:
+        score_detail = (
+            f"abs(想定差 {hit_diff_best}) + abs(回収差 {roi_diff_best}) "
+            f"= {hit_abs_best} + {roi_abs_best} = {best.get('安定差')}"
+        )
+    else:
+        score_detail = "差分不足"
+
     return {
         "型": f"123{x}BOX",
         "第4枠": x,
         "1軸相手": best.get("1軸相手"),
         "候補点": best.get("安定差"),
+        "選定スコア": best.get("安定差"),
+        "選定スコア内訳": score_detail,
+        "判定": "◎採用",
         "選択理由": "安定差最小（abs(想定差)+abs(回収差)）",
         "買い目": trio_keys,
         "candidate_rows": candidates_all,
@@ -3096,6 +3114,7 @@ with tabs[2]:
             tc_sub = (
                 f"第4枠：{tc.get('第4枠', '—')}／"
                 f"1軸相手：{tc.get('1軸相手', '—')}／"
+                f"選定スコア：{tc.get('選定スコア', tc.get('候補点', '—'))}／"
                 f"買い目：{buy_list}"
             )
             tc_html = (
@@ -3115,7 +3134,9 @@ with tabs[2]:
                         "型": tc.get("型"),
                         "第4枠": tc.get("第4枠"),
                         "1軸相手": tc.get("1軸相手"),
-                        "候補点": tc.get("候補点"),
+                        "選定スコア": tc.get("選定スコア", tc.get("候補点")),
+                        "選定スコア内訳": tc.get("選定スコア内訳"),
+                        "判定": tc.get("判定"),
                         "買い目": tc.get("買い目"),
                         "選択理由": tc.get("選択理由"),
                     }
@@ -3123,6 +3144,18 @@ with tabs[2]:
                 tc_candidates = pd.DataFrame(tc.get("candidate_rows", []))
                 if not tc_candidates.empty:
                     st.caption("4567の第4枠候補です。安定差＝abs(想定差)+abs(回収差)。小さいほど想定に近い相手です。")
+                    root_cols = [
+                        "第4枠",
+                        "1軸相手",
+                        "安定差",
+                        "的中率差abs",
+                        "回収差abs",
+                        "想定差",
+                        "回収差",
+                        "判定",
+                        "選択理由",
+                    ]
+                    tc_candidates = tc_candidates[[c for c in root_cols if c in tc_candidates.columns]]
                     st.dataframe(
                         tc_candidates,
                         use_container_width=True,
