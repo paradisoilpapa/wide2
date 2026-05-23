@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict
+from itertools import combinations
 from typing import List, Dict, Tuple
 
 import pandas as pd
