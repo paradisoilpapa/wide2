@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict
-from itertools import combinations
 from typing import List, Dict, Tuple
 
 import pandas as pd
@@ -1897,16 +1896,19 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
     }
 
 
-def build_axis1_three_mate_formation_summary(df_pairs: pd.DataFrame) -> dict | None:
+
+def build_axis1_stability_hybrid_formation_summary(df_pairs: pd.DataFrame) -> dict | None:
     """
-    三連複3点フォメを作る。
+    三連複フォーメーションを作る。
 
     方針：
-    - 評価1を軸固定する。
-    - 相手は評価2～7のうち、ズレが少ない3車を選ぶ。
-    - ここでは「第4枠1車選定」と違い、回収差プラス除外は使わない。
-    - 安定差 = abs(想定差) + abs(回収差) の絶対値評価だけで小さい順に3車を採用する。
-    - 買い目は 1-X-Y の3点。
+    - 1列目は評価1固定。
+    - 2列目は、1軸相手（1-2〜1-7）の安定差が小さい順に上位2車。
+    - 3列目は、2列目の2車 + 評価上位から追加2車。
+      追加2車は、評価1と2列目を除いた中で評価番号が若い順。
+    - 表記例：1-26-2634
+    - 安定差は abs(想定差) + abs(回収差)。
+    - ここでは回収差プラス除外は使わない。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -1931,91 +1933,131 @@ def build_axis1_three_mate_formation_summary(df_pairs: pd.DataFrame) -> dict | N
         except Exception:
             return default
 
-    candidate_rows = []
+    candidates = []
     for x in range(2, FIELD_SIZE + 1):
-        key = _pair_key_norm(1, int(x))
+        key = f"1-{int(x)}"
         row = row_map.get(key)
-
         hit_diff = _num(row, "想定差", None)
         roi_diff = _num(row, "回収差", None)
-
         if hit_diff is not None and roi_diff is not None:
-            hit_abs = abs(float(hit_diff))
-            roi_abs = abs(float(roi_diff))
-            stability_gap = round(hit_abs + roi_abs, 3)
-            reason = "安定差計算可"
+            stability = round(abs(float(hit_diff)) + abs(float(roi_diff)), 3)
         else:
-            hit_abs = None
-            roi_abs = None
-            stability_gap = None
-            reason = "差分不足"
-
-        candidate_rows.append({
+            stability = None
+        candidates.append({
             "相手": int(x),
             "1軸相手": key,
             "想定差": hit_diff,
             "回収差": roi_diff,
-            "安定差": stability_gap,
+            "安定差": stability,
             "判定": "",
-            "選択理由": reason,
-            "安定差内訳": (
-                f"abs({hit_diff}) + abs({roi_diff}) = {round(hit_abs, 3)} + {round(roi_abs, 3)} = {stability_gap}"
-                if hit_abs is not None and roi_abs is not None else "差分不足"
-            ),
+            "選択理由": "差分不足" if stability is None else "比較候補",
         })
 
-    calc_rows = [r for r in candidate_rows if r.get("安定差") is not None]
-    if len(calc_rows) < 3:
+    valid = [c for c in candidates if c.get("安定差") is not None]
+    if len(valid) < 2:
         return None
 
-    picked = sorted(
-        calc_rows,
-        key=lambda r: (
-            float(r.get("安定差", 999999.0)),
-            int(r.get("相手", 99)),
-        ),
-    )[:3]
-    picked_nums = [int(r["相手"]) for r in picked]
-    picked_set = set(picked_nums)
+    valid_sorted = sorted(valid, key=lambda r: (float(r.get("安定差", 999999.0)), int(r.get("相手", 9))))
+    second_mates = [int(c["相手"]) for c in valid_sorted[:2]]
 
-    for r in candidate_rows:
-        if int(r.get("相手", 0)) in picked_set:
-            r["判定"] = "◎採用"
-            r["選択理由"] = "安定差小さい順3車"
-        elif r.get("安定差") is not None:
-            r["判定"] = ""
-            r["選択理由"] = "比較候補"
-        else:
-            r["判定"] = ""
-            r["選択理由"] = "差分不足"
+    # 評価上位から追加2車。評価1と2列目は除外する。
+    extra_mates = []
+    for r in range(2, FIELD_SIZE + 1):
+        if r in second_mates:
+            continue
+        extra_mates.append(r)
+        if len(extra_mates) >= 2:
+            break
 
-    candidate_rows = sorted(
-        candidate_rows,
-        key=lambda r: (
-            0 if r.get("判定") == "◎採用" else 1,
-            float(r.get("安定差") if r.get("安定差") is not None else 999999.0),
-            int(r.get("相手", 99)),
-        )
-    )
+    third_mates = []
+    for r in second_mates + extra_mates:
+        if r not in third_mates:
+            third_mates.append(r)
 
-    # 表示と買い目は数字順にそろえる。
-    mates_sorted = sorted(picked_nums)
+    if len(third_mates) < 2:
+        return None
+
     trio_keys = []
-    for a, b in combinations(mates_sorted, 2):
-        trio_keys.append(_trio_key_from_parts(1, a, b))
-    trio_keys = list(dict.fromkeys(trio_keys))
+    seen = set()
+    for a in second_mates:
+        for b in third_mates:
+            if int(a) == int(b):
+                continue
+            key = _trio_key_from_parts(1, int(a), int(b))
+            if key not in seen:
+                trio_keys.append(key)
+                seen.add(key)
+
+    if not trio_keys:
+        return None
+
+    second_code = "".join(str(x) for x in second_mates)
+    third_code = "".join(str(x) for x in third_mates)
+    form_type = f"1-{second_code}-{third_code}"
+
+    for c in candidates:
+        x = int(c.get("相手", 0))
+        if x in second_mates:
+            c["判定"] = "◎2列目"
+            c["選択理由"] = "安定差上位2車"
+        elif x in extra_mates:
+            c["判定"] = "○3列目"
+            c["選択理由"] = "評価上位追加2車"
+        elif c.get("安定差") is not None:
+            c["判定"] = ""
+            c["選択理由"] = "比較候補"
+        else:
+            c["判定"] = ""
+            c["選択理由"] = "差分不足"
+
+    def _cand_sort_key(r):
+        judge = str(r.get("判定", ""))
+        if judge == "◎2列目":
+            rank = 0
+        elif judge == "○3列目":
+            rank = 1
+        else:
+            rank = 2
+        return (
+            rank,
+            float(r.get("安定差") if r.get("安定差") is not None else 999999.0),
+            int(r.get("相手", 9)),
+        )
+
+    candidate_rows = sorted(candidates, key=_cand_sort_key)
+
+    hit_count = 0
+    weighted_pay = 0
+    for key in trio_keys:
+        cnt = int(TRIO_FULL_BASE_COUNTS.get(key, 0))
+        pay = float(TRIO_FULL_BASE_AVG_PAYS.get(key, 0) or 0)
+        hit_count += cnt
+        weighted_pay += cnt * pay
+
+    hit_rate = round(100.0 * hit_count / TRIO_BASE_TOTAL_RACES, 1) if TRIO_BASE_TOTAL_RACES else None
+    avg_pay = round(weighted_pay / hit_count, 1) if hit_count > 0 else None
+    invest = len(trio_keys) * 100
+    expected_payout_per_race = weighted_pay / TRIO_BASE_TOTAL_RACES if TRIO_BASE_TOTAL_RACES else 0.0
+    expected_roi = round(100.0 * expected_payout_per_race / invest, 1) if invest > 0 else None
+    breakeven_avg_pay = round(invest / (hit_count / TRIO_BASE_TOTAL_RACES), 1) if hit_count > 0 else None
 
     return {
-        "型": f"1-{'/'.join(str(x) for x in mates_sorted)}-{'/'.join(str(x) for x in mates_sorted)}",
+        "型": form_type,
         "評価1軸": 1,
-        "相手3車": mates_sorted,
+        "2列目": second_code,
+        "3列目": third_code,
+        "安定差上位2車": second_mates,
+        "評価上位追加2車": extra_mates,
         "買い目": trio_keys,
-        "コピー用": " / ".join(trio_keys),
-        "判定": "◎採用",
-        "選択理由": "評価1軸。相手2～7から安定差（abs(想定差)+abs(回収差)）が小さい順に3車採用。回収差プラス除外は使わない。",
+        "点数": len(trio_keys),
+        "想定的中数": hit_count,
+        "想定的中率%": hit_rate,
+        "基準平均配当": avg_pay,
+        "想定回収率%": expected_roi,
+        "100%必要平均払戻": breakeven_avg_pay,
+        "選択理由": "1列目は評価1固定。2列目は安定差上位2車。3列目は2列目＋評価上位追加2車。",
         "candidate_rows": candidate_rows,
     }
-
 
 
 # =========================
@@ -2665,7 +2707,7 @@ with tabs[2]:
     ev_diagnosis_frames = []
     cross_formation_summary = None
     sanrenpuku_4point_candidate_summary = None
-    axis1_three_mate_formation_summary = None
+    axis1_stability_hybrid_summary = None
 
     # 三連複4点候補では、通常画面に投資EV設定UIを出さない。
     # 初期値は他場想定の安全係数0.90で固定し、必要なら後続版で詳細設定へ戻す。
@@ -3085,7 +3127,7 @@ with tabs[2]:
             ev_diagnosis_frames.append(df_pairs.loc[_pair_pick_mask].copy())
         cross_formation_summary = build_cross_formation_summary(df_pairs, pair12_total)
         sanrenpuku_4point_candidate_summary = build_sanrenpuku_4point_candidate_summary(df_pairs)
-        axis1_three_mate_formation_summary = build_axis1_three_mate_formation_summary(df_pairs)
+        axis1_stability_hybrid_summary = build_axis1_stability_hybrid_formation_summary(df_pairs)
 
     # =========================
     # 最終2車複候補の表示分離
@@ -3257,104 +3299,59 @@ with tabs[2]:
         )
 
     with purchase_candidate_slot.container():
-        st.markdown("### ＜購入候補｜三連複4点候補＞")
-        if sanrenpuku_4point_candidate_summary:
-            tc = sanrenpuku_4point_candidate_summary
+        st.markdown("### ＜購入候補｜三連複フォメ＞")
+        if axis1_stability_hybrid_summary:
+            tc = axis1_stability_hybrid_summary
             buy_list = " / ".join(tc.get("買い目", []))
-            tc_line = f"三連複4点候補：{tc.get('型', '—')}"
+            tc_line = f"三連複フォメ：{tc.get('型', '—')}"
             tc_sub = (
-                f"第4枠：{tc.get('第4枠', '—')}／"
-                f"1軸相手：{tc.get('1軸相手', '—')}／"
-                f"想定差：{tc.get('想定差', '—')}／"
-                f"回収差：{tc.get('回収差', '—')}／"
-                f"安定差：{tc.get('安定差', '—')}／"
+                f"評価1軸：{tc.get('評価1軸', '—')}／"
+                f"2列目：{tc.get('2列目', '—')}／"
+                f"3列目：{tc.get('3列目', '—')}／"
+                f"点数：{tc.get('点数', '—')}点／"
                 f"買い目：{buy_list}"
+            )
+            tc_stats = (
+                f"想定的中率：{tc.get('想定的中率%', '—')}%／"
+                f"基準平均配当：{tc.get('基準平均配当', '—')}円／"
+                f"想定回収率：{tc.get('想定回収率%', '—')}%／"
+                f"100%必要平均払戻：{tc.get('100%必要平均払戻', '—')}円"
             )
             tc_html = (
                 '<div style="background:#fff7e6;color:#7a4a00;border-radius:8px;'
                 'padding:14px 16px;border:1px solid rgba(0,0,0,0.05);'
                 'font-size:18px;line-height:1.7;font-weight:700;">'
                 f'<div>{_escape_html(tc_line)}</div>'
-                f'<div style="font-size:14px;font-weight:600;opacity:0.88;">{_escape_html(tc_sub)}</div>'
+                f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(tc_sub)}</div>'
+                f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(tc_stats)}</div>'
                 '</div>'
             )
             st.markdown(tc_html, unsafe_allow_html=True)
 
-            if axis1_three_mate_formation_summary:
-                af = axis1_three_mate_formation_summary
-                af_buy_list = " / ".join(af.get("買い目", []))
-                af_mates = "・".join(str(x) for x in af.get("相手3車", []))
-                af_line = f"三連複3点フォメ：{af.get('型', '—')}"
-                af_sub = (
-                    f"評価1軸：{af.get('評価1軸', '—')}／"
-                    f"相手3車：{af_mates or '—'}／"
-                    f"買い目：{af_buy_list}"
-                )
-                af_html = (
-                    '<div style="background:#eef7ff;color:#12415f;border-radius:8px;'
-                    'padding:14px 16px;border:1px solid rgba(0,0,0,0.05);'
-                    'font-size:18px;line-height:1.7;font-weight:700;margin-top:10px;">'
-                    f'<div>{_escape_html(af_line)}</div>'
-                    f'<div style="font-size:14px;font-weight:600;opacity:0.88;">{_escape_html(af_sub)}</div>'
-                    f'<div style="font-size:14px;font-weight:600;opacity:0.88;">コピー用：{_escape_html(af.get("コピー用", ""))}</div>'
-                    '</div>'
-                )
-                st.markdown(af_html, unsafe_allow_html=True)
-
-                with st.expander("根拠数値を確認｜三連複3点フォメ", expanded=False):
-                    st.caption("評価1を軸固定。相手2～7から安定差（abs(想定差)+abs(回収差)）が小さい順に3車を採用します。この表では回収差プラス除外は使いません。")
-                    st.write(
-                        {
-                            "型": af.get("型"),
-                            "評価1軸": af.get("評価1軸"),
-                            "相手3車": af.get("相手3車"),
-                            "買い目": af.get("買い目"),
-                            "コピー用": af.get("コピー用"),
-                            "判定": af.get("判定"),
-                            "選択理由": af.get("選択理由"),
-                        }
-                    )
-                    af_candidates = pd.DataFrame(af.get("candidate_rows", []))
-                    if not af_candidates.empty:
-                        af_cols = [
-                            "相手",
-                            "1軸相手",
-                            "想定差",
-                            "回収差",
-                            "安定差",
-                            "判定",
-                            "選択理由",
-                        ]
-                        af_candidates = af_candidates[[c for c in af_cols if c in af_candidates.columns]]
-                        st.dataframe(
-                            af_candidates,
-                            use_container_width=True,
-                            hide_index=True,
-                            height=table_auto_height(af_candidates),
-                        )
-
-
             with st.expander("根拠数値を確認", expanded=False):
-                st.caption("評価1・2・3は固定。第4枠は1-4/1-5/1-6/1-7の中で、回収差が0以下の候補から安定差（abs(想定差)+abs(回収差)）最小を選びます。回収差プラスは『＋につき除外』です。")
+                st.caption("1列目は評価1固定。2列目は1軸相手の安定差上位2車。3列目は2列目＋評価上位追加2車です。安定差は abs(想定差)+abs(回収差)。このフォメでは回収差プラス除外は使いません。")
                 st.write(
                     {
                         "型": tc.get("型"),
-                        "第4枠": tc.get("第4枠"),
-                        "1軸相手": tc.get("1軸相手"),
-                        "想定差": tc.get("想定差"),
-                        "回収差": tc.get("回収差"),
-                        "安定差": tc.get("安定差"),
-                        "安定差内訳": tc.get("安定差内訳"),
-                        "判定": tc.get("判定"),
+                        "評価1軸": tc.get("評価1軸"),
+                        "2列目": tc.get("2列目"),
+                        "3列目": tc.get("3列目"),
+                        "安定差上位2車": tc.get("安定差上位2車"),
+                        "評価上位追加2車": tc.get("評価上位追加2車"),
+                        "点数": tc.get("点数"),
                         "買い目": tc.get("買い目"),
+                        "想定的中数": tc.get("想定的中数"),
+                        "想定的中率%": tc.get("想定的中率%"),
+                        "基準平均配当": tc.get("基準平均配当"),
+                        "想定回収率%": tc.get("想定回収率%"),
+                        "100%必要平均払戻": tc.get("100%必要平均払戻"),
                         "選択理由": tc.get("選択理由"),
                     }
                 )
                 tc_candidates = pd.DataFrame(tc.get("candidate_rows", []))
                 if not tc_candidates.empty:
-                    st.caption("4567の第4枠候補です。回収差プラスは『＋につき除外』、回収差0以下の中で安定差最小を◎採用します。")
                     root_cols = [
-                        "第4枠",
+                        "相手",
                         "1軸相手",
                         "想定差",
                         "回収差",
@@ -3383,7 +3380,7 @@ with tabs[2]:
                             }
                         )
         else:
-            st.info("三連複4点候補はありません。1-4/1-5/1-6/1-7の個別2車複データが必要です。")
+            st.info("三連複フォメはありません。1-2〜1-7の個別2車複データが必要です。")
 
     st.markdown("### 個別2車複 引継ぎ用累積表")
     st.caption("次回の『個別2車複 引継ぎ入力』へ転記する表です。対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。")
