@@ -1718,8 +1718,8 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
     v11.8c方針：
     - 評価1・2・3は固定する。
     - 第4枠Xは 1-4 / 1-5 / 1-6 / 1-7 だけを見る。
-    - 選抜基準はシンプルに「的中率差と回収率差の絶対値が小さいもの」。
-    - 安定差 = abs(想定差) + abs(回収差)
+    - 回収差がプラスの候補は「＋につき除外」とする。
+    - 回収差が0以下の候補だけで、安定差 = abs(想定差) + abs(回収差) を比較する。
     - 安定差が一番小さいXを選び、123XBOXを表示する。
     - 根拠表示は第4枠選定に必要な列だけに絞る。
     - 投資系の列（資産枠・配当位置・EV判定など）はこの表に混ぜない。
@@ -1769,8 +1769,14 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
 
         if hit_abs is not None and roi_abs is not None:
             stability_gap = round(hit_abs + roi_abs, 3)
-            selectable = True
-            select_reason = "安定差計算可"
+            # 第4枠は「足りない側」を拾う設計にする。
+            # 回収差がプラスの候補は、安定差が小さくても後追い扱いで除外する。
+            if roi_diff is not None and float(roi_diff) > 0:
+                selectable = False
+                select_reason = "＋につき除外"
+            else:
+                selectable = True
+                select_reason = "安定差計算可"
         else:
             stability_gap = None
             selectable = False
@@ -1806,19 +1812,37 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         )
         best = selectable[0]
     else:
-        # 差分列がまだ作れない場合だけ、画面を空にせず既定の4へ戻す。
-        fallback = next((c for c in candidates_all if int(c.get("第4枠", 0)) == 4), None)
-        if fallback is None:
-            return None
-        best = fallback
-        best["選択理由"] = "差分不足のため既定4枠"
+        # 通常は「回収差0以下」が候補になる。
+        # ただし全候補がプラス、または差分不足の場合でも画面が空にならないように例外処理する。
+        calc_candidates = [c for c in candidates_all if c.get("安定差") is not None]
+        if calc_candidates:
+            best = sorted(
+                calc_candidates,
+                key=lambda r: (
+                    float(r.get("安定差", 999999.0)),
+                    int(r.get("第4枠", 9)),
+                ),
+            )[0]
+            best["選択理由"] = "全候補＋または対象外のため例外採用"
+        else:
+            fallback = next((c for c in candidates_all if int(c.get("第4枠", 0)) == 4), None)
+            if fallback is None:
+                return None
+            best = fallback
+            best["選択理由"] = "差分不足のため既定4枠"
 
-    # 採用行を候補表上で明示する。
+    # 採用行・除外行を候補表上で明示する。
     best_x = int(best["第4枠"])
     for c in candidates_all:
         if int(c.get("第4枠", 0)) == best_x:
             c["判定"] = "◎採用"
-            c["選択理由"] = "安定差最小"
+            if c.get("選択可否") == "可":
+                c["選択理由"] = "回収差0以下の中で安定差最小"
+            else:
+                c["選択理由"] = c.get("選択理由") or "例外採用"
+        elif c.get("選択理由") == "＋につき除外":
+            c["判定"] = "＋につき除外"
+            c["選択理由"] = "回収差プラス"
         elif c.get("選択可否") == "可":
             c["判定"] = ""
             c["選択理由"] = "比較候補"
@@ -1826,13 +1850,23 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
             c["判定"] = ""
             c["選択理由"] = "差分不足"
 
-    candidates_all = sorted(
-        candidates_all,
-        key=lambda r: (
+    def _candidate_sort_key(r):
+        judge = str(r.get("判定", ""))
+        if judge == "◎採用":
+            rank = 0
+        elif judge == "":
+            rank = 1
+        elif judge == "＋につき除外":
+            rank = 2
+        else:
+            rank = 3
+        return (
+            rank,
             float(r.get("安定差") if r.get("安定差") is not None else 999999.0),
             int(r.get("第4枠", 9)),
-        ),
-    )
+        )
+
+    candidates_all = sorted(candidates_all, key=_candidate_sort_key)
 
     x = best_x
     trio_keys = [
@@ -1856,7 +1890,7 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
         "安定差": best.get("安定差"),
         "安定差内訳": stability_detail,
         "判定": "◎採用",
-        "選択理由": "安定差最小（abs(想定差)+abs(回収差)）",
+        "選択理由": "回収差0以下の中で安定差最小（回収差プラスは除外）",
         "買い目": trio_keys,
         "candidate_rows": candidates_all,
     }
@@ -3123,7 +3157,7 @@ with tabs[2]:
             st.markdown(tc_html, unsafe_allow_html=True)
 
             with st.expander("根拠数値を確認", expanded=False):
-                st.caption("評価1・2・3は固定。第4枠は1-4/1-5/1-6/1-7の中で、abs(想定差)+abs(回収差) が最小のものを選びます。")
+                st.caption("評価1・2・3は固定。第4枠は1-4/1-5/1-6/1-7の中で、回収差が0以下の候補から安定差（abs(想定差)+abs(回収差)）最小を選びます。回収差プラスは『＋につき除外』です。")
                 st.write(
                     {
                         "型": tc.get("型"),
@@ -3140,7 +3174,7 @@ with tabs[2]:
                 )
                 tc_candidates = pd.DataFrame(tc.get("candidate_rows", []))
                 if not tc_candidates.empty:
-                    st.caption("4567の第4枠候補です。採用判定は『安定差』だけで行います。安定差＝abs(想定差)+abs(回収差)。")
+                    st.caption("4567の第4枠候補です。回収差プラスは『＋につき除外』、回収差0以下の中で安定差最小を◎採用します。")
                     root_cols = [
                         "第4枠",
                         "1軸相手",
