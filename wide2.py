@@ -3678,7 +3678,7 @@ with tabs[2]:
             # 2車複の軸相手は、三連複フォメの3列目を使う。
             # 例：三連複 1-24-2435 → 2車複 1-2435
             # -----------------------------------------
-            nf = _build_nishafuku_from_trio_third(tc, pair12_counts)
+            nf = _build_nishafuku_from_trio_third(tc, pair12_total)
 
             if nf:
                 nf_buy_list = " / ".join(nf.get("買い目", []))
