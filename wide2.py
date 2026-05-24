@@ -1897,7 +1897,10 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
 
 
 
-def build_axis1_stability_hybrid_formation_summary(df_pairs: pd.DataFrame) -> dict | None:
+def build_axis1_stability_hybrid_formation_summary(
+    df_pairs: pd.DataFrame,
+    trio_actual_map: Dict[str, Dict[str, int]] | None = None,
+) -> dict | None:
     """
     三連複フォーメーションを作る。
 
@@ -1909,6 +1912,11 @@ def build_axis1_stability_hybrid_formation_summary(df_pairs: pd.DataFrame) -> di
     - 表記例：1-26-2634
     - 安定差は abs(想定差) + abs(回収差)。
     - ここでは回収差プラス除外は使わない。
+
+    重要：
+    - 三連複フォメの想定的中率・平均配当・必要平均払戻は、
+      小倉基準ではなく、日々入力している実戦累積から算出する。
+    - trio_actual_map は payout_sanrenpuku12_individual_total["仮想全体"] を渡す想定。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -1957,7 +1965,13 @@ def build_axis1_stability_hybrid_formation_summary(df_pairs: pd.DataFrame) -> di
     if len(valid) < 2:
         return None
 
-    valid_sorted = sorted(valid, key=lambda r: (float(r.get("安定差", 999999.0)), int(r.get("相手", 9))))
+    valid_sorted = sorted(
+        valid,
+        key=lambda r: (
+            float(r.get("安定差", 999999.0)),
+            int(r.get("相手", 9)),
+        ),
+    )
     second_mates = [int(c["相手"]) for c in valid_sorted[:2]]
 
     # 評価上位から追加2車。評価1と2列目は除外する。
@@ -2026,20 +2040,57 @@ def build_axis1_stability_hybrid_formation_summary(df_pairs: pd.DataFrame) -> di
 
     candidate_rows = sorted(candidates, key=_cand_sort_key)
 
-    hit_count = 0
-    weighted_pay = 0
-    for key in trio_keys:
-        cnt = int(TRIO_FULL_BASE_COUNTS.get(key, 0))
-        pay = float(TRIO_FULL_BASE_AVG_PAYS.get(key, 0) or 0)
-        hit_count += cnt
-        weighted_pay += cnt * pay
+    # =====================================================
+    # 実戦累積から三連複フォメの成績を算出する
+    # =====================================================
+    trio_actual_map = trio_actual_map or {}
 
-    hit_rate = round(100.0 * hit_count / TRIO_BASE_TOTAL_RACES, 1) if TRIO_BASE_TOTAL_RACES else None
-    avg_pay = round(weighted_pay / hit_count, 1) if hit_count > 0 else None
-    invest = len(trio_keys) * 100
-    expected_payout_per_race = weighted_pay / TRIO_BASE_TOTAL_RACES if TRIO_BASE_TOTAL_RACES else 0.0
-    expected_roi = round(100.0 * expected_payout_per_race / invest, 1) if invest > 0 else None
-    breakeven_avg_pay = round(invest / (hit_count / TRIO_BASE_TOTAL_RACES), 1) if hit_count > 0 else None
+    actual_n = 0
+    actual_h = 0
+    actual_sum = 0
+    actual_ksum = 0
+    actual_rows = []
+
+    for key in trio_keys:
+        rec = trio_actual_map.get(key, new_payout_rec())
+        n = int(rec.get("N", 0) or 0)
+        ksum = int(rec.get("KSUM", 0) or 0)
+        h = int(rec.get("H", 0) or 0)
+        pay_sum = int(rec.get("SUM", 0) or 0)
+
+        actual_n = max(actual_n, n)
+        actual_ksum += ksum
+        actual_h += h
+        actual_sum += pay_sum
+
+        actual_rows.append({
+            "買い目": key,
+            "対象N": n,
+            "的中H": h,
+            "払戻合計SUM": pay_sum,
+            "的中率%": round(100.0 * h / n, 1) if n > 0 else None,
+            "平均配当": round(pay_sum / h, 1) if h > 0 else None,
+        })
+
+    points = len(trio_keys)
+    invest_per_race = points * 100
+
+    if actual_n > 0:
+        actual_hit_rate = round(100.0 * actual_h / actual_n, 1)
+    else:
+        actual_hit_rate = None
+
+    actual_avg_pay = round(actual_sum / actual_h, 1) if actual_h > 0 else None
+
+    if actual_n > 0 and invest_per_race > 0:
+        actual_roi = round(100.0 * actual_sum / (actual_n * invest_per_race), 1)
+    else:
+        actual_roi = None
+
+    if actual_h > 0 and actual_n > 0:
+        breakeven_avg_pay = round(invest_per_race / (actual_h / actual_n), 1)
+    else:
+        breakeven_avg_pay = None
 
     return {
         "型": form_type,
@@ -2049,13 +2100,25 @@ def build_axis1_stability_hybrid_formation_summary(df_pairs: pd.DataFrame) -> di
         "安定差上位2車": second_mates,
         "評価上位追加2車": extra_mates,
         "買い目": trio_keys,
-        "点数": len(trio_keys),
-        "想定的中数": hit_count,
-        "想定的中率%": hit_rate,
-        "基準平均配当": avg_pay,
-        "想定回収率%": expected_roi,
+        "点数": points,
+
+        # 実戦累積ベース。購入判断・オッズ帯はこちらを使う。
+        "実戦対象N": actual_n,
+        "実戦的中H": actual_h,
+        "実戦払戻合計SUM": actual_sum,
+        "実戦想定的中率%": actual_hit_rate,
+        "実戦平均配当": actual_avg_pay,
+        "実戦想定回収率%": actual_roi,
         "100%必要平均払戻": breakeven_avg_pay,
-        "選択理由": "1列目は評価1固定。2列目は安定差上位2車。3列目は2列目＋評価上位追加2車。",
+        "実戦買い目別": actual_rows,
+
+        # 既存表示との互換用。中身は小倉基準ではなく実戦値。
+        "想定的中数": actual_h,
+        "想定的中率%": actual_hit_rate,
+        "基準平均配当": actual_avg_pay,
+        "想定回収率%": actual_roi,
+
+        "選択理由": "1列目は評価1固定。2列目は安定差上位2車。3列目は2列目＋評価上位追加2車。成績は実戦累積から算出。",
         "candidate_rows": candidate_rows,
     }
 
@@ -3127,7 +3190,10 @@ with tabs[2]:
             ev_diagnosis_frames.append(df_pairs.loc[_pair_pick_mask].copy())
         cross_formation_summary = build_cross_formation_summary(df_pairs, pair12_total)
         sanrenpuku_4point_candidate_summary = build_sanrenpuku_4point_candidate_summary(df_pairs)
-        axis1_stability_hybrid_summary = build_axis1_stability_hybrid_formation_summary(df_pairs)
+        axis1_stability_hybrid_summary = build_axis1_stability_hybrid_formation_summary(
+            df_pairs,
+            payout_sanrenpuku12_individual_total.get("仮想全体", {}),
+        )
 
     # =========================
     # 最終2車複候補の表示分離
@@ -3286,16 +3352,19 @@ with tabs[2]:
         pass
 
     # 3連複検証・推奨表示は、この画面では「三連複フォメ」に一本化する。
-    # 評価別テーブル直下に、最終的な三連複フォメ候補とオッズ帯目安を表示する。
+    # 評価別テーブル直下に、最終的な三連複フォメ候補を表示する。
     #
     # フォメの考え方：
     # 1列目：評価1固定
     # 2列目：1軸相手の安定差上位2車
     # 3列目：2列目＋評価上位追加2車
     #
-    # オッズ帯の考え方：
-    # 100%必要平均払戻を基準に、低すぎ／300円／200円／100円／高すぎ の境界を出す。
-    # これは買い目1点ごとの強弱判定ではなく、フォーメーション全体を買うときの目安。
+    # 成績計算：
+    # 小倉基準は使わず、日々入力している実戦累積だけを使う。
+    #
+    # オッズ帯：
+    # 実戦累積から出した100%必要平均払戻を基準に、
+    # 低すぎ／300円／200円／100円／高すぎ の境界を出す。
     def _escape_html(s) -> str:
         return (
             str(s)
@@ -3313,88 +3382,51 @@ with tabs[2]:
         except Exception:
             return default
 
-    def _build_trio_odds_zone(need_pay):
-        """
-        100%必要平均払戻から三連複オッズ帯を作る。
-
-        例：100%必要平均払戻 1160円なら、
-        3.9倍未満       = 低すぎ
-        3.9〜5.8倍      = 300円
-        5.8〜11.6倍     = 200円
-        11.6〜34.8倍    = 100円
-        34.8倍超        = 高すぎ注意
-        """
+    def _build_trio_odds_zone_html(need_pay):
         need_pay = _safe_float_trio_zone(need_pay, None)
 
         if need_pay is None or need_pay <= 0:
-            return {
-                "available": False,
-                "low_cut": None,
-                "zone_300_hi": None,
-                "zone_200_hi": None,
-                "high_cut": None,
-                "plain": "三連複オッズ帯：算出不可",
-                "rows": [],
-            }
+            return (
+                '<div style="margin-top:10px;padding:10px 12px;'
+                'background:rgba(255,255,255,0.55);border-radius:8px;'
+                'border:1px solid rgba(122,74,0,0.18);">'
+                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">三連複オッズ帯</div>'
+                '<div style="font-size:14px;line-height:1.8;font-weight:700;">算出不可</div>'
+                '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
+                '実戦累積の的中数が不足しているため、100%必要平均払戻を算出できません。'
+                '</div>'
+                '</div>'
+            )
 
         low_cut = need_pay / 300.0
         zone_300_hi = need_pay / 200.0
         zone_200_hi = need_pay / 100.0
         high_cut = zone_200_hi * 3.0
 
-        rows = [
-            {
-                "ゾーン": "低すぎ",
-                "オッズ帯": f"{low_cut:.1f}倍未満",
-                "扱い": "ケン",
-            },
-            {
-                "ゾーン": "厚め",
-                "オッズ帯": f"{low_cut:.1f}〜{zone_300_hi:.1f}倍",
-                "扱い": "300円",
-            },
-            {
-                "ゾーン": "標準厚め",
-                "オッズ帯": f"{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍",
-                "扱い": "200円",
-            },
-            {
-                "ゾーン": "通常",
-                "オッズ帯": f"{zone_200_hi:.1f}〜{high_cut:.1f}倍",
-                "扱い": "100円",
-            },
-            {
-                "ゾーン": "高すぎ",
-                "オッズ帯": f"{high_cut:.1f}倍超",
-                "扱い": "注意",
-            },
-        ]
-
-        plain = (
-            f"三連複オッズ帯："
-            f"低すぎ={low_cut:.1f}倍未満／"
-            f"300円={low_cut:.1f}〜{zone_300_hi:.1f}倍／"
-            f"200円={zone_300_hi:.1f}〜{zone_200_hi:.1f}倍／"
-            f"100円={zone_200_hi:.1f}〜{high_cut:.1f}倍／"
-            f"高すぎ={high_cut:.1f}倍超"
+        return (
+            '<div style="margin-top:10px;padding:10px 12px;'
+            'background:rgba(255,255,255,0.55);'
+            'border-radius:8px;border:1px solid rgba(122,74,0,0.18);">'
+            '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">'
+            '三連複オッズ帯'
+            '</div>'
+            '<div style="font-size:14px;line-height:1.85;font-weight:700;">'
+            f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
+            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円<br>'
+            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円<br>'
+            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円<br>'
+            f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
+            '</div>'
+            '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
+            f'基準：実戦累積の100%必要平均払戻 {need_pay:.1f}円'
+            '</div>'
+            '</div>'
         )
-
-        return {
-            "available": True,
-            "low_cut": low_cut,
-            "zone_300_hi": zone_300_hi,
-            "zone_200_hi": zone_200_hi,
-            "high_cut": high_cut,
-            "plain": plain,
-            "rows": rows,
-        }
 
     with purchase_candidate_slot.container():
         st.markdown("### ＜購入候補｜三連複フォメ＞")
-
         if axis1_stability_hybrid_summary:
             tc = axis1_stability_hybrid_summary
-
             buy_list = " / ".join(tc.get("買い目", []))
             tc_line = f"三連複フォメ：{tc.get('型', '—')}"
             tc_sub = (
@@ -3405,51 +3437,15 @@ with tabs[2]:
                 f"買い目：{buy_list}"
             )
             tc_stats = (
-                f"想定的中率：{tc.get('想定的中率%', '—')}%／"
-                f"基準平均配当：{tc.get('基準平均配当', '—')}円／"
-                f"想定回収率：{tc.get('想定回収率%', '—')}%／"
+                f"実戦対象N：{tc.get('実戦対象N', '—')}／"
+                f"実戦的中H：{tc.get('実戦的中H', '—')}／"
+                f"実戦想定的中率：{tc.get('実戦想定的中率%', '—')}%／"
+                f"実戦平均配当：{tc.get('実戦平均配当', '—')}円／"
+                f"実戦想定回収率：{tc.get('実戦想定回収率%', '—')}%／"
                 f"100%必要平均払戻：{tc.get('100%必要平均払戻', '—')}円"
             )
 
-            trio_zone = _build_trio_odds_zone(tc.get("100%必要平均払戻"))
-
-            if trio_zone.get("available"):
-                z_rows = trio_zone.get("rows", [])
-                z1, z2, z3, z4, z5 = z_rows
-                tc_zone_html = (
-                    '<div style="margin-top:10px;padding:10px 12px;'
-                    'background:rgba(255,255,255,0.60);border-radius:8px;'
-                    'border:1px solid rgba(122,74,0,0.18);">'
-                    '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">三連複オッズ帯</div>'
-                    '<div style="display:grid;grid-template-columns:1.2fr 1.8fr 1fr;gap:4px 10px;'
-                    'font-size:14px;line-height:1.7;font-weight:700;">'
-                    '<div style="opacity:0.70;">ゾーン</div><div style="opacity:0.70;">オッズ帯</div><div style="opacity:0.70;">扱い</div>'
-                    f'<div>{_escape_html(z1["ゾーン"])}</div><div>{_escape_html(z1["オッズ帯"])}</div><div>{_escape_html(z1["扱い"])}</div>'
-                    f'<div>{_escape_html(z2["ゾーン"])}</div><div>{_escape_html(z2["オッズ帯"])}</div><div>{_escape_html(z2["扱い"])}</div>'
-                    f'<div>{_escape_html(z3["ゾーン"])}</div><div>{_escape_html(z3["オッズ帯"])}</div><div>{_escape_html(z3["扱い"])}</div>'
-                    f'<div>{_escape_html(z4["ゾーン"])}</div><div>{_escape_html(z4["オッズ帯"])}</div><div>{_escape_html(z4["扱い"])}</div>'
-                    f'<div>{_escape_html(z5["ゾーン"])}</div><div>{_escape_html(z5["オッズ帯"])}</div><div>{_escape_html(z5["扱い"])}</div>'
-                    '</div>'
-                    f'<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
-                    f'基準：100%必要平均払戻 {_safe_float_trio_zone(tc.get("100%必要平均払戻"), 0.0):.1f}円。'
-                    'フォーメーション全体を買うときのオッズ帯目安。'
-                    '</div>'
-                    '</div>'
-                )
-            else:
-                tc_zone_html = (
-                    '<div style="margin-top:10px;padding:10px 12px;'
-                    'background:rgba(255,255,255,0.60);border-radius:8px;'
-                    'border:1px solid rgba(122,74,0,0.18);font-size:14px;font-weight:700;">'
-                    '三連複オッズ帯：算出不可'
-                    '</div>'
-                )
-
-            # noteコピーや後続表示で使いたい場合のため、summaryにも保持しておく。
-            try:
-                tc["三連複オッズ帯"] = trio_zone.get("plain", "")
-            except Exception:
-                pass
+            tc_zone_html = _build_trio_odds_zone_html(tc.get("100%必要平均払戻"))
 
             tc_html = (
                 '<div style="background:#fff7e6;color:#7a4a00;border-radius:8px;'
@@ -3465,11 +3461,9 @@ with tabs[2]:
 
             with st.expander("根拠数値を確認", expanded=False):
                 st.caption(
-                    "1列目は評価1固定。"
-                    "2列目は1軸相手の安定差上位2車。"
+                    "1列目は評価1固定。2列目は1軸相手の安定差上位2車。"
                     "3列目は2列目＋評価上位追加2車です。"
-                    "安定差は abs(想定差)+abs(回収差)。"
-                    "このフォメでは回収差プラス除外は使いません。"
+                    "三連複フォメの的中率・平均配当・必要平均払戻は、小倉基準ではなく実戦累積から算出します。"
                 )
                 st.write(
                     {
@@ -3481,17 +3475,39 @@ with tabs[2]:
                         "評価上位追加2車": tc.get("評価上位追加2車"),
                         "点数": tc.get("点数"),
                         "買い目": tc.get("買い目"),
-                        "想定的中数": tc.get("想定的中数"),
-                        "想定的中率%": tc.get("想定的中率%"),
-                        "基準平均配当": tc.get("基準平均配当"),
-                        "想定回収率%": tc.get("想定回収率%"),
+                        "実戦対象N": tc.get("実戦対象N"),
+                        "実戦的中H": tc.get("実戦的中H"),
+                        "実戦払戻合計SUM": tc.get("実戦払戻合計SUM"),
+                        "実戦想定的中率%": tc.get("実戦想定的中率%"),
+                        "実戦平均配当": tc.get("実戦平均配当"),
+                        "実戦想定回収率%": tc.get("実戦想定回収率%"),
                         "100%必要平均払戻": tc.get("100%必要平均払戻"),
-                        "三連複オッズ帯": tc.get("三連複オッズ帯"),
                         "選択理由": tc.get("選択理由"),
                     }
                 )
+
+                tc_actual_rows = pd.DataFrame(tc.get("実戦買い目別", []))
+                if not tc_actual_rows.empty:
+                    st.markdown("##### 実戦累積｜買い目別")
+                    actual_cols = [
+                        "買い目",
+                        "対象N",
+                        "的中H",
+                        "的中率%",
+                        "平均配当",
+                        "払戻合計SUM",
+                    ]
+                    tc_actual_rows = tc_actual_rows[[c for c in actual_cols if c in tc_actual_rows.columns]]
+                    st.dataframe(
+                        tc_actual_rows,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=table_auto_height(tc_actual_rows),
+                    )
+
                 tc_candidates = pd.DataFrame(tc.get("candidate_rows", []))
                 if not tc_candidates.empty:
+                    st.markdown("##### 2列目・3列目候補")
                     root_cols = [
                         "相手",
                         "1軸相手",
