@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8c｜三連複4点候補｜想定回収率・回収差判定｜固定想定ペア的%｜ペア別基準配当｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8d｜三連複フォメ｜累積評価ベースオッズ帯｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1899,7 +1899,8 @@ def build_sanrenpuku_4point_candidate_summary(df_pairs: pd.DataFrame) -> dict | 
 
 def build_axis1_stability_hybrid_formation_summary(
     df_pairs: pd.DataFrame,
-    trio_actual_map: Dict[str, Dict[str, int]] | None = None,
+    rank_total_map: Dict[int, Dict[str, int]] | None = None,
+    pair12_counts: Dict[PairKey, int] | None = None,
 ) -> dict | None:
     """
     三連複フォーメーションを作る。
@@ -1914,9 +1915,10 @@ def build_axis1_stability_hybrid_formation_summary(
     - ここでは回収差プラス除外は使わない。
 
     重要：
-    - 三連複フォメの想定的中率・平均配当・必要平均払戻は、
-      小倉基準ではなく、日々入力している実戦累積から算出する。
-    - trio_actual_map は payout_sanrenpuku12_individual_total["仮想全体"] を渡す想定。
+    - オッズ帯に使う想定的中率は、当日だけの3連複実績では出さない。
+    - 小倉基準も使わない。
+    - 日々引き継いでいる「評価別3着内率」と「1→2着評価分布」を使って、
+      累積評価ベースの三連複想定的中率を作る。
     """
     if df_pairs is None or df_pairs.empty:
         return None
@@ -2041,58 +2043,122 @@ def build_axis1_stability_hybrid_formation_summary(
     candidate_rows = sorted(candidates, key=_cand_sort_key)
 
     # =====================================================
-    # 実戦累積から三連複フォメの成績を算出する
+    # 累積評価ベースで三連複フォメの想定的中率を作る
     # =====================================================
-    trio_actual_map = trio_actual_map or {}
+    rank_total_map = rank_total_map or {}
+    pair12_counts = pair12_counts or {}
 
-    actual_n = 0
-    actual_h = 0
-    actual_sum = 0
-    actual_ksum = 0
-    actual_rows = []
+    def _rank_place_rate(r: int):
+        rec = rank_total_map.get(int(r), {})
+        try:
+            n = int(rec.get("N", 0) or 0)
+            c1 = int(rec.get("C1", 0) or 0)
+            c2 = int(rec.get("C2", 0) or 0)
+            c3 = int(rec.get("C3", 0) or 0)
+        except Exception:
+            return None
+        if n <= 0:
+            return None
+        return 100.0 * (c1 + c2 + c3) / n
 
+    def _pair12_rate(a: int, b: int):
+        try:
+            a = int(a); b = int(b)
+        except Exception:
+            return None
+        total = sum(int(v) for v in pair12_counts.values())
+        if total <= 0 or a == b:
+            return None
+        hit = int(pair12_counts.get((a, b), 0)) + int(pair12_counts.get((b, a), 0))
+        return 100.0 * hit / total
+
+    axis_place = _rank_place_rate(1)
+
+    # 評価1が3着内に残った前提で、残り2枠にフォメ有効ペアが入るかを、
+    # 評価別3着内率の重みから推定する。
+    other_ranks = [r for r in range(2, FIELD_SIZE + 1)]
+    place_weights = {r: (_rank_place_rate(r) or 0.0) for r in other_ranks}
+
+    valid_other_pairs = set()
     for key in trio_keys:
-        rec = trio_actual_map.get(key, new_payout_rec())
-        n = int(rec.get("N", 0) or 0)
-        ksum = int(rec.get("KSUM", 0) or 0)
-        h = int(rec.get("H", 0) or 0)
-        pay_sum = int(rec.get("SUM", 0) or 0)
+        vals = [int(x) for x in str(key).split("-")]
+        others = tuple(sorted([v for v in vals if v != 1]))
+        if len(others) == 2:
+            valid_other_pairs.add(others)
 
-        actual_n = max(actual_n, n)
-        actual_ksum += ksum
-        actual_h += h
-        actual_sum += pay_sum
+    denom = 0.0
+    numer = 0.0
+    for i, a in enumerate(other_ranks):
+        for b in other_ranks[i + 1:]:
+            w = float(place_weights.get(a, 0.0)) * float(place_weights.get(b, 0.0))
+            denom += w
+            if tuple(sorted((a, b))) in valid_other_pairs:
+                numer += w
 
-        actual_rows.append({
-            "買い目": key,
-            "対象N": n,
-            "的中H": h,
-            "払戻合計SUM": pay_sum,
-            "的中率%": round(100.0 * h / n, 1) if n > 0 else None,
-            "平均配当": round(pay_sum / h, 1) if h > 0 else None,
-        })
+    place_cover_rate = (100.0 * numer / denom) if denom > 0 else None
+
+    # 1→2着評価分布側でも、フォメを構成する3車のうち2車が上位2着に入る頻度を見る。
+    # これは3連複そのものではなく、展開上の噛み合わせ補助。
+    valid_edges = set()
+    for key in trio_keys:
+        vals = [int(x) for x in str(key).split("-")]
+        for i, a in enumerate(vals):
+            for b in vals[i + 1:]:
+                valid_edges.add(tuple(sorted((int(a), int(b)))))
+
+    pair_total = sum(int(v) for v in pair12_counts.values())
+    pair_hit = 0
+    if pair_total > 0:
+        for a, b in valid_edges:
+            pair_hit += int(pair12_counts.get((a, b), 0)) + int(pair12_counts.get((b, a), 0))
+        pair_cover_rate = 100.0 * pair_hit / pair_total
+    else:
+        pair_cover_rate = None
+
+    # 評価別3着内カバーを主、1→2着評価分布を補助にする。
+    # どちらも引き継ぎ累積なので、当日だけのブレは使わない。
+    cover_parts = []
+    if place_cover_rate is not None:
+        cover_parts.append((0.70, place_cover_rate))
+    if pair_cover_rate is not None:
+        cover_parts.append((0.30, pair_cover_rate))
+
+    if axis_place is not None and cover_parts:
+        w_sum = sum(w for w, _ in cover_parts)
+        cover_rate = sum(w * v for w, v in cover_parts) / max(w_sum, 1e-9)
+        cumulative_hit_rate = round(max(0.0, min(float(axis_place), float(axis_place) * cover_rate / 100.0)), 1)
+    else:
+        cover_rate = None
+        cumulative_hit_rate = None
 
     points = len(trio_keys)
     invest_per_race = points * 100
 
-    if actual_n > 0:
-        actual_hit_rate = round(100.0 * actual_h / actual_n, 1)
-    else:
-        actual_hit_rate = None
-
-    # 払戻SUMが未入力のまま的中Hだけ入っている場合、平均配当0円とは表示しない。
-    # 0円表示は「データ未接続」に見えにくいため、未入力は None にする。
-    actual_avg_pay = round(actual_sum / actual_h, 1) if actual_h > 0 and actual_sum > 0 else None
-
-    if actual_n > 0 and invest_per_race > 0 and actual_sum > 0:
-        actual_roi = round(100.0 * actual_sum / (actual_n * invest_per_race), 1)
-    else:
-        actual_roi = None
-
-    if actual_h > 0 and actual_n > 0:
-        breakeven_avg_pay = round(invest_per_race / (actual_h / actual_n), 1)
+    if cumulative_hit_rate is not None and cumulative_hit_rate > 0:
+        breakeven_avg_pay = round(invest_per_race / (cumulative_hit_rate / 100.0), 1)
     else:
         breakeven_avg_pay = None
+
+    basis_n_values = []
+    for r in range(1, FIELD_SIZE + 1):
+        try:
+            n = int(rank_total_map.get(r, {}).get("N", 0) or 0)
+            if n > 0:
+                basis_n_values.append(n)
+        except Exception:
+            pass
+    basis_n = max(basis_n_values) if basis_n_values else 0
+
+    estimate_rows = []
+    for key in trio_keys:
+        vals = [int(x) for x in str(key).split("-")]
+        rates = [_rank_place_rate(v) for v in vals]
+        estimate_rows.append({
+            "買い目": key,
+            "評価1_3着内率%": round(_rank_place_rate(1), 1) if _rank_place_rate(1) is not None else None,
+            "構成評価3着内率%": " / ".join("—" if r is None else f"{r:.1f}" for r in rates),
+            "補助2車複率%": round(sum((_pair12_rate(a, b) or 0.0) for i, a in enumerate(vals) for b in vals[i + 1:]), 1),
+        })
 
     return {
         "型": form_type,
@@ -2104,23 +2170,22 @@ def build_axis1_stability_hybrid_formation_summary(
         "買い目": trio_keys,
         "点数": points,
 
-        # 実戦累積ベース。購入判断・オッズ帯はこちらを使う。
-        "実戦対象N": actual_n,
-        "実戦的中H": actual_h,
-        "実戦払戻合計SUM": actual_sum,
-        "実戦想定的中率%": actual_hit_rate,
-        "実戦平均配当": actual_avg_pay,
-        "実戦想定回収率%": actual_roi,
+        # 累積評価ベース。購入判断・オッズ帯はこちらを使う。
+        "累積対象N": basis_n,
+        "評価1_3着内率%": round(axis_place, 1) if axis_place is not None else None,
+        "相手3着内カバー率%": round(place_cover_rate, 1) if place_cover_rate is not None else None,
+        "2車複カバー率%": round(pair_cover_rate, 1) if pair_cover_rate is not None else None,
+        "合成カバー率%": round(cover_rate, 1) if cover_rate is not None else None,
+        "累積評価ベース想定的中率%": cumulative_hit_rate,
         "100%必要平均払戻": breakeven_avg_pay,
-        "実戦買い目別": actual_rows,
+        "累積評価ベース買い目別": estimate_rows,
 
-        # 既存表示との互換用。中身は小倉基準ではなく実戦値。
-        "想定的中数": actual_h,
-        "想定的中率%": actual_hit_rate,
-        "基準平均配当": actual_avg_pay,
-        "想定回収率%": actual_roi,
+        # 既存表示との互換用。中身は小倉基準でも本日実績でもなく、累積評価ベース。
+        "想定的中率%": cumulative_hit_rate,
+        "基準平均配当": None,
+        "想定回収率%": None,
 
-        "選択理由": "1列目は評価1固定。2列目は安定差上位2車。3列目は2列目＋評価上位追加2車。成績は実戦累積から算出。",
+        "選択理由": "1列目は評価1固定。2列目は安定差上位2車。3列目は2列目＋評価上位追加2車。オッズ帯は累積評価別3着内率と1→2着評価分布から算出。",
         "candidate_rows": candidate_rows,
     }
 
@@ -3216,7 +3281,8 @@ with tabs[2]:
         sanrenpuku_4point_candidate_summary = build_sanrenpuku_4point_candidate_summary(df_pairs)
         axis1_stability_hybrid_summary = build_axis1_stability_hybrid_formation_summary(
             df_pairs,
-            payout_sanrenpuku12_individual_total.get("仮想全体", {}),
+            rank_total,
+            pair12_total,
         )
 
     # =========================
@@ -3384,10 +3450,11 @@ with tabs[2]:
     # 3列目：2列目＋評価上位追加2車
     #
     # 成績計算：
-    # 小倉基準は使わず、日々入力している実戦累積だけを使う。
+    # 小倉基準・本日だけの三連複実績は使わない。
+    # 日々引き継ぐ評価別3着内率と1→2着評価分布から累積評価ベースで算出する。
     #
     # オッズ帯：
-    # 実戦累積から出した100%必要平均払戻を基準に、
+    # 累積評価ベースの100%必要平均払戻を基準に、
     # 低すぎ／300円／200円／100円／高すぎ の境界を出す。
     def _escape_html(s) -> str:
         return (
@@ -3417,7 +3484,7 @@ with tabs[2]:
                 '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">三連複オッズ帯</div>'
                 '<div style="font-size:14px;line-height:1.8;font-weight:700;">算出不可</div>'
                 '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
-                '実戦累積の的中数が不足しているため、100%必要平均払戻を算出できません。'
+                '累積評価ベースの的中率が不足しているため、100%必要平均払戻を算出できません。'
                 '</div>'
                 '</div>'
             )
@@ -3442,7 +3509,7 @@ with tabs[2]:
             f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
             '</div>'
             '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
-            f'基準：実戦累積の100%必要平均払戻 {need_pay:.1f}円'
+            f'基準：累積評価ベースの100%必要平均払戻 {need_pay:.1f}円'
             '</div>'
             '</div>'
         )
@@ -3471,11 +3538,10 @@ with tabs[2]:
                 f"買い目：{buy_list}"
             )
             tc_stats = (
-                f"実戦対象N：{_fmt_tc_value(tc.get('実戦対象N'))}／"
-                f"実戦的中H：{_fmt_tc_value(tc.get('実戦的中H'))}／"
-                f"実戦想定的中率：{_fmt_tc_value(tc.get('実戦想定的中率%'), '%')}／"
-                f"実戦平均配当：{_fmt_tc_value(tc.get('実戦平均配当'), '円')}／"
-                f"実戦想定回収率：{_fmt_tc_value(tc.get('実戦想定回収率%'), '%')}／"
+                f"累積対象N：{_fmt_tc_value(tc.get('累積対象N'))}／"
+                f"評価1_3着内率：{_fmt_tc_value(tc.get('評価1_3着内率%'), '%')}／"
+                f"合成カバー率：{_fmt_tc_value(tc.get('合成カバー率%'), '%')}／"
+                f"累積評価ベース想定的中率：{_fmt_tc_value(tc.get('累積評価ベース想定的中率%'), '%')}／"
                 f"100%必要平均払戻：{_fmt_tc_value(tc.get('100%必要平均払戻'), '円')}"
             )
 
@@ -3497,7 +3563,7 @@ with tabs[2]:
                 st.caption(
                     "1列目は評価1固定。2列目は1軸相手の安定差上位2車。"
                     "3列目は2列目＋評価上位追加2車です。"
-                    "三連複フォメの的中率・平均配当・必要平均払戻は、小倉基準ではなく実戦累積から算出します。"
+                    "三連複フォメの想定的中率・必要平均払戻は、小倉基準や本日だけの実績ではなく、累積評価ベースから算出します。"
                 )
                 st.write(
                     {
@@ -3509,27 +3575,25 @@ with tabs[2]:
                         "評価上位追加2車": tc.get("評価上位追加2車"),
                         "点数": tc.get("点数"),
                         "買い目": tc.get("買い目"),
-                        "実戦対象N": tc.get("実戦対象N"),
-                        "実戦的中H": tc.get("実戦的中H"),
-                        "実戦払戻合計SUM": tc.get("実戦払戻合計SUM"),
-                        "実戦想定的中率%": tc.get("実戦想定的中率%"),
-                        "実戦平均配当": tc.get("実戦平均配当"),
-                        "実戦想定回収率%": tc.get("実戦想定回収率%"),
+                        "累積対象N": tc.get("累積対象N"),
+                        "評価1_3着内率%": tc.get("評価1_3着内率%"),
+                        "相手3着内カバー率%": tc.get("相手3着内カバー率%"),
+                        "2車複カバー率%": tc.get("2車複カバー率%"),
+                        "合成カバー率%": tc.get("合成カバー率%"),
+                        "累積評価ベース想定的中率%": tc.get("累積評価ベース想定的中率%"),
                         "100%必要平均払戻": tc.get("100%必要平均払戻"),
                         "選択理由": tc.get("選択理由"),
                     }
                 )
 
-                tc_actual_rows = pd.DataFrame(tc.get("実戦買い目別", []))
+                tc_actual_rows = pd.DataFrame(tc.get("累積評価ベース買い目別", []))
                 if not tc_actual_rows.empty:
-                    st.markdown("##### 実戦累積｜買い目別")
+                    st.markdown("##### 累積評価ベース｜買い目別")
                     actual_cols = [
                         "買い目",
-                        "対象N",
-                        "的中H",
-                        "的中率%",
-                        "平均配当",
-                        "払戻合計SUM",
+                        "評価1_3着内率%",
+                        "構成評価3着内率%",
+                        "補助2車複率%",
                     ]
                     tc_actual_rows = tc_actual_rows[[c for c in actual_cols if c in tc_actual_rows.columns]]
                     st.dataframe(
