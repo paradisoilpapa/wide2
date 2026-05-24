@@ -8,7 +8,7 @@ import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
 st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8d｜三連複フォメ｜累積評価ベースオッズ帯｜7車固定・欠車対応")
-
+a
 # =========================
 # 基本設定（7車ベース）
 # =========================
@@ -3556,6 +3556,123 @@ with tabs[2]:
             '</div>'
         )
 
+
+    def _build_nishatan_odds_zone_html(need_pay):
+        need_pay = _safe_float_trio_zone(need_pay, None)
+
+        if need_pay is None or need_pay <= 0:
+            return (
+                '<div style="margin-top:10px;padding:10px 12px;'
+                'background:#eef6ff;border-radius:8px;'
+                'border:1px solid rgba(32,92,145,0.20);">'
+                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">2車単オッズ帯</div>'
+                '<div style="font-size:14px;line-height:1.8;font-weight:700;">算出不可</div>'
+                '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
+                '累積1→2着評価分布が不足しているため、100%必要平均払戻を算出できません。'
+                '</div>'
+                '</div>'
+            )
+
+        low_cut = need_pay / 300.0
+        zone_300_hi = need_pay / 200.0
+        zone_200_hi = need_pay / 100.0
+        high_cut = zone_200_hi * 3.0
+
+        return (
+            '<div style="margin-top:10px;padding:10px 12px;'
+            'background:#eef6ff;'
+            'border-radius:8px;border:1px solid rgba(32,92,145,0.20);">'
+            '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">'
+            '2車単オッズ帯'
+            '</div>'
+            '<div style="font-size:14px;line-height:1.85;font-weight:700;">'
+            f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
+            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円<br>'
+            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円<br>'
+            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円<br>'
+            f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
+            '</div>'
+            '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
+            f'基準：累積1→2着評価分布ベースの100%必要平均払戻 {need_pay:.1f}円'
+            '</div>'
+            '</div>'
+        )
+
+
+    def _build_nishatan_from_trio_third(tc, pair12_counts):
+        """
+        2車単の軸相手は、三連複フォメの3列目を使う。
+        例：三連複 1-24-2435 → 2車単 1→2435
+        2車複と違い、評価1が1着・相手が2着の場合だけを数える。
+        """
+        if not tc:
+            return None
+
+        try:
+            axis = int(tc.get("評価1軸", 1) or 1)
+        except Exception:
+            axis = 1
+
+        third_code = str(tc.get("3列目", "") or "")
+        targets = []
+        for ch in third_code:
+            if ch.isdigit():
+                v = int(ch)
+                if v != axis and 1 <= v <= FIELD_SIZE and v not in targets:
+                    targets.append(v)
+
+        if not targets:
+            return None
+
+        pair_total = sum(int(v) for v in (pair12_counts or {}).values())
+
+        if pair_total <= 0:
+            hit_count = 0
+            hit_rate = None
+        else:
+            hit_count = 0
+            for t in targets:
+                hit_count += int(pair12_counts.get((axis, t), 0))
+            hit_rate = round(100.0 * hit_count / pair_total, 1)
+
+        points = len(targets)
+        invest = points * 100
+
+        if hit_rate is not None and hit_rate > 0:
+            breakeven_avg_pay = round(invest / (hit_rate / 100.0), 1)
+        else:
+            breakeven_avg_pay = None
+
+        bet_keys = [f"{axis}→{t}" for t in targets]
+
+        bet_rows = []
+        for t, pk in zip(targets, bet_keys):
+            if pair_total > 0:
+                h = int(pair12_counts.get((axis, t), 0))
+                r = round(100.0 * h / pair_total, 1)
+            else:
+                h = 0
+                r = None
+            bet_rows.append({
+                "買い目": pk,
+                "的中H": h,
+                "的中率%": r,
+            })
+
+        return {
+            "型": f"{axis}→" + "".join(str(t) for t in targets),
+            "軸": axis,
+            "相手": "".join(str(t) for t in targets),
+            "点数": points,
+            "買い目": bet_keys,
+            "累積対象N": pair_total,
+            "累積2車単的中H": hit_count,
+            "累積2車単的中率%": hit_rate,
+            "100%必要平均払戻": breakeven_avg_pay,
+            "買い目別": bet_rows,
+        }
+
+
     def _build_nishafuku_from_trio_third(tc, pair12_counts):
         """
         2車複の軸相手は、三連複フォメの3列目を使う。
@@ -3711,6 +3828,44 @@ with tabs[2]:
                 st.markdown(nf_html, unsafe_allow_html=True)
 
 
+            # -----------------------------------------
+            # 2車単オッズ帯
+            # 2車単の軸相手も、三連複フォメの3列目を使う。
+            # 例：三連複 1-24-2435 → 2車単 1→2435
+            # -----------------------------------------
+            nt = _build_nishatan_from_trio_third(tc, pair12_total)
+
+            if nt:
+                nt_buy_list = " / ".join(nt.get("買い目", []))
+                nt_line = f"2車単フォメ：{nt.get('型', '—')}"
+                nt_sub = (
+                    f"軸：{nt.get('軸', '—')}／"
+                    f"相手：{nt.get('相手', '—')}／"
+                    f"点数：{nt.get('点数', '—')}点／"
+                    f"買い目：{nt_buy_list}"
+                )
+                nt_stats = (
+                    f"累積対象N：{_fmt_tc_value(nt.get('累積対象N'))}／"
+                    f"累積2車単的中H：{_fmt_tc_value(nt.get('累積2車単的中H'))}／"
+                    f"累積2車単的中率：{_fmt_tc_value(nt.get('累積2車単的中率%'), '%')}／"
+                    f"100%必要平均払戻：{_fmt_tc_value(nt.get('100%必要平均払戻'), '円')}"
+                )
+
+                nt_zone_html = _build_nishatan_odds_zone_html(nt.get("100%必要平均払戻"))
+
+                nt_html = (
+                    '<div style="background:#eef6ff;color:#205c91;border-radius:8px;'
+                    'padding:14px 16px;border:1px solid rgba(32,92,145,0.18);'
+                    'font-size:18px;line-height:1.7;font-weight:700;margin-top:12px;">'
+                    f'<div>{_escape_html(nt_line)}</div>'
+                    f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(nt_sub)}</div>'
+                    f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(nt_stats)}</div>'
+                    f'{nt_zone_html}'
+                    '</div>'
+                )
+                st.markdown(nt_html, unsafe_allow_html=True)
+
+
             with st.expander("根拠数値を確認", expanded=False):
                 st.caption(
                     "1列目は評価1固定。2列目は1軸相手の安定差上位2車。"
@@ -3735,6 +3890,8 @@ with tabs[2]:
                         "累積評価ベース想定的中率%": tc.get("累積評価ベース想定的中率%"),
                         "100%必要平均払戻": tc.get("100%必要平均払戻"),
                         "選択理由": tc.get("選択理由"),
+                        "2車複フォメ": nf if 'nf' in locals() else None,
+                        "2車単フォメ": nt if 'nt' in locals() else None,
                     }
                 )
 
