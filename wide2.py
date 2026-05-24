@@ -7,8 +7,8 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜軸1・2限定 個別2車複 v11.8d｜三連複フォメ｜累積評価ベースオッズ帯｜7車固定・欠車対応")
-a
+st.title("ヴェロビ 復習（全体累積）｜v11.8g｜2車複・2車単・三連複オッズ帯｜7車固定・欠車対応")
+
 # =========================
 # 基本設定（7車ベース）
 # =========================
@@ -3746,7 +3746,8 @@ with tabs[2]:
         }
 
     with purchase_candidate_slot.container():
-        st.markdown("### ＜購入候補｜三連複フォメ＞")
+        st.markdown("### ＜購入候補｜2車複・2車単・三連複＞")
+
         if axis1_stability_hybrid_summary:
             tc = axis1_stability_hybrid_summary
 
@@ -3759,44 +3760,16 @@ with tabs[2]:
                         return "—"
                 return f"{v}{suffix}"
 
-            buy_list = " / ".join(tc.get("買い目", []))
-            tc_line = f"三連複フォメ：{tc.get('型', '—')}"
-            tc_sub = (
-                f"評価1軸：{tc.get('評価1軸', '—')}／"
-                f"2列目：{tc.get('2列目', '—')}／"
-                f"3列目：{tc.get('3列目', '—')}／"
-                f"点数：{tc.get('点数', '—')}点／"
-                f"買い目：{buy_list}"
-            )
-            tc_stats = (
-                f"累積対象N：{_fmt_tc_value(tc.get('累積対象N'))}／"
-                f"評価1_3着内率：{_fmt_tc_value(tc.get('評価1_3着内率%'), '%')}／"
-                f"合成カバー率：{_fmt_tc_value(tc.get('合成カバー率%'), '%')}／"
-                f"累積評価ベース想定的中率：{_fmt_tc_value(tc.get('累積評価ベース想定的中率%'), '%')}／"
-                f"100%必要平均払戻：{_fmt_tc_value(tc.get('100%必要平均払戻'), '円')}"
-            )
-
-            tc_zone_html = _build_trio_odds_zone_html(tc.get("100%必要平均払戻"))
-
-            tc_html = (
-                '<div style="background:#fff7e6;color:#7a4a00;border-radius:8px;'
-                'padding:14px 16px;border:1px solid rgba(0,0,0,0.05);'
-                'font-size:18px;line-height:1.7;font-weight:700;">'
-                f'<div>{_escape_html(tc_line)}</div>'
-                f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(tc_sub)}</div>'
-                f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(tc_stats)}</div>'
-                f'{tc_zone_html}'
-                '</div>'
-            )
-            st.markdown(tc_html, unsafe_allow_html=True)
+            # 先に3券種の候補を作る。
+            # 表示順は、2車複 → 2車単 → 三連複。
+            nf = _build_nishafuku_from_trio_third(tc, pair12_total)
+            nt = _build_nishatan_from_trio_third(tc, pair12_total)
 
             # -----------------------------------------
             # 2車複オッズ帯
             # 2車複の軸相手は、三連複フォメの3列目を使う。
             # 例：三連複 1-24-2435 → 2車複 1-2435
             # -----------------------------------------
-            nf = _build_nishafuku_from_trio_third(tc, pair12_total)
-
             if nf:
                 nf_buy_list = " / ".join(nf.get("買い目", []))
                 nf_line = f"2車複フォメ：{nf.get('型', '—')}"
@@ -3827,14 +3800,11 @@ with tabs[2]:
                 )
                 st.markdown(nf_html, unsafe_allow_html=True)
 
-
             # -----------------------------------------
             # 2車単オッズ帯
             # 2車単の軸相手も、三連複フォメの3列目を使う。
             # 例：三連複 1-24-2435 → 2車単 1→2435
             # -----------------------------------------
-            nt = _build_nishatan_from_trio_third(tc, pair12_total)
-
             if nt:
                 nt_buy_list = " / ".join(nt.get("買い目", []))
                 nt_line = f"2車単フォメ：{nt.get('型', '—')}"
@@ -3864,6 +3834,41 @@ with tabs[2]:
                     '</div>'
                 )
                 st.markdown(nt_html, unsafe_allow_html=True)
+
+            # -----------------------------------------
+            # 三連複オッズ帯
+            # 表示順を下に回す。2車複・2車単を確認したあとに見る。
+            # -----------------------------------------
+            buy_list = " / ".join(tc.get("買い目", []))
+            tc_line = f"三連複フォメ：{tc.get('型', '—')}"
+            tc_sub = (
+                f"評価1軸：{tc.get('評価1軸', '—')}／"
+                f"2列目：{tc.get('2列目', '—')}／"
+                f"3列目：{tc.get('3列目', '—')}／"
+                f"点数：{tc.get('点数', '—')}点／"
+                f"買い目：{buy_list}"
+            )
+            tc_stats = (
+                f"累積対象N：{_fmt_tc_value(tc.get('累積対象N'))}／"
+                f"評価1_3着内率：{_fmt_tc_value(tc.get('評価1_3着内率%'), '%')}／"
+                f"合成カバー率：{_fmt_tc_value(tc.get('合成カバー率%'), '%')}／"
+                f"累積評価ベース想定的中率：{_fmt_tc_value(tc.get('累積評価ベース想定的中率%'), '%')}／"
+                f"100%必要平均払戻：{_fmt_tc_value(tc.get('100%必要平均払戻'), '円')}"
+            )
+
+            tc_zone_html = _build_trio_odds_zone_html(tc.get("100%必要平均払戻"))
+
+            tc_html = (
+                '<div style="background:#fff7e6;color:#7a4a00;border-radius:8px;'
+                'padding:14px 16px;border:1px solid rgba(0,0,0,0.05);'
+                'font-size:18px;line-height:1.7;font-weight:700;margin-top:12px;">'
+                f'<div>{_escape_html(tc_line)}</div>'
+                f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(tc_sub)}</div>'
+                f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(tc_stats)}</div>'
+                f'{tc_zone_html}'
+                '</div>'
+            )
+            st.markdown(tc_html, unsafe_allow_html=True)
 
 
             with st.expander("根拠数値を確認", expanded=False):
