@@ -3285,10 +3285,17 @@ with tabs[2]:
     except Exception:
         pass
 
-    # 3連複検証・推奨表示は、この画面では「三連複4点候補」に一本化する。
-
-    # 評価別テーブル直下に、三連複4点候補だけを表示する。
-    # 評価1・2・3は固定し、第4枠だけを1-4/1-5/1-6/1-7の総合候補情報で選ぶ。
+    # 3連複検証・推奨表示は、この画面では「三連複フォメ」に一本化する。
+    # 評価別テーブル直下に、最終的な三連複フォメ候補とオッズ帯目安を表示する。
+    #
+    # フォメの考え方：
+    # 1列目：評価1固定
+    # 2列目：1軸相手の安定差上位2車
+    # 3列目：2列目＋評価上位追加2車
+    #
+    # オッズ帯の考え方：
+    # 100%必要平均払戻を基準に、低すぎ／300円／200円／100円／高すぎ の境界を出す。
+    # これは買い目1点ごとの強弱判定ではなく、フォーメーション全体を買うときの目安。
     def _escape_html(s) -> str:
         return (
             str(s)
@@ -3298,10 +3305,96 @@ with tabs[2]:
             .replace('"', "&quot;")
         )
 
+    def _safe_float_trio_zone(v, default=None):
+        try:
+            if v is None or pd.isna(v):
+                return default
+            return float(v)
+        except Exception:
+            return default
+
+    def _build_trio_odds_zone(need_pay):
+        """
+        100%必要平均払戻から三連複オッズ帯を作る。
+
+        例：100%必要平均払戻 1160円なら、
+        3.9倍未満       = 低すぎ
+        3.9〜5.8倍      = 300円
+        5.8〜11.6倍     = 200円
+        11.6〜34.8倍    = 100円
+        34.8倍超        = 高すぎ注意
+        """
+        need_pay = _safe_float_trio_zone(need_pay, None)
+
+        if need_pay is None or need_pay <= 0:
+            return {
+                "available": False,
+                "low_cut": None,
+                "zone_300_hi": None,
+                "zone_200_hi": None,
+                "high_cut": None,
+                "plain": "三連複オッズ帯：算出不可",
+                "rows": [],
+            }
+
+        low_cut = need_pay / 300.0
+        zone_300_hi = need_pay / 200.0
+        zone_200_hi = need_pay / 100.0
+        high_cut = zone_200_hi * 3.0
+
+        rows = [
+            {
+                "ゾーン": "低すぎ",
+                "オッズ帯": f"{low_cut:.1f}倍未満",
+                "扱い": "ケン",
+            },
+            {
+                "ゾーン": "厚め",
+                "オッズ帯": f"{low_cut:.1f}〜{zone_300_hi:.1f}倍",
+                "扱い": "300円",
+            },
+            {
+                "ゾーン": "標準厚め",
+                "オッズ帯": f"{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍",
+                "扱い": "200円",
+            },
+            {
+                "ゾーン": "通常",
+                "オッズ帯": f"{zone_200_hi:.1f}〜{high_cut:.1f}倍",
+                "扱い": "100円",
+            },
+            {
+                "ゾーン": "高すぎ",
+                "オッズ帯": f"{high_cut:.1f}倍超",
+                "扱い": "注意",
+            },
+        ]
+
+        plain = (
+            f"三連複オッズ帯："
+            f"低すぎ={low_cut:.1f}倍未満／"
+            f"300円={low_cut:.1f}〜{zone_300_hi:.1f}倍／"
+            f"200円={zone_300_hi:.1f}〜{zone_200_hi:.1f}倍／"
+            f"100円={zone_200_hi:.1f}〜{high_cut:.1f}倍／"
+            f"高すぎ={high_cut:.1f}倍超"
+        )
+
+        return {
+            "available": True,
+            "low_cut": low_cut,
+            "zone_300_hi": zone_300_hi,
+            "zone_200_hi": zone_200_hi,
+            "high_cut": high_cut,
+            "plain": plain,
+            "rows": rows,
+        }
+
     with purchase_candidate_slot.container():
         st.markdown("### ＜購入候補｜三連複フォメ＞")
+
         if axis1_stability_hybrid_summary:
             tc = axis1_stability_hybrid_summary
+
             buy_list = " / ".join(tc.get("買い目", []))
             tc_line = f"三連複フォメ：{tc.get('型', '—')}"
             tc_sub = (
@@ -3317,6 +3410,47 @@ with tabs[2]:
                 f"想定回収率：{tc.get('想定回収率%', '—')}%／"
                 f"100%必要平均払戻：{tc.get('100%必要平均払戻', '—')}円"
             )
+
+            trio_zone = _build_trio_odds_zone(tc.get("100%必要平均払戻"))
+
+            if trio_zone.get("available"):
+                z_rows = trio_zone.get("rows", [])
+                z1, z2, z3, z4, z5 = z_rows
+                tc_zone_html = (
+                    '<div style="margin-top:10px;padding:10px 12px;'
+                    'background:rgba(255,255,255,0.60);border-radius:8px;'
+                    'border:1px solid rgba(122,74,0,0.18);">'
+                    '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">三連複オッズ帯</div>'
+                    '<div style="display:grid;grid-template-columns:1.2fr 1.8fr 1fr;gap:4px 10px;'
+                    'font-size:14px;line-height:1.7;font-weight:700;">'
+                    '<div style="opacity:0.70;">ゾーン</div><div style="opacity:0.70;">オッズ帯</div><div style="opacity:0.70;">扱い</div>'
+                    f'<div>{_escape_html(z1["ゾーン"])}</div><div>{_escape_html(z1["オッズ帯"])}</div><div>{_escape_html(z1["扱い"])}</div>'
+                    f'<div>{_escape_html(z2["ゾーン"])}</div><div>{_escape_html(z2["オッズ帯"])}</div><div>{_escape_html(z2["扱い"])}</div>'
+                    f'<div>{_escape_html(z3["ゾーン"])}</div><div>{_escape_html(z3["オッズ帯"])}</div><div>{_escape_html(z3["扱い"])}</div>'
+                    f'<div>{_escape_html(z4["ゾーン"])}</div><div>{_escape_html(z4["オッズ帯"])}</div><div>{_escape_html(z4["扱い"])}</div>'
+                    f'<div>{_escape_html(z5["ゾーン"])}</div><div>{_escape_html(z5["オッズ帯"])}</div><div>{_escape_html(z5["扱い"])}</div>'
+                    '</div>'
+                    f'<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
+                    f'基準：100%必要平均払戻 {_safe_float_trio_zone(tc.get("100%必要平均払戻"), 0.0):.1f}円。'
+                    'フォーメーション全体を買うときのオッズ帯目安。'
+                    '</div>'
+                    '</div>'
+                )
+            else:
+                tc_zone_html = (
+                    '<div style="margin-top:10px;padding:10px 12px;'
+                    'background:rgba(255,255,255,0.60);border-radius:8px;'
+                    'border:1px solid rgba(122,74,0,0.18);font-size:14px;font-weight:700;">'
+                    '三連複オッズ帯：算出不可'
+                    '</div>'
+                )
+
+            # noteコピーや後続表示で使いたい場合のため、summaryにも保持しておく。
+            try:
+                tc["三連複オッズ帯"] = trio_zone.get("plain", "")
+            except Exception:
+                pass
+
             tc_html = (
                 '<div style="background:#fff7e6;color:#7a4a00;border-radius:8px;'
                 'padding:14px 16px;border:1px solid rgba(0,0,0,0.05);'
@@ -3324,12 +3458,19 @@ with tabs[2]:
                 f'<div>{_escape_html(tc_line)}</div>'
                 f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(tc_sub)}</div>'
                 f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(tc_stats)}</div>'
+                f'{tc_zone_html}'
                 '</div>'
             )
             st.markdown(tc_html, unsafe_allow_html=True)
 
             with st.expander("根拠数値を確認", expanded=False):
-                st.caption("1列目は評価1固定。2列目は1軸相手の安定差上位2車。3列目は2列目＋評価上位追加2車です。安定差は abs(想定差)+abs(回収差)。このフォメでは回収差プラス除外は使いません。")
+                st.caption(
+                    "1列目は評価1固定。"
+                    "2列目は1軸相手の安定差上位2車。"
+                    "3列目は2列目＋評価上位追加2車です。"
+                    "安定差は abs(想定差)+abs(回収差)。"
+                    "このフォメでは回収差プラス除外は使いません。"
+                )
                 st.write(
                     {
                         "型": tc.get("型"),
@@ -3345,6 +3486,7 @@ with tabs[2]:
                         "基準平均配当": tc.get("基準平均配当"),
                         "想定回収率%": tc.get("想定回収率%"),
                         "100%必要平均払戻": tc.get("100%必要平均払戻"),
+                        "三連複オッズ帯": tc.get("三連複オッズ帯"),
                         "選択理由": tc.get("選択理由"),
                     }
                 )
