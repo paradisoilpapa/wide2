@@ -2080,9 +2080,11 @@ def build_axis1_stability_hybrid_formation_summary(
     else:
         actual_hit_rate = None
 
-    actual_avg_pay = round(actual_sum / actual_h, 1) if actual_h > 0 else None
+    # 払戻SUMが未入力のまま的中Hだけ入っている場合、平均配当0円とは表示しない。
+    # 0円表示は「データ未接続」に見えにくいため、未入力は None にする。
+    actual_avg_pay = round(actual_sum / actual_h, 1) if actual_h > 0 and actual_sum > 0 else None
 
-    if actual_n > 0 and invest_per_race > 0:
+    if actual_n > 0 and invest_per_race > 0 and actual_sum > 0:
         actual_roi = round(100.0 * actual_sum / (actual_n * invest_per_race), 1)
     else:
         actual_roi = None
@@ -2178,28 +2180,29 @@ with tabs[0]:
     st.caption(
         "入力中の白化を抑えるため、フォーム送信式です。"
         "V評価は頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。"
-        "着順は～3桁。2車複配当を入力。配当は100円あたりの払戻金（円）です。"
+        "着順は～3桁。2車複・3連複配当を入力。配当は100円あたりの払戻金（円）です。"
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([0.8, 0.9, 2.8, 1.05, 1.0])
+        cols_hdr = st.columns([0.7, 0.8, 2.6, 1.0, 0.95, 0.95])
         cols_hdr[0].markdown("**R**")
         cols_hdr[1].markdown("**頭数**")
         cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
         cols_hdr[3].markdown("**着順(～3桁)**")
         cols_hdr[4].markdown("**2車複**")
+        cols_hdr[5].markdown("**3連複**")
 
         daily_inputs = []
 
         for i in range(1, 37):
-            c1, c2, c3, c4, c5 = st.columns([0.8, 0.9, 2.8, 1.05, 1.0])
+            c1, c2, c3, c4, c5, c6 = st.columns([0.7, 0.8, 2.6, 1.0, 0.95, 0.95])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
             vline = c3.text_input("", key=f"vline_{i}", value="")
             fin = c4.text_input("", key=f"fin_{i}", value="")
             pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
-            pay_3f = 0
+            pay_3f = c6.number_input("", key=f"pay3f_{i}", min_value=0, value=0, step=10)
             pay_2t = 0
 
             daily_inputs.append(
@@ -2356,9 +2359,30 @@ with tabs[1]:
 
         st.divider()
 
-        # 3連複入力はクロスフォーメーション運用では使用しないため非表示。
+        st.markdown("## 個別3連複 引継ぎ入力（累積）")
+        st.caption(
+            "分析結果の『個別3連複 引継ぎ用累積表』をそのまま転記します。"
+            "対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じ扱いで自動計算します。"
+            "この入力がない場合、実戦平均配当・実戦想定回収率は算出できません。"
+        )
+
         sanrenpuku12_inputs = []
         sanrenpuku12_individual_inputs = []
+
+        trio_cols = st.columns([1.35, 0.85, 1.05, 0.75])
+        trio_cols[0].markdown("**目**")
+        trio_cols[1].markdown("**N**")
+        trio_cols[2].markdown("**SUM**")
+        trio_cols[3].markdown("**H**")
+
+        for key in TRIO_USED_KEYS:
+            safe_key = str(key).replace("-", "_")
+            c0, c1, c2, c3 = st.columns([1.35, 0.85, 1.05, 0.75])
+            c0.write(str(key))
+            N = c1.number_input("", key=f"prev_trio_{safe_key}_N", min_value=0, value=0, label_visibility="collapsed")
+            SUM = c2.number_input("", key=f"prev_trio_{safe_key}_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
+            H = c3.number_input("", key=f"prev_trio_{safe_key}_H", min_value=0, value=0, label_visibility="collapsed")
+            sanrenpuku12_individual_inputs.append(("仮想全体", str(key), int(N), int(SUM), int(H)))
 
         st.divider()
 
@@ -3427,6 +3451,16 @@ with tabs[2]:
         st.markdown("### ＜購入候補｜三連複フォメ＞")
         if axis1_stability_hybrid_summary:
             tc = axis1_stability_hybrid_summary
+
+            def _fmt_tc_value(v, suffix=""):
+                try:
+                    if v is None or pd.isna(v):
+                        return "—"
+                except Exception:
+                    if v is None:
+                        return "—"
+                return f"{v}{suffix}"
+
             buy_list = " / ".join(tc.get("買い目", []))
             tc_line = f"三連複フォメ：{tc.get('型', '—')}"
             tc_sub = (
@@ -3437,12 +3471,12 @@ with tabs[2]:
                 f"買い目：{buy_list}"
             )
             tc_stats = (
-                f"実戦対象N：{tc.get('実戦対象N', '—')}／"
-                f"実戦的中H：{tc.get('実戦的中H', '—')}／"
-                f"実戦想定的中率：{tc.get('実戦想定的中率%', '—')}%／"
-                f"実戦平均配当：{tc.get('実戦平均配当', '—')}円／"
-                f"実戦想定回収率：{tc.get('実戦想定回収率%', '—')}%／"
-                f"100%必要平均払戻：{tc.get('100%必要平均払戻', '—')}円"
+                f"実戦対象N：{_fmt_tc_value(tc.get('実戦対象N'))}／"
+                f"実戦的中H：{_fmt_tc_value(tc.get('実戦的中H'))}／"
+                f"実戦想定的中率：{_fmt_tc_value(tc.get('実戦想定的中率%'), '%')}／"
+                f"実戦平均配当：{_fmt_tc_value(tc.get('実戦平均配当'), '円')}／"
+                f"実戦想定回収率：{_fmt_tc_value(tc.get('実戦想定回収率%'), '%')}／"
+                f"100%必要平均払戻：{_fmt_tc_value(tc.get('100%必要平均払戻'), '円')}"
             )
 
             tc_zone_html = _build_trio_odds_zone_html(tc.get("100%必要平均払戻"))
@@ -3571,7 +3605,33 @@ with tabs[2]:
 
     st.divider()
 
-    # 3連複引継ぎ表は非表示。
+    st.markdown("### 個別3連複 引継ぎ用累積表")
+    st.caption(
+        "次回の『個別3連複 引継ぎ入力』へ転記する表です。"
+        "対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。"
+    )
+
+    trio_carry_rows = []
+    for key in TRIO_USED_KEYS:
+        rec = payout_sanrenpuku12_individual_total.get("仮想全体", {}).get(key, new_payout_rec())
+        row = payout_row(str(key), rec)
+        trio_carry_rows.append({
+            "目": str(key),
+            "対象N": row.get("対象N"),
+            "払戻合計SUM": row.get("払戻合計SUM"),
+            "的中H": row.get("的中H"),
+            "的中率%": row.get("的中率%"),
+            "平均配当": row.get("平均配当"),
+            "回収率%": row.get("回収率%"),
+        })
+
+    df_trio_carry = pd.DataFrame(trio_carry_rows)
+    st.dataframe(
+        df_trio_carry,
+        use_container_width=True,
+        hide_index=True,
+        height=max(120, 38 * (len(df_trio_carry) + 1)),
+    )
 
     st.divider()
 
