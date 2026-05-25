@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8g｜2車複・2車単・三連複オッズ帯｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8h｜2車複・2車単・三連複オッズ帯｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -2245,29 +2245,29 @@ with tabs[0]:
     st.caption(
         "入力中の白化を抑えるため、フォーム送信式です。"
         "V評価は頭数ぶんの桁数で入力（例：7車=1432567 / 6車=143256）。"
-        "着順は～3桁。2車複・3連複配当を入力。配当は100円あたりの払戻金（円）です。"
+        "着順は～3桁。2車複配当のみ入力します。"
+        "三連複は実配当入力を使わず、評価別3着内率×カバー率から必要平均払戻を算出します。"
     )
 
     with st.form("daily_input_form"):
-        cols_hdr = st.columns([0.7, 0.8, 2.6, 1.0, 0.95, 0.95])
+        cols_hdr = st.columns([0.7, 0.8, 2.8, 1.0, 1.0])
         cols_hdr[0].markdown("**R**")
         cols_hdr[1].markdown("**頭数**")
         cols_hdr[2].markdown("**V評価（頭数ぶんの桁数）**")
         cols_hdr[3].markdown("**着順(～3桁)**")
         cols_hdr[4].markdown("**2車複**")
-        cols_hdr[5].markdown("**3連複**")
 
         daily_inputs = []
 
         for i in range(1, 37):
-            c1, c2, c3, c4, c5, c6 = st.columns([0.7, 0.8, 2.6, 1.0, 0.95, 0.95])
+            c1, c2, c3, c4, c5 = st.columns([0.7, 0.8, 2.8, 1.0, 1.0])
 
             rid = c1.text_input("", key=f"rid_{i}", value=str(i))
             field_n = c2.selectbox("", options=[7, 6, 5], index=0, key=f"field_n_{i}")
             vline = c3.text_input("", key=f"vline_{i}", value="")
             fin = c4.text_input("", key=f"fin_{i}", value="")
             pay_2f = c5.number_input("", key=f"pay2f_{i}", min_value=0, value=0, step=10)
-            pay_3f = c6.number_input("", key=f"pay3f_{i}", min_value=0, value=0, step=10)
+            pay_3f = 0
             pay_2t = 0
 
             daily_inputs.append(
@@ -2295,7 +2295,7 @@ with tabs[0]:
         vorder = parse_rankline(vline, field_n)
         finish = parse_finish(fin)
 
-        any_input = any([vline.strip(), fin.strip(), pay_2f > 0, pay_3f > 0])
+        any_input = any([vline.strip(), fin.strip(), pay_2f > 0])
         if any_input:
             if not vorder:
                 st.warning(f"R{rid}: 頭数{field_n}なので、V評価は{field_n}桁で入力してください。")
@@ -2425,29 +2425,14 @@ with tabs[1]:
         st.divider()
 
         st.markdown("## 個別3連複 引継ぎ入力（累積）")
-        st.caption(
-            "分析結果の『個別3連複 引継ぎ用累積表』をそのまま転記します。"
-            "対象N・払戻合計SUM・的中Hだけ入力。KSUMは対象Nと同じ扱いで自動計算します。"
-            "この入力がない場合、実戦平均配当・実戦想定回収率は算出できません。"
+        st.info(
+            "個別3連複の配当入力は廃止しました。"
+            "三連複フォメは、評価別3着内率と1→2着評価分布から"
+            "想定的中率・100%必要平均払戻を算出します。"
         )
 
         sanrenpuku12_inputs = []
         sanrenpuku12_individual_inputs = []
-
-        trio_cols = st.columns([1.35, 0.85, 1.05, 0.75])
-        trio_cols[0].markdown("**目**")
-        trio_cols[1].markdown("**N**")
-        trio_cols[2].markdown("**SUM**")
-        trio_cols[3].markdown("**H**")
-
-        for key in TRIO_USED_KEYS:
-            safe_key = str(key).replace("-", "_")
-            c0, c1, c2, c3 = st.columns([1.35, 0.85, 1.05, 0.75])
-            c0.write(str(key))
-            N = c1.number_input("", key=f"prev_trio_{safe_key}_N", min_value=0, value=0, label_visibility="collapsed")
-            SUM = c2.number_input("", key=f"prev_trio_{safe_key}_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
-            H = c3.number_input("", key=f"prev_trio_{safe_key}_H", min_value=0, value=0, label_visibility="collapsed")
-            sanrenpuku12_individual_inputs.append(("仮想全体", str(key), int(N), int(SUM), int(H)))
 
         st.divider()
 
@@ -2740,7 +2725,8 @@ for row in byrace_rows:
     if ksum <= 0:
         continue
 
-    pay_3f = int(row.get("pay_3f", 0))
+    # 三連複の実配当入力は廃止。的中Hだけ参考集計し、SUMは使わない。
+    pay_3f = 0
     is_hit = hit_sanrenpuku_12_all(vorder, finish, field_n)
 
     rec_all = payout_sanrenpuku12_all_daily["仮想全体"]
@@ -2748,7 +2734,6 @@ for row in byrace_rows:
     rec_all["KSUM"] += ksum
     if is_hit:
         rec_all["H"] += 1
-        rec_all["SUM"] += pay_3f
 
     # 個別3連複。実運用対象の1・2絡みだけを、存在する評価ごとに毎回1点仮想購入。
     for key in TRIO_USED_KEYS:
@@ -2762,7 +2747,6 @@ for row in byrace_rows:
         rec_ind_all["KSUM"] += one_ksum
         if one_hit:
             rec_ind_all["H"] += 1
-            rec_ind_all["SUM"] += pay_3f
 
 
 payout_2t_pattern_total: Dict[int, Dict[str, int]] = {
@@ -3984,31 +3968,10 @@ with tabs[2]:
     st.divider()
 
     st.markdown("### 個別3連複 引継ぎ用累積表")
-    st.caption(
-        "次回の『個別3連複 引継ぎ入力』へ転記する表です。"
-        "対象N・払戻合計SUM・的中Hだけ入力すれば、KSUMは自動で対象Nと同じになります。"
-    )
-
-    trio_carry_rows = []
-    for key in TRIO_USED_KEYS:
-        rec = payout_sanrenpuku12_individual_total.get("仮想全体", {}).get(key, new_payout_rec())
-        row = payout_row(str(key), rec)
-        trio_carry_rows.append({
-            "目": str(key),
-            "対象N": row.get("対象N"),
-            "払戻合計SUM": row.get("払戻合計SUM"),
-            "的中H": row.get("的中H"),
-            "的中率%": row.get("的中率%"),
-            "平均配当": row.get("平均配当"),
-            "回収率%": row.get("回収率%"),
-        })
-
-    df_trio_carry = pd.DataFrame(trio_carry_rows)
-    st.dataframe(
-        df_trio_carry,
-        use_container_width=True,
-        hide_index=True,
-        height=max(120, 38 * (len(df_trio_carry) + 1)),
+    st.info(
+        "個別3連複の引継ぎ表は廃止しました。"
+        "三連複フォメは、上の評価別入賞回数と1→2着評価分布だけで"
+        "想定的中率・必要平均払戻を算出します。"
     )
 
     st.divider()
