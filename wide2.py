@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8j｜2車単金額補正・三連複防御・2車複参考｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8k｜2車単ブロック・三連複防御・2車複参考｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -3542,6 +3542,11 @@ with tabs[2]:
 
 
     def _build_nishatan_odds_zone_html(need_pay):
+        """
+        2車単は1→234をワンブロックで見る。
+        個別買い目ごとに300/200/100円へ振り分けるのではなく、
+        3点100円のブロック全体で、当たり時平均払戻が必要平均払戻へ届くかを見る。
+        """
         need_pay = _safe_float_trio_zone(need_pay, None)
 
         if need_pay is None or need_pay <= 0:
@@ -3549,7 +3554,7 @@ with tabs[2]:
                 '<div style="margin-top:10px;padding:10px 12px;'
                 'background:#eef6ff;border-radius:8px;'
                 'border:1px solid rgba(32,92,145,0.20);">'
-                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">2車単オッズ帯</div>'
+                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">2車単ブロック判定</div>'
                 '<div style="font-size:14px;line-height:1.8;font-weight:700;">算出不可</div>'
                 '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
                 '累積1→2着評価分布が不足しているため、100%必要平均払戻を算出できません。'
@@ -3557,46 +3562,40 @@ with tabs[2]:
                 '</div>'
             )
 
-        low_cut = need_pay / 300.0
-        zone_300_hi = need_pay / 200.0
-        zone_200_hi = need_pay / 100.0
-        high_cut = zone_200_hi * 3.0
+        need_odds = need_pay / 100.0
+        weak_odds = need_odds * 0.90
 
         return (
             '<div style="margin-top:10px;padding:10px 12px;'
             'background:#eef6ff;'
             'border-radius:8px;border:1px solid rgba(32,92,145,0.20);">'
             '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">'
-            '2車単オッズ帯'
+            '2車単ブロック判定'
             '</div>'
             '<div style="font-size:14px;line-height:1.85;font-weight:700;">'
-            f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
-            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円（安め注意）<br>'
-            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円（主戦場）<br>'
-            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円（上振れ・最大1点）<br>'
-            f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
+            '基本　　　：1→234 を各100円、3点300円のワンブロック<br>'
+            f'採用目安　：当たり時の平均払戻 {need_pay:.1f}円以上（平均オッズ {need_odds:.1f}倍以上）<br>'
+            f'薄い　　　：平均オッズ {weak_odds:.1f}〜{need_odds:.1f}倍　→　軸A以上なら検討<br>'
+            f'ケン寄り　：平均オッズ {weak_odds:.1f}倍未満　→　安すぎ注意<br>'
+            '拡張　　　：1→2345 は的中スパン短縮用。常用ではなく例外枠'
             '</div>'
             '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
-            f'基準：累積1→2着評価分布ベースの100%必要平均払戻 {need_pay:.1f}円'
+            f'基準：2車単1→234ブロックの100%必要平均払戻 {need_pay:.1f}円。'
+            '個別買い目ごとの300/200/100円振り分けは行わず、3点セット全体で判断します。'
             '</div>'
             '</div>'
         )
 
 
-    def _build_nishatan_from_trio_third(tc, pair12_counts, df_pairs: pd.DataFrame | None = None):
+    def _build_nishatan_from_trio_third(tc, pair12_counts):
         """
-        2車単は攻めの主役候補として、累積1→2着評価分布に沿って
-        評価1→234を基本形にする。
+        2車単は、累積1→2着評価分布を主根拠にする。
+        基本は評価1→234を3点100円のワンブロックで扱う。
 
-        さらに、対応する2車複ペアの回収率を
-        2車単の300/200/100円ゾーンの金額補正に使う。
-        2車複を買うためではなく、2車単の金額を減額・維持するための補正。
-
-        補正ルール：
-        - 2車複回収率 100%以上：維持。100円ゾーンは上振れ候補として優先。
-        - 85〜100%：維持。
-        - 70〜85%：1段階減額。300→200、200→100、100→切り。
-        - 70%未満：安めを厚くしない。300→切り、200→100、100→切り。
+        重要：
+        - 個別買い目を300/200/100円へ振り分けない。
+        - 2車複の回収率補正は使わない。
+        - 1→2345は的中スパン短縮用の比較・例外枠として表示する。
         """
         if not tc:
             return None
@@ -3606,131 +3605,75 @@ with tabs[2]:
         except Exception:
             axis = 1
 
-        targets = [r for r in (2, 3, 4) if r != axis and 1 <= r <= FIELD_SIZE]
-
-        if not targets:
-            return None
-
-        pair_row_map = {}
-        if df_pairs is not None and not df_pairs.empty and "ペアキー" in df_pairs.columns:
-            try:
-                for _, _pr in df_pairs.iterrows():
-                    _pk = str(_pr.get("ペアキー", "")).strip()
-                    if _pk:
-                        pair_row_map[_pk] = _pr
-            except Exception:
-                pair_row_map = {}
-
-        def _pair_metric(pair_key: str, col: str, default=None):
-            row = pair_row_map.get(str(pair_key))
-            if row is None:
-                return default
-            try:
-                v = row.get(col, default)
-                if pd.isna(v):
-                    return default
-                return v
-            except Exception:
-                return default
-
-        def _pair_roi_amount_adjust(pair_key: str):
-            """対応2車複の回収率で、2車単の各オッズ帯の推奨金額を補正する。"""
-            roi = _safe_float_trio_zone(_pair_metric(pair_key, "回収率%", None), None)
-            pay_pos = str(_pair_metric(pair_key, "配当位置", "") or "")
-            reason = str(_pair_metric(pair_key, "総合候補理由", "") or "")
-            pay_coef = _safe_float_trio_zone(_pair_metric(pair_key, "配当係数", None), None)
-
-            if roi is None:
-                cls = "データ不足"
-                amt_300, amt_200, amt_100 = "200円まで", "100円まで", "原則切り"
-                note = "対応2車複の回収率不足。厚張りは避ける"
-            elif roi >= 100.0:
-                cls = "歪み強"
-                amt_300, amt_200, amt_100 = "300円", "200円", "100円候補"
-                note = "対応2車複の回収率が100%以上。金額維持可"
-            elif roi >= 85.0:
-                cls = "維持"
-                amt_300, amt_200, amt_100 = "300円", "200円", "100円候補"
-                note = "対応2車複の回収率が許容域。基本金額を維持"
-            elif roi >= 70.0:
-                cls = "減額"
-                amt_300, amt_200, amt_100 = "200円", "100円", "切り"
-                note = "対応2車複の回収率が弱い。1段階減額"
-            else:
-                cls = "強減額"
-                amt_300, amt_200, amt_100 = "切り", "100円", "切り"
-                note = "対応2車複の回収率が70%未満。安め厚張り禁止"
-
-            # 配当上振れ・後追い警戒があるペアは100円ゾーンをさらに慎重にする。
-            if ("上振れ" in pay_pos) or ("過熱" in reason) or ("後追い" in reason):
-                if amt_100 != "切り":
-                    amt_100 = "原則切り"
-                note += "／配当・回収の後追い警戒"
-
-            return {
-                "対応2車複": pair_key,
-                "2車複回収率%": round(roi, 1) if roi is not None else None,
-                "2車複配当係数": round(float(pay_coef), 2) if pay_coef is not None else None,
-                "2車複配当位置": pay_pos,
-                "補正判定": cls,
-                "300円ゾーン時": amt_300,
-                "200円ゾーン時": amt_200,
-                "100円ゾーン時": amt_100,
-                "補正メモ": note,
-            }
-
-        pair_total = sum(int(v) for v in (pair12_counts or {}).values())
-
-        if pair_total <= 0:
-            hit_count = 0
-            hit_rate = None
-        else:
+        def _block_stats(targets):
+            targets = [r for r in targets if r != axis and 1 <= r <= FIELD_SIZE]
+            targets = list(dict.fromkeys(targets))
+            pair_total = sum(int(v) for v in (pair12_counts or {}).values())
             hit_count = 0
             for t in targets:
                 hit_count += int(pair12_counts.get((axis, t), 0))
-            hit_rate = round(100.0 * hit_count / pair_total, 1)
-
-        points = len(targets)
-        invest = points * 100
-
-        if hit_rate is not None and hit_rate > 0:
-            breakeven_avg_pay = round(invest / (hit_rate / 100.0), 1)
-        else:
-            breakeven_avg_pay = None
-
-        bet_keys = [f"{axis}→{t}" for t in targets]
-
-        bet_rows = []
-        for t, pk in zip(targets, bet_keys):
-            if pair_total > 0:
-                h = int(pair12_counts.get((axis, t), 0))
-                r = round(100.0 * h / pair_total, 1)
-            else:
-                h = 0
-                r = None
-
-            pair_key = f"{min(axis, t)}-{max(axis, t)}"
-            adj = _pair_roi_amount_adjust(pair_key)
-            row = {
-                "買い目": pk,
-                "的中H": h,
-                "的中率%": r,
+            hit_rate = round(100.0 * hit_count / pair_total, 1) if pair_total > 0 else None
+            points = len(targets)
+            invest = points * 100
+            breakeven_avg_pay = round(invest / (hit_rate / 100.0), 1) if hit_rate and hit_rate > 0 else None
+            avg_span = round(100.0 / hit_rate, 2) if hit_rate and hit_rate > 0 else None
+            return {
+                "型": f"{axis}→" + "".join(str(t) for t in targets),
+                "軸": axis,
+                "相手": "".join(str(t) for t in targets),
+                "点数": points,
+                "買い目": [f"{axis}→{t}" for t in targets],
+                "累積対象N": pair_total,
+                "累積2車単的中H": hit_count,
+                "累積2車単的中率%": hit_rate,
+                "平均的中スパンR": avg_span,
+                "100%必要平均払戻": breakeven_avg_pay,
             }
-            row.update(adj)
-            bet_rows.append(row)
 
-        return {
-            "型": f"{axis}→" + "".join(str(t) for t in targets),
-            "軸": axis,
-            "相手": "".join(str(t) for t in targets),
-            "点数": points,
-            "買い目": bet_keys,
-            "累積対象N": pair_total,
-            "累積2車単的中H": hit_count,
-            "累積2車単的中率%": hit_rate,
-            "100%必要平均払戻": breakeven_avg_pay,
-            "買い目別": bet_rows,
-        }
+        main_targets = [2, 3, 4]
+        ext_targets = [2, 3, 4, 5]
+        main = _block_stats(main_targets)
+        ext = _block_stats(ext_targets)
+
+        if not main or not main.get("買い目"):
+            return None
+
+        compare_rows = []
+        for label, row, role in [
+            ("基本", main, "通常運用"),
+            ("拡張", ext, "的中スパン短縮・例外枠"),
+        ]:
+            if row and row.get("買い目"):
+                compare_rows.append({
+                    "区分": label,
+                    "型": row.get("型"),
+                    "点数": row.get("点数"),
+                    "買い目": " / ".join(row.get("買い目", [])),
+                    "的中H": row.get("累積2車単的中H"),
+                    "的中率%": row.get("累積2車単的中率%"),
+                    "平均的中スパンR": row.get("平均的中スパンR"),
+                    "100%必要平均払戻": row.get("100%必要平均払戻"),
+                    "役割": role,
+                })
+
+        # 拡張による増分を参考表示用に保持する。
+        try:
+            add_hits = int(ext.get("累積2車単的中H", 0)) - int(main.get("累積2車単的中H", 0))
+            add_points = int(ext.get("点数", 0)) - int(main.get("点数", 0))
+            add_need_pay = None
+            if add_hits > 0 and main.get("累積対象N"):
+                # 追加1点分だけを常用した場合に必要な平均払戻。
+                add_need_pay = round((int(main.get("累積対象N")) * add_points * 100) / add_hits, 1)
+        except Exception:
+            add_hits = None
+            add_points = None
+            add_need_pay = None
+
+        main["比較"] = compare_rows
+        main["拡張増分的中H"] = add_hits
+        main["拡張増分点数"] = add_points
+        main["拡張増分必要平均払戻"] = add_need_pay
+        return main
 
 
     def _build_nishafuku_from_trio_third(tc, pair12_counts):
@@ -3891,7 +3834,7 @@ with tabs[2]:
             # 先に3券種の候補を作る。
             # 表示順は、2車単 → 三連複 → 2車複参考。
             nf = _build_nishafuku_from_trio_third(tc, pair12_total)
-            nt = _build_nishatan_from_trio_third(tc, pair12_total, df_pairs)
+            nt = _build_nishatan_from_trio_third(tc, pair12_total)
 
             # -----------------------------------------
             # 2車単オッズ帯
@@ -3927,31 +3870,19 @@ with tabs[2]:
                 )
                 st.markdown(nt_html, unsafe_allow_html=True)
 
-                nt_amount_rows = pd.DataFrame(nt.get("買い目別", []))
-                if not nt_amount_rows.empty:
-                    show_cols = [
-                        "買い目",
-                        "的中H",
-                        "的中率%",
-                        "対応2車複",
-                        "2車複回収率%",
-                        "2車複配当係数",
-                        "2車複配当位置",
-                        "補正判定",
-                        "300円ゾーン時",
-                        "200円ゾーン時",
-                        "100円ゾーン時",
-                        "補正メモ",
-                    ]
-                    nt_amount_rows = nt_amount_rows[[c for c in show_cols if c in nt_amount_rows.columns]]
-                    st.markdown("##### 2車単｜対応2車複回収率による金額補正")
-                    st.caption("オッズ帯で基本金額を決めたあと、対応2車複の回収率で減額・維持を判定します。2車複を買うためではなく、2車単の金額補正に使います。")
+                nt_compare_rows = pd.DataFrame(nt.get("比較", []))
+                if not nt_compare_rows.empty:
+                    st.markdown("##### 2車単｜ブロック比較")
+                    st.caption("2車単は個別の300/200/100円振り分けではなく、1→234を3点100円のワンブロックで見ます。1→2345は的中スパン短縮用の例外枠です。")
                     st.dataframe(
-                        nt_amount_rows,
+                        nt_compare_rows,
                         use_container_width=True,
                         hide_index=True,
-                        height=table_auto_height(nt_amount_rows),
+                        height=table_auto_height(nt_compare_rows),
                     )
+                    add_need = nt.get("拡張増分必要平均払戻")
+                    if add_need is not None:
+                        st.caption(f"1→2345へ拡張した追加1点は、増分だけで見ると必要平均払戻 {add_need:.1f}円。常用ではなく、現レースで5が明確に上がる時の例外枠です。")
 
             # -----------------------------------------
             # 三連複オッズ帯
