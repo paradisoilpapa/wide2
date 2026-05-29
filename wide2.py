@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8m｜2車単ブロック運用・三連複防御・2車複参考｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8o｜2車単オッズ帯・三連複オッズ帯・2車複参考｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -3542,11 +3542,7 @@ with tabs[2]:
 
 
     def _build_nishatan_odds_zone_html(need_pay):
-        """
-        2車単は1→234をワンブロックで見る。
-        ここで強調するのは金額帯ではなく、
-        「評価1頭で、2着候補を234までで受ける。567は常用しない。」という運用方針。
-        """
+        """2車単1→234ブロック用のオッズ帯を主表示する。"""
         need_pay = _safe_float_trio_zone(need_pay, None)
 
         if need_pay is None or need_pay <= 0:
@@ -3554,7 +3550,7 @@ with tabs[2]:
                 '<div style="margin-top:10px;padding:10px 12px;'
                 'background:#eef6ff;border-radius:8px;'
                 'border:1px solid rgba(32,92,145,0.20);">'
-                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">2車単ブロック運用</div>'
+                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">2車単オッズ帯</div>'
                 '<div style="font-size:14px;line-height:1.8;font-weight:700;">算出不可</div>'
                 '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
                 '累積1→2着評価分布が不足しているため、100%必要平均払戻を算出できません。'
@@ -3562,24 +3558,27 @@ with tabs[2]:
                 '</div>'
             )
 
+        low_cut = need_pay / 300.0
+        zone_300_hi = need_pay / 200.0
+        zone_200_hi = need_pay / 100.0
+        high_cut = zone_200_hi * 3.0
+
         return (
             '<div style="margin-top:10px;padding:10px 12px;'
             'background:#eef6ff;'
             'border-radius:8px;border:1px solid rgba(32,92,145,0.20);">'
             '<div style="font-size:14px;font-weight:900;margin-bottom:6px;">'
-            '2車単ブロック運用'
+            '2車単オッズ帯'
             '</div>'
             '<div style="font-size:14px;line-height:1.9;font-weight:800;">'
-            '基本　　　：1→234を各100円、合計300円の1ブロックで見る<br>'
-            '見たいこと：評価1が頭で来た時、2着候補を234までで受ける<br>'
-            '切る理由　：567は常用しない。点数増に対して的中増が小さい<br>'
-            f'成立条件　：当たり時の払戻目安が {need_pay:.1f}円以上<br>'
-            '例外　　　：1→2345は的中スパン短縮用。常用ではなく例外枠<br>'
-            '禁止　　　：個別オッズで厚張りしない／2車複回収率で金額補正しない'
+            f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
+            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円（安め注意）<br>'
+            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円（主戦場）<br>'
+            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円（上振れ・最大1点）<br>'
+            f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
             '</div>'
             '<div style="font-size:12px;line-height:1.65;font-weight:700;opacity:0.82;margin-top:6px;">'
-            f'基準：1→234の3点ブロックで100%必要平均払戻 {need_pay:.1f}円。'
-            'オッズは買い目作成ではなく、ブロックを買うか・ケンするかの確認に使う。'
+            f'基準：累積1→2着評価分布ベースの100%必要平均払戻 {need_pay:.1f}円'
             '</div>'
             '</div>'
         )
@@ -3836,7 +3835,7 @@ with tabs[2]:
 
             # -----------------------------------------
             # 2車単オッズ帯
-            # 2車単は攻めの主役候補。基本形は1→234。
+            # 2車単は攻めの主役候補。基本形は1→234。何倍でケン/300/200/100かを主表示する。
             # -----------------------------------------
             if nt:
                 nt_buy_list = " / ".join(nt.get("買い目", []))
@@ -3868,19 +3867,6 @@ with tabs[2]:
                 )
                 st.markdown(nt_html, unsafe_allow_html=True)
 
-                nt_compare_rows = pd.DataFrame(nt.get("比較", []))
-                if not nt_compare_rows.empty:
-                    st.markdown("##### 2車単｜ブロック比較")
-                    st.caption("1→234を標準ブロック、1→2345を的中スパン短縮用の例外枠として比較します。")
-                    st.dataframe(
-                        nt_compare_rows,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=table_auto_height(nt_compare_rows),
-                    )
-                    add_need = nt.get("拡張増分必要平均払戻")
-                    if add_need is not None:
-                        st.caption(f"1→2345へ拡張した追加1点は、増分だけで見ると必要平均払戻 {add_need:.1f}円。これは的中スパン短縮用の保険料で、常用ではなく例外枠です。")
 
             # -----------------------------------------
             # 三連複オッズ帯
