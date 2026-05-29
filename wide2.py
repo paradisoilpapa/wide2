@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8l｜2車単の意図明確化・三連複防御・2車複参考｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8m｜2車単ブロック運用・三連複防御・2車複参考｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -3544,8 +3544,8 @@ with tabs[2]:
     def _build_nishatan_odds_zone_html(need_pay):
         """
         2車単は1→234をワンブロックで見る。
-        個別買い目ごとに300/200/100円へ振り分けるのではなく、
-        3点100円のブロック全体で、当たり時平均払戻が必要平均払戻へ届くかを見る。
+        ここで強調するのは金額帯ではなく、
+        「評価1頭で、2着候補を234までで受ける。567は常用しない。」という運用方針。
         """
         need_pay = _safe_float_trio_zone(need_pay, None)
 
@@ -3554,7 +3554,7 @@ with tabs[2]:
                 '<div style="margin-top:10px;padding:10px 12px;'
                 'background:#eef6ff;border-radius:8px;'
                 'border:1px solid rgba(32,92,145,0.20);">'
-                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">2車単ブロック判定</div>'
+                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">2車単ブロック運用</div>'
                 '<div style="font-size:14px;line-height:1.8;font-weight:700;">算出不可</div>'
                 '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
                 '累積1→2着評価分布が不足しているため、100%必要平均払戻を算出できません。'
@@ -3562,27 +3562,24 @@ with tabs[2]:
                 '</div>'
             )
 
-        need_odds = need_pay / 100.0
-        weak_odds = need_odds * 0.90
-
         return (
             '<div style="margin-top:10px;padding:10px 12px;'
             'background:#eef6ff;'
-            'border-radius:8px;border:1px solid rgba(32,92,145,0.20);'>
+            'border-radius:8px;border:1px solid rgba(32,92,145,0.20);">'
             '<div style="font-size:14px;font-weight:900;margin-bottom:6px;">'
-            '2車単で見たいこと'
+            '2車単ブロック運用'
             '</div>'
             '<div style="font-size:14px;line-height:1.9;font-weight:800;">'
-            '目的　　　：評価1が頭で来た時の2着候補を、234までで受ける<br>'
-            '基本買い　：1→2 / 1→3 / 1→4 を各100円、合計300円<br>'
-            f'判定基準　：3点セットの当たり時平均払戻が {need_pay:.1f}円以上なら成立<br>'
-            f'不足目安　：平均払戻 {need_pay:.1f}円未満なら、2車単ではなくケンまたは三連複側へ<br>'
-            '拡張　　　：1→5は的中スパン短縮用の例外。常用では足さない'
+            '基本　　　：1→234を各100円、合計300円の1ブロックで見る<br>'
+            '見たいこと：評価1が頭で来た時、2着候補を234までで受ける<br>'
+            '切る理由　：567は常用しない。点数増に対して的中増が小さい<br>'
+            f'成立条件　：当たり時の払戻目安が {need_pay:.1f}円以上<br>'
+            '例外　　　：1→2345は的中スパン短縮用。常用ではなく例外枠<br>'
+            '禁止　　　：個別オッズで厚張りしない／2車複回収率で金額補正しない'
             '</div>'
             '<div style="font-size:12px;line-height:1.65;font-weight:700;opacity:0.82;margin-top:6px;">'
-            '言いたいこと：2車単は個別オッズで100/200/300円に振り分ける欄ではなく、'
-            '「1→234を3点100円で買う価値があるか」を確認する欄です。'
-            f'100%必要平均払戻は {need_pay:.1f}円。'
+            f'基準：1→234の3点ブロックで100%必要平均払戻 {need_pay:.1f}円。'
+            'オッズは買い目作成ではなく、ブロックを買うか・ケンするかの確認に使う。'
             '</div>'
             '</div>'
         )
@@ -3843,7 +3840,7 @@ with tabs[2]:
             # -----------------------------------------
             if nt:
                 nt_buy_list = " / ".join(nt.get("買い目", []))
-                nt_line = f"2車単｜1→234ブロック：{nt.get('型', '—')}"
+                nt_line = f"2車単フォメ：{nt.get('型', '—')}"
                 nt_sub = (
                     f"軸：{nt.get('軸', '—')}／"
                     f"相手：{nt.get('相手', '—')}／"
@@ -3874,7 +3871,7 @@ with tabs[2]:
                 nt_compare_rows = pd.DataFrame(nt.get("比較", []))
                 if not nt_compare_rows.empty:
                     st.markdown("##### 2車単｜ブロック比較")
-                    st.caption("2車単は、評価1頭の2着分布を使い、1→234を3点100円の標準ブロックとして見る欄です。個別オッズで厚く張る欄ではありません。")
+                    st.caption("1→234を標準ブロック、1→2345を的中スパン短縮用の例外枠として比較します。")
                     st.dataframe(
                         nt_compare_rows,
                         use_container_width=True,
