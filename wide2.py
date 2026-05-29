@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8h｜2車複・2車単・三連複オッズ帯｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8i｜2車単主役・三連複防御・2車複参考｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -3487,9 +3487,9 @@ with tabs[2]:
             '</div>'
             '<div style="font-size:14px;line-height:1.85;font-weight:700;">'
             f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
-            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円<br>'
-            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円<br>'
-            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円<br>'
+            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円（安め注意）<br>'
+            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円（主戦場）<br>'
+            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円（上振れ・最大1点）<br>'
             f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
             '</div>'
             '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
@@ -3529,9 +3529,9 @@ with tabs[2]:
             '</div>'
             '<div style="font-size:14px;line-height:1.85;font-weight:700;">'
             f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
-            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円<br>'
-            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円<br>'
-            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円<br>'
+            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円（安め注意）<br>'
+            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円（主戦場）<br>'
+            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円（上振れ・最大1点）<br>'
             f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
             '</div>'
             '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
@@ -3571,9 +3571,9 @@ with tabs[2]:
             '</div>'
             '<div style="font-size:14px;line-height:1.85;font-weight:700;">'
             f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
-            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円<br>'
-            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円<br>'
-            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円<br>'
+            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円（安め注意）<br>'
+            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円（主戦場）<br>'
+            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円（上振れ・最大1点）<br>'
             f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
             '</div>'
             '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
@@ -3585,9 +3585,12 @@ with tabs[2]:
 
     def _build_nishatan_from_trio_third(tc, pair12_counts):
         """
-        2車単の軸相手は、三連複フォメの3列目を使う。
-        例：三連複 1-24-2435 → 2車単 1→2435
-        2車複と違い、評価1が1着・相手が2着の場合だけを数える。
+        2車単は攻めの主役候補として、累積1→2着評価分布に沿って
+        評価1→234を基本形にする。
+
+        以前は三連複フォメの3列目を流用して 1→2435 などを作っていたが、
+        1→2345は4点化しても1→5ぶんしか伸びず、効率が落ちるため、
+        ここでは3点の 1→234 に固定する。
         """
         if not tc:
             return None
@@ -3597,13 +3600,7 @@ with tabs[2]:
         except Exception:
             axis = 1
 
-        third_code = str(tc.get("3列目", "") or "")
-        targets = []
-        for ch in third_code:
-            if ch.isdigit():
-                v = int(ch)
-                if v != axis and 1 <= v <= FIELD_SIZE and v not in targets:
-                    targets.append(v)
+        targets = [r for r in (2, 3, 4) if r != axis and 1 <= r <= FIELD_SIZE]
 
         if not targets:
             return None
@@ -3659,8 +3656,8 @@ with tabs[2]:
 
     def _build_nishafuku_from_trio_third(tc, pair12_counts):
         """
-        2車複の軸相手は、三連複フォメの3列目を使う。
-        例：三連複 1-24-2435 → 2車複 1-2435
+        2車複は主役ではなく参考・歪み確認用。
+        便宜上、三連複フォメの3列目を使って軸相手候補を表示する。
         """
         if not tc:
             return None
@@ -3730,7 +3727,7 @@ with tabs[2]:
         }
 
     with purchase_candidate_slot.container():
-        st.markdown("### ＜購入候補｜2車複・2車単・三連複＞")
+        st.markdown("### ＜購入候補｜2車単・三連複・2車複参考＞")
 
         if axis1_stability_hybrid_summary:
             tc = axis1_stability_hybrid_summary
@@ -3745,49 +3742,13 @@ with tabs[2]:
                 return f"{v}{suffix}"
 
             # 先に3券種の候補を作る。
-            # 表示順は、2車複 → 2車単 → 三連複。
+            # 表示順は、2車単 → 三連複 → 2車複参考。
             nf = _build_nishafuku_from_trio_third(tc, pair12_total)
             nt = _build_nishatan_from_trio_third(tc, pair12_total)
 
             # -----------------------------------------
-            # 2車複オッズ帯
-            # 2車複の軸相手は、三連複フォメの3列目を使う。
-            # 例：三連複 1-24-2435 → 2車複 1-2435
-            # -----------------------------------------
-            if nf:
-                nf_buy_list = " / ".join(nf.get("買い目", []))
-                nf_line = f"2車複フォメ：{nf.get('型', '—')}"
-                nf_sub = (
-                    f"軸：{nf.get('軸', '—')}／"
-                    f"相手：{nf.get('相手', '—')}／"
-                    f"点数：{nf.get('点数', '—')}点／"
-                    f"買い目：{nf_buy_list}"
-                )
-                nf_stats = (
-                    f"累積対象N：{_fmt_tc_value(nf.get('累積対象N'))}／"
-                    f"累積2車複的中H：{_fmt_tc_value(nf.get('累積2車複的中H'))}／"
-                    f"累積2車複的中率：{_fmt_tc_value(nf.get('累積2車複的中率%'), '%')}／"
-                    f"100%必要平均払戻：{_fmt_tc_value(nf.get('100%必要平均払戻'), '円')}"
-                )
-
-                nf_zone_html = _build_nishafuku_odds_zone_html(nf.get("100%必要平均払戻"))
-
-                nf_html = (
-                    '<div style="background:#edf9ee;color:#1f5e32;border-radius:8px;'
-                    'padding:14px 16px;border:1px solid rgba(31,94,50,0.18);'
-                    'font-size:18px;line-height:1.7;font-weight:700;margin-top:12px;">'
-                    f'<div>{_escape_html(nf_line)}</div>'
-                    f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(nf_sub)}</div>'
-                    f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(nf_stats)}</div>'
-                    f'{nf_zone_html}'
-                    '</div>'
-                )
-                st.markdown(nf_html, unsafe_allow_html=True)
-
-            # -----------------------------------------
             # 2車単オッズ帯
-            # 2車単の軸相手も、三連複フォメの3列目を使う。
-            # 例：三連複 1-24-2435 → 2車単 1→2435
+            # 2車単は攻めの主役候補。基本形は1→234。
             # -----------------------------------------
             if nt:
                 nt_buy_list = " / ".join(nt.get("買い目", []))
@@ -3853,6 +3814,41 @@ with tabs[2]:
                 '</div>'
             )
             st.markdown(tc_html, unsafe_allow_html=True)
+
+            # -----------------------------------------
+            # 2車複参考
+            # 2車複は主役ではなく、歪み確認・参考表示。
+            # -----------------------------------------
+            if nf:
+                nf_buy_list = " / ".join(nf.get("買い目", []))
+                nf_line = f"2車複参考：{nf.get('型', '—')}"
+                nf_sub = (
+                    f"軸：{nf.get('軸', '—')}／"
+                    f"相手：{nf.get('相手', '—')}／"
+                    f"点数：{nf.get('点数', '—')}点／"
+                    f"買い目：{nf_buy_list}"
+                )
+                nf_stats = (
+                    f"累積対象N：{_fmt_tc_value(nf.get('累積対象N'))}／"
+                    f"累積2車複的中H：{_fmt_tc_value(nf.get('累積2車複的中H'))}／"
+                    f"累積2車複的中率：{_fmt_tc_value(nf.get('累積2車複的中率%'), '%')}／"
+                    f"100%必要平均払戻：{_fmt_tc_value(nf.get('100%必要平均払戻'), '円')}"
+                )
+
+                nf_zone_html = _build_nishafuku_odds_zone_html(nf.get("100%必要平均払戻"))
+
+                nf_html = (
+                    '<div style="background:#edf9ee;color:#1f5e32;border-radius:8px;'
+                    'padding:14px 16px;border:1px solid rgba(31,94,50,0.18);'
+                    'font-size:18px;line-height:1.7;font-weight:700;margin-top:12px;">'
+                    f'<div>{_escape_html(nf_line)}</div>'
+                    f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(nf_sub)}</div>'
+                    f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(nf_stats)}</div>'
+                    f'{nf_zone_html}'
+                    '</div>'
+                )
+                st.markdown(nf_html, unsafe_allow_html=True)
+
 
 
             with st.expander("根拠数値を確認", expanded=False):
