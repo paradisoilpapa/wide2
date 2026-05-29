@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8o｜2車単オッズ帯・三連複オッズ帯・2車複参考｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8p｜役割フォメ・3連単参考｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1906,11 +1906,15 @@ def build_axis1_stability_hybrid_formation_summary(
     三連複フォーメーションを作る。
 
     方針：
-    - 1列目は評価1固定。
-    - 2列目は、1軸相手（1-2〜1-7）の安定差が小さい順に上位2車。
-    - 3列目は、2列目の2車 + 評価上位から追加2車。
-      追加2車は、評価1と2列目を除いた中で評価番号が若い順。
-    - 表記例：1-26-2634
+    - 役割番号でフォーメーションを作る。
+      1 = 軸（評価1）
+      2 = 安定差1位
+      3 = 1・2を除いた評価上位
+      4 = 安定差2位
+      5 = 1・2・3・4を除いた次の評価上位
+    - 三連複は 12-123-12345（重複除外で7点）。
+    - 3連単参考は 12→123→12345（重複除外で12点）。
+    - 2車単は 12→123（重複除外で4点）。
     - 安定差は abs(想定差) + abs(回収差)。
     - ここでは回収差プラス除外は使わない。
 
@@ -1974,51 +1978,88 @@ def build_axis1_stability_hybrid_formation_summary(
             int(r.get("相手", 9)),
         ),
     )
-    second_mates = [int(c["相手"]) for c in valid_sorted[:2]]
 
-    # 評価上位から追加2車。評価1と2列目は除外する。
-    extra_mates = []
+    # =====================================================
+    # 役割番号の決定
+    # 1 = 軸（評価1）
+    # 2 = 安定差1位
+    # 3 = 1・2を除いた評価上位
+    # 4 = 安定差2位
+    # 5 = 1・2・3・4を除いた次の評価上位
+    # =====================================================
+    axis = 1
+    role2 = int(valid_sorted[0]["相手"])
+
+    role3 = None
     for r in range(2, FIELD_SIZE + 1):
-        if r in second_mates:
-            continue
-        extra_mates.append(r)
-        if len(extra_mates) >= 2:
+        if r not in (axis, role2):
+            role3 = int(r)
             break
 
-    third_mates = []
-    for r in second_mates + extra_mates:
-        if r not in third_mates:
-            third_mates.append(r)
+    role4 = None
+    for c in valid_sorted[1:]:
+        cand = int(c["相手"])
+        if cand not in (axis, role2, role3):
+            role4 = cand
+            break
+    if role4 is None and len(valid_sorted) >= 2:
+        role4 = int(valid_sorted[1]["相手"])
 
-    if len(third_mates) < 2:
+    role5 = None
+    for r in range(2, FIELD_SIZE + 1):
+        if r not in (axis, role2, role3, role4):
+            role5 = int(r)
+            break
+
+    roles = [x for x in [axis, role2, role3, role4, role5] if x is not None]
+    if len(roles) < 5:
         return None
 
+    first_mates = [axis, role2]
+    second_mates = [axis, role2, role3]
+    third_mates = [axis, role2, role3, role4, role5]
+
+    # 三連複：12-123-12345。重複除外・同一組み合わせ重複除外。
     trio_keys = []
     seen = set()
-    for a in second_mates:
-        for b in third_mates:
-            if int(a) == int(b):
-                continue
-            key = _trio_key_from_parts(1, int(a), int(b))
-            if key not in seen:
-                trio_keys.append(key)
-                seen.add(key)
+    for a in first_mates:
+        for b in second_mates:
+            for c in third_mates:
+                vals = [int(a), int(b), int(c)]
+                if len(set(vals)) != 3:
+                    continue
+                key = _trio_key_from_parts(vals[0], vals[1], vals[2])
+                if key not in seen:
+                    trio_keys.append(key)
+                    seen.add(key)
 
     if not trio_keys:
         return None
 
+    first_code = "".join(str(x) for x in first_mates)
     second_code = "".join(str(x) for x in second_mates)
     third_code = "".join(str(x) for x in third_mates)
-    form_type = f"1-{second_code}-{third_code}"
+    form_type = f"{first_code}-{second_code}-{third_code}"
+
+    role_label_map = {
+        role2: "②安定差1位",
+        role3: "③評価上位",
+        role4: "④安定差2位",
+        role5: "⑤評価上位追加",
+    }
 
     for c in candidates:
         x = int(c.get("相手", 0))
-        if x in second_mates:
-            c["判定"] = "◎2列目"
-            c["選択理由"] = "安定差上位2車"
-        elif x in extra_mates:
-            c["判定"] = "○3列目"
-            c["選択理由"] = "評価上位追加2車"
+        if x in role_label_map:
+            c["判定"] = role_label_map[x]
+            if x == role2:
+                c["選択理由"] = "安定差1位"
+            elif x == role3:
+                c["選択理由"] = "1・2を除いた評価上位"
+            elif x == role4:
+                c["選択理由"] = "安定差2位"
+            elif x == role5:
+                c["選択理由"] = "1・2・3・4を除いた次の評価上位"
         elif c.get("安定差") is not None:
             c["判定"] = ""
             c["選択理由"] = "比較候補"
@@ -2028,12 +2069,16 @@ def build_axis1_stability_hybrid_formation_summary(
 
     def _cand_sort_key(r):
         judge = str(r.get("判定", ""))
-        if judge == "◎2列目":
+        if judge.startswith("②"):
             rank = 0
-        elif judge == "○3列目":
+        elif judge.startswith("③"):
             rank = 1
-        else:
+        elif judge.startswith("④"):
             rank = 2
+        elif judge.startswith("⑤"):
+            rank = 3
+        else:
+            rank = 4
         return (
             rank,
             float(r.get("安定差") if r.get("安定差") is not None else 999999.0),
@@ -2074,31 +2119,33 @@ def build_axis1_stability_hybrid_formation_summary(
 
     axis_place = _rank_place_rate(1)
 
-    # 評価1が3着内に残った前提で、残り2枠にフォメ有効ペアが入るかを、
-    # 評価別3着内率の重みから推定する。
-    other_ranks = [r for r in range(2, FIELD_SIZE + 1)]
-    place_weights = {r: (_rank_place_rate(r) or 0.0) for r in other_ranks}
-
-    valid_other_pairs = set()
+    # =====================================================
+    # 三連複 12-123-12345 の累積評価ベース想定
+    # 評価別3着内率の積で、全3車組の中のフォメカバー率を推定する。
+    # =====================================================
+    all_ranks = [r for r in range(1, FIELD_SIZE + 1)]
+    place_weights = {r: (_rank_place_rate(r) or 0.0) for r in all_ranks}
+    valid_trio_sets = set()
     for key in trio_keys:
-        vals = [int(x) for x in str(key).split("-")]
-        others = tuple(sorted([v for v in vals if v != 1]))
-        if len(others) == 2:
-            valid_other_pairs.add(others)
+        vals = tuple(sorted(int(x) for x in str(key).split("-")))
+        if len(vals) == 3:
+            valid_trio_sets.add(vals)
 
     denom = 0.0
     numer = 0.0
-    for i, a in enumerate(other_ranks):
-        for b in other_ranks[i + 1:]:
-            w = float(place_weights.get(a, 0.0)) * float(place_weights.get(b, 0.0))
-            denom += w
-            if tuple(sorted((a, b))) in valid_other_pairs:
-                numer += w
+    for i, a in enumerate(all_ranks):
+        for j in range(i + 1, len(all_ranks)):
+            b = all_ranks[j]
+            for k in range(j + 1, len(all_ranks)):
+                c = all_ranks[k]
+                w = float(place_weights.get(a, 0.0)) * float(place_weights.get(b, 0.0)) * float(place_weights.get(c, 0.0))
+                denom += w
+                if tuple(sorted((a, b, c))) in valid_trio_sets:
+                    numer += w
 
     place_cover_rate = (100.0 * numer / denom) if denom > 0 else None
 
     # 1→2着評価分布側でも、フォメを構成する3車のうち2車が上位2着に入る頻度を見る。
-    # これは3連複そのものではなく、展開上の噛み合わせ補助。
     valid_edges = set()
     for key in trio_keys:
         vals = [int(x) for x in str(key).split("-")]
@@ -2115,18 +2162,14 @@ def build_axis1_stability_hybrid_formation_summary(
     else:
         pair_cover_rate = None
 
-    # 評価別3着内カバーを主、1→2着評価分布を補助にする。
-    # どちらも引き継ぎ累積なので、当日だけのブレは使わない。
-    cover_parts = []
-    if place_cover_rate is not None:
-        cover_parts.append((0.70, place_cover_rate))
-    if pair_cover_rate is not None:
-        cover_parts.append((0.30, pair_cover_rate))
-
-    if axis_place is not None and cover_parts:
-        w_sum = sum(w for w, _ in cover_parts)
-        cover_rate = sum(w * v for w, v in cover_parts) / max(w_sum, 1e-9)
-        cumulative_hit_rate = round(max(0.0, min(float(axis_place), float(axis_place) * cover_rate / 100.0)), 1)
+    # 三連複の想定的中率は、3着内カバーを主、1→2着分布を弱補助にする。
+    # pair_coverは「2車が上位2着に入る頻度」なので、そのままだと高く出る。
+    if place_cover_rate is not None and pair_cover_rate is not None:
+        cover_rate = 0.85 * place_cover_rate + 0.15 * pair_cover_rate
+        cumulative_hit_rate = round(max(0.0, min(100.0, cover_rate)), 1)
+    elif place_cover_rate is not None:
+        cover_rate = place_cover_rate
+        cumulative_hit_rate = round(max(0.0, min(100.0, cover_rate)), 1)
     else:
         cover_rate = None
         cumulative_hit_rate = None
@@ -2163,10 +2206,16 @@ def build_axis1_stability_hybrid_formation_summary(
     return {
         "型": form_type,
         "評価1軸": 1,
+        "1列目": first_code,
         "2列目": second_code,
         "3列目": third_code,
-        "安定差上位2車": second_mates,
-        "評価上位追加2車": extra_mates,
+        "役割1_軸": axis,
+        "役割2_安定差1位": role2,
+        "役割3_評価上位": role3,
+        "役割4_安定差2位": role4,
+        "役割5_評価上位追加": role5,
+        "安定差上位2車": [role2, role4],
+        "評価上位追加2車": [role3, role5],
         "買い目": trio_keys,
         "点数": points,
 
@@ -2185,7 +2234,7 @@ def build_axis1_stability_hybrid_formation_summary(
         "基準平均配当": None,
         "想定回収率%": None,
 
-        "選択理由": "1列目は評価1固定。2列目は安定差上位2車。3列目は2列目＋評価上位追加2車。オッズ帯は累積評価別3着内率と1→2着評価分布から算出。",
+        "選択理由": "役割番号：1=軸、2=安定差1位、3=1・2を除いた評価上位、4=安定差2位、5=次の評価上位。三連複は12-123-12345。オッズ帯は累積評価別3着内率と1→2着評価分布から算出。",
         "candidate_rows": candidate_rows,
     }
 
@@ -3609,29 +3658,46 @@ with tabs[2]:
         if not tc:
             return None
 
-        try:
-            axis = int(tc.get("評価1軸", 1) or 1)
-        except Exception:
-            axis = 1
+        first_code = str(tc.get("1列目", "") or "")
+        second_code = str(tc.get("2列目", "") or "")
 
-        def _block_stats(targets):
-            targets = [r for r in targets if r != axis and 1 <= r <= FIELD_SIZE]
-            targets = list(dict.fromkeys(targets))
+        def _digits(code):
+            out = []
+            for ch in str(code):
+                if ch.isdigit():
+                    v = int(ch)
+                    if 1 <= v <= FIELD_SIZE and v not in out:
+                        out.append(v)
+            return out
+
+        first_mates = _digits(first_code)
+        second_mates = _digits(second_code)
+
+        def _block_stats(firsts, seconds, label_suffix=""):
+            firsts = [r for r in firsts if 1 <= r <= FIELD_SIZE]
+            seconds = [r for r in seconds if 1 <= r <= FIELD_SIZE]
             pair_total = sum(int(v) for v in (pair12_counts or {}).values())
+            buy_pairs = []
             hit_count = 0
-            for t in targets:
-                hit_count += int(pair12_counts.get((axis, t), 0))
+            for a in firsts:
+                for b in seconds:
+                    if a == b:
+                        continue
+                    pair = (int(a), int(b))
+                    if pair not in buy_pairs:
+                        buy_pairs.append(pair)
+                        hit_count += int(pair12_counts.get(pair, 0))
             hit_rate = round(100.0 * hit_count / pair_total, 1) if pair_total > 0 else None
-            points = len(targets)
+            points = len(buy_pairs)
             invest = points * 100
             breakeven_avg_pay = round(invest / (hit_rate / 100.0), 1) if hit_rate and hit_rate > 0 else None
             avg_span = round(100.0 / hit_rate, 2) if hit_rate and hit_rate > 0 else None
             return {
-                "型": f"{axis}→" + "".join(str(t) for t in targets),
-                "軸": axis,
-                "相手": "".join(str(t) for t in targets),
+                "型": f"{''.join(str(x) for x in firsts)}→{''.join(str(x) for x in seconds)}" + label_suffix,
+                "軸": "".join(str(x) for x in firsts),
+                "相手": "".join(str(x) for x in seconds),
                 "点数": points,
-                "買い目": [f"{axis}→{t}" for t in targets],
+                "買い目": [f"{a}→{b}" for a, b in buy_pairs],
                 "累積対象N": pair_total,
                 "累積2車単的中H": hit_count,
                 "累積2車単的中率%": hit_rate,
@@ -3639,18 +3705,17 @@ with tabs[2]:
                 "100%必要平均払戻": breakeven_avg_pay,
             }
 
-        main_targets = [2, 3, 4]
-        ext_targets = [2, 3, 4, 5]
-        main = _block_stats(main_targets)
-        ext = _block_stats(ext_targets)
+        main = _block_stats(first_mates, second_mates)
+        # 参考：旧1→234型ではなく、3列目まで広げた場合の比較。常用はしない。
+        ext = _block_stats(first_mates, _digits(tc.get("3列目", "")), "（参考拡張）")
 
         if not main or not main.get("買い目"):
             return None
 
         compare_rows = []
         for label, row, role in [
-            ("基本", main, "通常運用"),
-            ("拡張", ext, "的中スパン短縮・例外枠"),
+            ("基本", main, "12→123・通常運用"),
+            ("拡張", ext, "12→12345・参考拡張"),
         ]:
             if row and row.get("買い目"):
                 compare_rows.append({
@@ -3825,8 +3890,92 @@ with tabs[2]:
             "買い目別": pair_rows,
         }
 
+
+
+    def _build_sanrentan_from_trio_roles(tc, pair12_counts, rank_total_map):
+        """3連単参考：12→123→12345。配当入力なしのため想定的中率と必要平均払戻だけを出す。"""
+        if not tc:
+            return None
+
+        def _digits(code):
+            out = []
+            for ch in str(code):
+                if ch.isdigit():
+                    v = int(ch)
+                    if 1 <= v <= FIELD_SIZE and v not in out:
+                        out.append(v)
+            return out
+
+        firsts = _digits(tc.get("1列目", ""))
+        seconds = _digits(tc.get("2列目", ""))
+        thirds = _digits(tc.get("3列目", ""))
+        if not firsts or not seconds or not thirds:
+            return None
+
+        buy = []
+        seen = set()
+        for a in firsts:
+            for b in seconds:
+                for c in thirds:
+                    if len({a, b, c}) != 3:
+                        continue
+                    tup = (int(a), int(b), int(c))
+                    if tup not in seen:
+                        buy.append(tup)
+                        seen.add(tup)
+        if not buy:
+            return None
+
+        pair_total = sum(int(v) for v in (pair12_counts or {}).values())
+
+        def _rank_place_weight(r: int):
+            rec = (rank_total_map or {}).get(int(r), {})
+            try:
+                n = int(rec.get("N", 0) or 0)
+                c1 = int(rec.get("C1", 0) or 0)
+                c2 = int(rec.get("C2", 0) or 0)
+                c3 = int(rec.get("C3", 0) or 0)
+            except Exception:
+                return 0.0
+            if n <= 0:
+                return 0.0
+            return 100.0 * (c1 + c2 + c3) / n
+
+        # 1→2着の実分布を主に、3着候補の入りやすさを評価別3着内率で近似する。
+        hit_est = 0.0
+        for a in firsts:
+            for b in seconds:
+                if a == b:
+                    continue
+                edge_count = int((pair12_counts or {}).get((int(a), int(b)), 0))
+                if edge_count <= 0:
+                    continue
+                remain_all = [r for r in range(1, FIELD_SIZE + 1) if r not in (a, b)]
+                denom = sum(_rank_place_weight(r) for r in remain_all)
+                valid_thirds = [c for c in thirds if c not in (a, b)]
+                numer = sum(_rank_place_weight(c) for c in valid_thirds)
+                cover = (numer / denom) if denom > 0 else 0.0
+                hit_est += edge_count * cover
+
+        hit_rate = round(100.0 * hit_est / pair_total, 1) if pair_total > 0 else None
+        points = len(buy)
+        invest = points * 100
+        need_pay = round(invest / (hit_rate / 100.0), 1) if hit_rate and hit_rate > 0 else None
+        avg_span = round(100.0 / hit_rate, 2) if hit_rate and hit_rate > 0 else None
+
+        return {
+            "型": f"{''.join(str(x) for x in firsts)}→{''.join(str(x) for x in seconds)}→{''.join(str(x) for x in thirds)}",
+            "点数": points,
+            "買い目": [f"{a}→{b}→{c}" for a, b, c in buy],
+            "累積対象N": pair_total,
+            "累積3連単想定的中率%": hit_rate,
+            "平均的中スパンR": avg_span,
+            "100%必要平均払戻": need_pay,
+            "注記": "配当入力なし。1→2着評価分布＋評価別3着内率からの参考推定。",
+        }
+
     with purchase_candidate_slot.container():
-        st.markdown("### ＜購入候補｜2車単・三連複・2車複参考＞")
+        st.markdown("### ＜購入候補｜役割フォメ（2車単・三連複・3連単参考）＞")
 
         if axis1_stability_hybrid_summary:
             tc = axis1_stability_hybrid_summary
@@ -3844,6 +3993,7 @@ with tabs[2]:
             # 表示順は、2車単 → 三連複 → 2車複参考。
             nf = _build_nishafuku_from_trio_third(tc, pair12_total)
             nt = _build_nishatan_from_trio_third(tc, pair12_total)
+            sr = _build_sanrentan_from_trio_roles(tc, pair12_total, rank_total)
 
             # -----------------------------------------
             # 2車単オッズ帯
@@ -3887,7 +4037,7 @@ with tabs[2]:
             buy_list = " / ".join(tc.get("買い目", []))
             tc_line = f"三連複フォメ：{tc.get('型', '—')}"
             tc_sub = (
-                f"評価1軸：{tc.get('評価1軸', '—')}／"
+                f"1列目：{tc.get('1列目', '—')}／"
                 f"2列目：{tc.get('2列目', '—')}／"
                 f"3列目：{tc.get('3列目', '—')}／"
                 f"点数：{tc.get('点数', '—')}点／"
@@ -3914,6 +4064,36 @@ with tabs[2]:
                 '</div>'
             )
             st.markdown(tc_html, unsafe_allow_html=True)
+
+            # -----------------------------------------
+            # 3連単参考
+            # 配当入力なしのため、想定的中率・必要平均払戻だけを表示する。
+            # -----------------------------------------
+            if sr:
+                sr_buy_list = " / ".join(sr.get("買い目", []))
+                sr_line = f"3連単参考：{sr.get('型', '—')}"
+                sr_sub = (
+                    f"点数：{sr.get('点数', '—')}点／"
+                    f"買い目：{sr_buy_list}"
+                )
+                sr_stats = (
+                    f"累積対象N：{_fmt_tc_value(sr.get('累積対象N'))}／"
+                    f"累積3連単想定的中率：{_fmt_tc_value(sr.get('累積3連単想定的中率%'), '%')}／"
+                    f"100%必要平均払戻：{_fmt_tc_value(sr.get('100%必要平均払戻'), '円')}"
+                )
+                sr_html = (
+                    '<div style="background:#f4efff;color:#4b2a86;border-radius:8px;'
+                    'padding:14px 16px;border:1px solid rgba(75,42,134,0.18);'
+                    'font-size:18px;line-height:1.7;font-weight:700;margin-top:12px;">'
+                    f'<div>{_escape_html(sr_line)}</div>'
+                    f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(sr_sub)}</div>'
+                    f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(sr_stats)}</div>'
+                    '<div style="font-size:12px;line-height:1.65;font-weight:700;opacity:0.82;margin-top:6px;">'
+                    '参考：配当入力なし。1→2着評価分布＋評価別3着内率からの推定です。'
+                    '</div>'
+                    '</div>'
+                )
+                st.markdown(sr_html, unsafe_allow_html=True)
 
             # -----------------------------------------
             # 2車複参考
@@ -3953,18 +4133,21 @@ with tabs[2]:
 
             with st.expander("根拠数値を確認", expanded=False):
                 st.caption(
-                    "1列目は評価1固定。2列目は1軸相手の安定差上位2車。"
-                    "3列目は2列目＋評価上位追加2車です。"
+                    "役割番号：1=軸、2=安定差1位、3=1・2を除いた評価上位、4=安定差2位、5=次の評価上位。"
+                    "2車単は12→123、三連複は12-123-12345、3連単参考は12→123→12345です。"
                     "三連複フォメの想定的中率・必要平均払戻は、小倉基準や本日だけの実績ではなく、累積評価ベースから算出します。"
                 )
                 st.write(
                     {
                         "型": tc.get("型"),
-                        "評価1軸": tc.get("評価1軸"),
+                        "1列目": tc.get("1列目"),
                         "2列目": tc.get("2列目"),
                         "3列目": tc.get("3列目"),
-                        "安定差上位2車": tc.get("安定差上位2車"),
-                        "評価上位追加2車": tc.get("評価上位追加2車"),
+                        "役割1_軸": tc.get("役割1_軸"),
+                        "役割2_安定差1位": tc.get("役割2_安定差1位"),
+                        "役割3_評価上位": tc.get("役割3_評価上位"),
+                        "役割4_安定差2位": tc.get("役割4_安定差2位"),
+                        "役割5_評価上位追加": tc.get("役割5_評価上位追加"),
                         "点数": tc.get("点数"),
                         "買い目": tc.get("買い目"),
                         "累積対象N": tc.get("累積対象N"),
@@ -3977,6 +4160,7 @@ with tabs[2]:
                         "選択理由": tc.get("選択理由"),
                         "2車複フォメ": nf if 'nf' in locals() else None,
                         "2車単フォメ": nt if 'nt' in locals() else None,
+                        "3連単参考": sr if 'sr' in locals() else None,
                     }
                 )
 
