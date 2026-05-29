@@ -3542,7 +3542,14 @@ with tabs[2]:
 
 
     def _build_nishatan_odds_zone_html(need_pay):
-        """2車単1→234ブロック用のオッズ帯を主表示する。"""
+        """
+        2車単1→234ブロック用のオッズ帯を主表示する。
+
+        7%安全補正：
+        - 低配当1→2の混入で、ブロック全体の有効的中率を7%低く見る。
+        - 的中率が下がる扱いなので、必要平均払戻は need_pay / 0.93 に上げる。
+        - 以後のオッズ帯は補正後need_payで計算する。
+        """
         need_pay = _safe_float_trio_zone(need_pay, None)
 
         if need_pay is None or need_pay <= 0:
@@ -3558,9 +3565,13 @@ with tabs[2]:
                 '</div>'
             )
 
-        low_cut = need_pay / 300.0
-        zone_300_hi = need_pay / 200.0
-        zone_200_hi = need_pay / 100.0
+        nishatan_safety_rate = 0.93
+        need_pay_raw = float(need_pay)
+        need_pay_adj = need_pay_raw / nishatan_safety_rate
+
+        low_cut = need_pay_adj / 300.0
+        zone_300_hi = need_pay_adj / 200.0
+        zone_200_hi = need_pay_adj / 100.0
         high_cut = zone_200_hi * 3.0
 
         return (
@@ -3568,7 +3579,7 @@ with tabs[2]:
             'background:#eef6ff;'
             'border-radius:8px;border:1px solid rgba(32,92,145,0.20);">'
             '<div style="font-size:14px;font-weight:900;margin-bottom:6px;">'
-            '2車単オッズ帯'
+            '2車単オッズ帯（7%安全補正後）'
             '</div>'
             '<div style="font-size:14px;line-height:1.9;font-weight:800;">'
             f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
@@ -3578,7 +3589,8 @@ with tabs[2]:
             f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
             '</div>'
             '<div style="font-size:12px;line-height:1.65;font-weight:700;opacity:0.82;margin-top:6px;">'
-            f'基準：累積1→2着評価分布ベースの100%必要平均払戻 {need_pay:.1f}円'
+            f'基準：累積1→2着評価分布ベースの100%必要平均払戻 {need_pay_raw:.1f}円<br>'
+            f'7%安全補正後：{need_pay_adj:.1f}円（有効的中率を0.93掛けで評価）'
             '</div>'
             '</div>'
         )
