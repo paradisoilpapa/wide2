@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8i｜2車単主役・三連複防御・2車複参考｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8j｜2車単金額補正・三連複防御・2車複参考｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -3583,14 +3583,20 @@ with tabs[2]:
         )
 
 
-    def _build_nishatan_from_trio_third(tc, pair12_counts):
+    def _build_nishatan_from_trio_third(tc, pair12_counts, df_pairs: pd.DataFrame | None = None):
         """
         2車単は攻めの主役候補として、累積1→2着評価分布に沿って
         評価1→234を基本形にする。
 
-        以前は三連複フォメの3列目を流用して 1→2435 などを作っていたが、
-        1→2345は4点化しても1→5ぶんしか伸びず、効率が落ちるため、
-        ここでは3点の 1→234 に固定する。
+        さらに、対応する2車複ペアの回収率を
+        2車単の300/200/100円ゾーンの金額補正に使う。
+        2車複を買うためではなく、2車単の金額を減額・維持するための補正。
+
+        補正ルール：
+        - 2車複回収率 100%以上：維持。100円ゾーンは上振れ候補として優先。
+        - 85〜100%：維持。
+        - 70〜85%：1段階減額。300→200、200→100、100→切り。
+        - 70%未満：安めを厚くしない。300→切り、200→100、100→切り。
         """
         if not tc:
             return None
@@ -3604,6 +3610,74 @@ with tabs[2]:
 
         if not targets:
             return None
+
+        pair_row_map = {}
+        if df_pairs is not None and not df_pairs.empty and "ペアキー" in df_pairs.columns:
+            try:
+                for _, _pr in df_pairs.iterrows():
+                    _pk = str(_pr.get("ペアキー", "")).strip()
+                    if _pk:
+                        pair_row_map[_pk] = _pr
+            except Exception:
+                pair_row_map = {}
+
+        def _pair_metric(pair_key: str, col: str, default=None):
+            row = pair_row_map.get(str(pair_key))
+            if row is None:
+                return default
+            try:
+                v = row.get(col, default)
+                if pd.isna(v):
+                    return default
+                return v
+            except Exception:
+                return default
+
+        def _pair_roi_amount_adjust(pair_key: str):
+            """対応2車複の回収率で、2車単の各オッズ帯の推奨金額を補正する。"""
+            roi = _safe_float_trio_zone(_pair_metric(pair_key, "回収率%", None), None)
+            pay_pos = str(_pair_metric(pair_key, "配当位置", "") or "")
+            reason = str(_pair_metric(pair_key, "総合候補理由", "") or "")
+            pay_coef = _safe_float_trio_zone(_pair_metric(pair_key, "配当係数", None), None)
+
+            if roi is None:
+                cls = "データ不足"
+                amt_300, amt_200, amt_100 = "200円まで", "100円まで", "原則切り"
+                note = "対応2車複の回収率不足。厚張りは避ける"
+            elif roi >= 100.0:
+                cls = "歪み強"
+                amt_300, amt_200, amt_100 = "300円", "200円", "100円候補"
+                note = "対応2車複の回収率が100%以上。金額維持可"
+            elif roi >= 85.0:
+                cls = "維持"
+                amt_300, amt_200, amt_100 = "300円", "200円", "100円候補"
+                note = "対応2車複の回収率が許容域。基本金額を維持"
+            elif roi >= 70.0:
+                cls = "減額"
+                amt_300, amt_200, amt_100 = "200円", "100円", "切り"
+                note = "対応2車複の回収率が弱い。1段階減額"
+            else:
+                cls = "強減額"
+                amt_300, amt_200, amt_100 = "切り", "100円", "切り"
+                note = "対応2車複の回収率が70%未満。安め厚張り禁止"
+
+            # 配当上振れ・後追い警戒があるペアは100円ゾーンをさらに慎重にする。
+            if ("上振れ" in pay_pos) or ("過熱" in reason) or ("後追い" in reason):
+                if amt_100 != "切り":
+                    amt_100 = "原則切り"
+                note += "／配当・回収の後追い警戒"
+
+            return {
+                "対応2車複": pair_key,
+                "2車複回収率%": round(roi, 1) if roi is not None else None,
+                "2車複配当係数": round(float(pay_coef), 2) if pay_coef is not None else None,
+                "2車複配当位置": pay_pos,
+                "補正判定": cls,
+                "300円ゾーン時": amt_300,
+                "200円ゾーン時": amt_200,
+                "100円ゾーン時": amt_100,
+                "補正メモ": note,
+            }
 
         pair_total = sum(int(v) for v in (pair12_counts or {}).values())
 
@@ -3634,11 +3708,16 @@ with tabs[2]:
             else:
                 h = 0
                 r = None
-            bet_rows.append({
+
+            pair_key = f"{min(axis, t)}-{max(axis, t)}"
+            adj = _pair_roi_amount_adjust(pair_key)
+            row = {
                 "買い目": pk,
                 "的中H": h,
                 "的中率%": r,
-            })
+            }
+            row.update(adj)
+            bet_rows.append(row)
 
         return {
             "型": f"{axis}→" + "".join(str(t) for t in targets),
@@ -3677,6 +3756,74 @@ with tabs[2]:
 
         if not targets:
             return None
+
+        pair_row_map = {}
+        if df_pairs is not None and not df_pairs.empty and "ペアキー" in df_pairs.columns:
+            try:
+                for _, _pr in df_pairs.iterrows():
+                    _pk = str(_pr.get("ペアキー", "")).strip()
+                    if _pk:
+                        pair_row_map[_pk] = _pr
+            except Exception:
+                pair_row_map = {}
+
+        def _pair_metric(pair_key: str, col: str, default=None):
+            row = pair_row_map.get(str(pair_key))
+            if row is None:
+                return default
+            try:
+                v = row.get(col, default)
+                if pd.isna(v):
+                    return default
+                return v
+            except Exception:
+                return default
+
+        def _pair_roi_amount_adjust(pair_key: str):
+            """対応2車複の回収率で、2車単の各オッズ帯の推奨金額を補正する。"""
+            roi = _safe_float_trio_zone(_pair_metric(pair_key, "回収率%", None), None)
+            pay_pos = str(_pair_metric(pair_key, "配当位置", "") or "")
+            reason = str(_pair_metric(pair_key, "総合候補理由", "") or "")
+            pay_coef = _safe_float_trio_zone(_pair_metric(pair_key, "配当係数", None), None)
+
+            if roi is None:
+                cls = "データ不足"
+                amt_300, amt_200, amt_100 = "200円まで", "100円まで", "原則切り"
+                note = "対応2車複の回収率不足。厚張りは避ける"
+            elif roi >= 100.0:
+                cls = "歪み強"
+                amt_300, amt_200, amt_100 = "300円", "200円", "100円候補"
+                note = "対応2車複の回収率が100%以上。金額維持可"
+            elif roi >= 85.0:
+                cls = "維持"
+                amt_300, amt_200, amt_100 = "300円", "200円", "100円候補"
+                note = "対応2車複の回収率が許容域。基本金額を維持"
+            elif roi >= 70.0:
+                cls = "減額"
+                amt_300, amt_200, amt_100 = "200円", "100円", "切り"
+                note = "対応2車複の回収率が弱い。1段階減額"
+            else:
+                cls = "強減額"
+                amt_300, amt_200, amt_100 = "切り", "100円", "切り"
+                note = "対応2車複の回収率が70%未満。安め厚張り禁止"
+
+            # 配当上振れ・後追い警戒があるペアは100円ゾーンをさらに慎重にする。
+            if ("上振れ" in pay_pos) or ("過熱" in reason) or ("後追い" in reason):
+                if amt_100 != "切り":
+                    amt_100 = "原則切り"
+                note += "／配当・回収の後追い警戒"
+
+            return {
+                "対応2車複": pair_key,
+                "2車複回収率%": round(roi, 1) if roi is not None else None,
+                "2車複配当係数": round(float(pay_coef), 2) if pay_coef is not None else None,
+                "2車複配当位置": pay_pos,
+                "補正判定": cls,
+                "300円ゾーン時": amt_300,
+                "200円ゾーン時": amt_200,
+                "100円ゾーン時": amt_100,
+                "補正メモ": note,
+            }
 
         pair_total = sum(int(v) for v in (pair12_counts or {}).values())
         if pair_total <= 0:
@@ -3744,7 +3891,7 @@ with tabs[2]:
             # 先に3券種の候補を作る。
             # 表示順は、2車単 → 三連複 → 2車複参考。
             nf = _build_nishafuku_from_trio_third(tc, pair12_total)
-            nt = _build_nishatan_from_trio_third(tc, pair12_total)
+            nt = _build_nishatan_from_trio_third(tc, pair12_total, df_pairs)
 
             # -----------------------------------------
             # 2車単オッズ帯
@@ -3779,6 +3926,32 @@ with tabs[2]:
                     '</div>'
                 )
                 st.markdown(nt_html, unsafe_allow_html=True)
+
+                nt_amount_rows = pd.DataFrame(nt.get("買い目別", []))
+                if not nt_amount_rows.empty:
+                    show_cols = [
+                        "買い目",
+                        "的中H",
+                        "的中率%",
+                        "対応2車複",
+                        "2車複回収率%",
+                        "2車複配当係数",
+                        "2車複配当位置",
+                        "補正判定",
+                        "300円ゾーン時",
+                        "200円ゾーン時",
+                        "100円ゾーン時",
+                        "補正メモ",
+                    ]
+                    nt_amount_rows = nt_amount_rows[[c for c in show_cols if c in nt_amount_rows.columns]]
+                    st.markdown("##### 2車単｜対応2車複回収率による金額補正")
+                    st.caption("オッズ帯で基本金額を決めたあと、対応2車複の回収率で減額・維持を判定します。2車複を買うためではなく、2車単の金額補正に使います。")
+                    st.dataframe(
+                        nt_amount_rows,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=table_auto_height(nt_amount_rows),
+                    )
 
             # -----------------------------------------
             # 三連複オッズ帯
