@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8p｜役割フォメ・3連単参考｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8q｜役割フォメ・3連単オッズゾーン｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -1913,7 +1913,7 @@ def build_axis1_stability_hybrid_formation_summary(
       4 = 安定差2位
       5 = 1・2・3・4を除いた次の評価上位
     - 三連複は 12-123-12345（重複除外で7点）。
-    - 3連単参考は 12→123→12345（重複除外で12点）。
+    - 3連単オッズゾーンは 12→123→12345（重複除外で12点）。
     - 2車単は 12→123（重複除外で4点）。
     - 安定差は abs(想定差) + abs(回収差)。
     - ここでは回収差プラス除外は使わない。
@@ -3645,6 +3645,49 @@ with tabs[2]:
         )
 
 
+    def _build_sanrentan_odds_zone_html(need_pay):
+        """3連単12点ブロック用のオッズ帯。買い目羅列ではなく、必要オッズゾーン確認用。"""
+        need_pay = _safe_float_trio_zone(need_pay, None)
+
+        if need_pay is None or need_pay <= 0:
+            return (
+                '<div style="margin-top:10px;padding:10px 12px;'
+                'background:#f4efff;border-radius:8px;'
+                'border:1px solid rgba(75,42,134,0.18);">'
+                '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">3連単オッズ帯</div>'
+                '<div style="font-size:14px;line-height:1.8;font-weight:700;">算出不可</div>'
+                '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
+                '3連単の想定的中率が不足しているため、100%必要平均払戻を算出できません。'
+                '</div>'
+                '</div>'
+            )
+
+        low_cut = need_pay / 300.0
+        zone_300_hi = need_pay / 200.0
+        zone_200_hi = need_pay / 100.0
+        high_cut = zone_200_hi * 3.0
+
+        return (
+            '<div style="margin-top:10px;padding:10px 12px;'
+            'background:#f4efff;'
+            'border-radius:8px;border:1px solid rgba(75,42,134,0.18);">'
+            '<div style="font-size:14px;font-weight:900;margin-bottom:6px;">'
+            '3連単オッズ帯'
+            '</div>'
+            '<div style="font-size:14px;line-height:1.9;font-weight:800;">'
+            f'低すぎ　　：{low_cut:.1f}倍未満　→　ケン<br>'
+            f'厚め　　　：{low_cut:.1f}〜{zone_300_hi:.1f}倍　→　300円（安め注意）<br>'
+            f'標準厚め　：{zone_300_hi:.1f}〜{zone_200_hi:.1f}倍　→　200円（主戦場）<br>'
+            f'通常　　　：{zone_200_hi:.1f}〜{high_cut:.1f}倍　→　100円（上振れ・最大1点）<br>'
+            f'高すぎ　　：{high_cut:.1f}倍超　→　注意'
+            '</div>'
+            '<div style="font-size:12px;line-height:1.65;font-weight:700;opacity:0.82;margin-top:6px;">'
+            f'基準：3連単12点ブロックの100%必要平均払戻 {need_pay:.1f}円'
+            '</div>'
+            '</div>'
+        )
+
+
     def _build_nishatan_from_trio_third(tc, pair12_counts):
         """
         2車単は、累積1→2着評価分布を主根拠にする。
@@ -3893,7 +3936,7 @@ with tabs[2]:
 
 
     def _build_sanrentan_from_trio_roles(tc, pair12_counts, rank_total_map):
-        """3連単参考：12→123→12345。配当入力なしのため想定的中率と必要平均払戻だけを出す。"""
+        """3連単オッズゾーン：12→123→12345。配当入力なしのため想定的中率と必要平均払戻だけを出す。"""
         if not tc:
             return None
 
@@ -3975,7 +4018,7 @@ with tabs[2]:
         }
 
     with purchase_candidate_slot.container():
-        st.markdown("### ＜購入候補｜役割フォメ（2車単・三連複・3連単参考）＞")
+        st.markdown("### ＜購入候補｜役割フォメ（2車単・三連複・3連単オッズゾーン）＞")
 
         if axis1_stability_hybrid_summary:
             tc = axis1_stability_hybrid_summary
@@ -4066,21 +4109,21 @@ with tabs[2]:
             st.markdown(tc_html, unsafe_allow_html=True)
 
             # -----------------------------------------
-            # 3連単参考
-            # 配当入力なしのため、想定的中率・必要平均払戻だけを表示する。
+            # 3連単オッズゾーン
+            # 買い目羅列は出さず、12点ブロックの必要オッズ帯だけを見る。
             # -----------------------------------------
             if sr:
-                sr_buy_list = " / ".join(sr.get("買い目", []))
-                sr_line = f"3連単参考：{sr.get('型', '—')}"
+                sr_line = f"3連単オッズゾーン：{sr.get('型', '—')}"
                 sr_sub = (
                     f"点数：{sr.get('点数', '—')}点／"
-                    f"買い目：{sr_buy_list}"
+                    "買い目羅列なし・オッズ帯確認用"
                 )
                 sr_stats = (
                     f"累積対象N：{_fmt_tc_value(sr.get('累積対象N'))}／"
                     f"累積3連単想定的中率：{_fmt_tc_value(sr.get('累積3連単想定的中率%'), '%')}／"
                     f"100%必要平均払戻：{_fmt_tc_value(sr.get('100%必要平均払戻'), '円')}"
                 )
+                sr_zone_html = _build_sanrentan_odds_zone_html(sr.get("100%必要平均払戻"))
                 sr_html = (
                     '<div style="background:#f4efff;color:#4b2a86;border-radius:8px;'
                     'padding:14px 16px;border:1px solid rgba(75,42,134,0.18);'
@@ -4088,8 +4131,9 @@ with tabs[2]:
                     f'<div>{_escape_html(sr_line)}</div>'
                     f'<div style="font-size:14px;font-weight:600;opacity:0.90;">{_escape_html(sr_sub)}</div>'
                     f'<div style="font-size:13px;font-weight:600;opacity:0.82;">{_escape_html(sr_stats)}</div>'
+                    f'{sr_zone_html}'
                     '<div style="font-size:12px;line-height:1.65;font-weight:700;opacity:0.82;margin-top:6px;">'
-                    '参考：配当入力なし。1→2着評価分布＋評価別3着内率からの推定です。'
+                    '注：配当入力なし。現段階では想定的中率から必要オッズ帯だけを表示します。'
                     '</div>'
                     '</div>'
                 )
@@ -4134,7 +4178,7 @@ with tabs[2]:
             with st.expander("根拠数値を確認", expanded=False):
                 st.caption(
                     "役割番号：1=軸、2=安定差1位、3=1・2を除いた評価上位、4=安定差2位、5=次の評価上位。"
-                    "2車単は12→123、三連複は12-123-12345、3連単参考は12→123→12345です。"
+                    "2車単は12→123、三連複は12-123-12345、3連単は12→123→12345のオッズゾーンです。"
                     "三連複フォメの想定的中率・必要平均払戻は、小倉基準や本日だけの実績ではなく、累積評価ベースから算出します。"
                 )
                 st.write(
@@ -4160,7 +4204,7 @@ with tabs[2]:
                         "選択理由": tc.get("選択理由"),
                         "2車複フォメ": nf if 'nf' in locals() else None,
                         "2車単フォメ": nt if 'nt' in locals() else None,
-                        "3連単参考": sr if 'sr' in locals() else None,
+                        "3連単オッズゾーン": sr if 'sr' in locals() else None,
                     }
                 )
 
