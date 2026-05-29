@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8k｜2車単ブロック・三連複防御・2車複参考｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8l｜2車単の意図明確化・三連複防御・2車複参考｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -3568,20 +3568,21 @@ with tabs[2]:
         return (
             '<div style="margin-top:10px;padding:10px 12px;'
             'background:#eef6ff;'
-            'border-radius:8px;border:1px solid rgba(32,92,145,0.20);">'
-            '<div style="font-size:14px;font-weight:800;margin-bottom:6px;">'
-            '2車単ブロック判定'
+            'border-radius:8px;border:1px solid rgba(32,92,145,0.20);'>
+            '<div style="font-size:14px;font-weight:900;margin-bottom:6px;">'
+            '2車単で見たいこと'
             '</div>'
-            '<div style="font-size:14px;line-height:1.85;font-weight:700;">'
-            '基本　　　：1→234 を各100円、3点300円のワンブロック<br>'
-            f'採用目安　：当たり時の平均払戻 {need_pay:.1f}円以上（平均オッズ {need_odds:.1f}倍以上）<br>'
-            f'薄い　　　：平均オッズ {weak_odds:.1f}〜{need_odds:.1f}倍　→　軸A以上なら検討<br>'
-            f'ケン寄り　：平均オッズ {weak_odds:.1f}倍未満　→　安すぎ注意<br>'
-            '拡張　　　：1→2345 は的中スパン短縮用。常用ではなく例外枠'
+            '<div style="font-size:14px;line-height:1.9;font-weight:800;">'
+            '目的　　　：評価1が頭で来た時の2着候補を、234までで受ける<br>'
+            '基本買い　：1→2 / 1→3 / 1→4 を各100円、合計300円<br>'
+            f'判定基準　：3点セットの当たり時平均払戻が {need_pay:.1f}円以上なら成立<br>'
+            f'不足目安　：平均払戻 {need_pay:.1f}円未満なら、2車単ではなくケンまたは三連複側へ<br>'
+            '拡張　　　：1→5は的中スパン短縮用の例外。常用では足さない'
             '</div>'
-            '<div style="font-size:12px;line-height:1.6;font-weight:600;opacity:0.78;margin-top:6px;">'
-            f'基準：2車単1→234ブロックの100%必要平均払戻 {need_pay:.1f}円。'
-            '個別買い目ごとの300/200/100円振り分けは行わず、3点セット全体で判断します。'
+            '<div style="font-size:12px;line-height:1.65;font-weight:700;opacity:0.82;margin-top:6px;">'
+            '言いたいこと：2車単は個別オッズで100/200/300円に振り分ける欄ではなく、'
+            '「1→234を3点100円で買う価値があるか」を確認する欄です。'
+            f'100%必要平均払戻は {need_pay:.1f}円。'
             '</div>'
             '</div>'
         )
@@ -3842,7 +3843,7 @@ with tabs[2]:
             # -----------------------------------------
             if nt:
                 nt_buy_list = " / ".join(nt.get("買い目", []))
-                nt_line = f"2車単フォメ：{nt.get('型', '—')}"
+                nt_line = f"2車単｜1→234ブロック：{nt.get('型', '—')}"
                 nt_sub = (
                     f"軸：{nt.get('軸', '—')}／"
                     f"相手：{nt.get('相手', '—')}／"
@@ -3873,7 +3874,7 @@ with tabs[2]:
                 nt_compare_rows = pd.DataFrame(nt.get("比較", []))
                 if not nt_compare_rows.empty:
                     st.markdown("##### 2車単｜ブロック比較")
-                    st.caption("2車単は個別の300/200/100円振り分けではなく、1→234を3点100円のワンブロックで見ます。1→2345は的中スパン短縮用の例外枠です。")
+                    st.caption("2車単は、評価1頭の2着分布を使い、1→234を3点100円の標準ブロックとして見る欄です。個別オッズで厚く張る欄ではありません。")
                     st.dataframe(
                         nt_compare_rows,
                         use_container_width=True,
@@ -3882,7 +3883,7 @@ with tabs[2]:
                     )
                     add_need = nt.get("拡張増分必要平均払戻")
                     if add_need is not None:
-                        st.caption(f"1→2345へ拡張した追加1点は、増分だけで見ると必要平均払戻 {add_need:.1f}円。常用ではなく、現レースで5が明確に上がる時の例外枠です。")
+                        st.caption(f"1→2345へ拡張した追加1点は、増分だけで見ると必要平均払戻 {add_need:.1f}円。これは的中スパン短縮用の保険料で、常用ではなく例外枠です。")
 
             # -----------------------------------------
             # 三連複オッズ帯
