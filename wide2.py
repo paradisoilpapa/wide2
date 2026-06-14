@@ -797,6 +797,121 @@ def nishafuku_3412_bets_from_order(vorder: List[str]) -> List[str]:
     return bets
 
 
+# 123-123-4 三連複3点の推定集計。
+# 実三連複配当は入力していないため、N/H/必要平均配当だけを出す。
+# 1→2着評価分布と評価別3着回数から、3着を条件付き按分して推定する。
+TRIO_1231234_LABEL = "123-123-4 三連複3点"
+TRIO_1231234_KEYS = ["1-2-4", "1-3-4", "2-3-4"]
+TRIO_1231234_TOP_SET = {1, 2, 3}
+TRIO_1231234_TARGET = 4
+
+
+def _trio_1231234_is_hit_ranks(ranks) -> bool:
+    """評価順位3つが 1-2-4 / 1-3-4 / 2-3-4 のどれかなら的中。"""
+    try:
+        s = {int(x) for x in ranks}
+    except Exception:
+        return False
+    return TRIO_1231234_TARGET in s and len(s & TRIO_1231234_TOP_SET) >= 2
+
+
+def hit_trio_1231234(vorder: List[str], finish: List[str], field_n: int) -> bool:
+    """日次入力から、123-123-4三連複3点の実的中だけ判定する。"""
+    try:
+        field_n = int(field_n)
+    except Exception:
+        return False
+    if field_n < 4 or not vorder or len(finish) < 3:
+        return False
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+    finish_ranks = [car_to_rank.get(car) for car in finish[:3]]
+    if any(x is None for x in finish_ranks):
+        return False
+    return _trio_1231234_is_hit_ranks(finish_ranks)
+
+
+def estimate_trio_1231234_from_pair12_and_rank(pair12_counts: Dict[PairKey, int], rank_counts: Dict[int, Dict[str, int]]) -> Dict:
+    """
+    123-123-4三連複3点を、既存の2車複ブロックと評価別3着回数から推定する。
+
+    実3連複配当がないため、払戻SUMは出さない。
+    推定方法：
+      1着→2着の各評価ペアごとに、残り評価の3着回数比で3着評価を按分。
+      その3着評価を加えた3つの評価が 1-2-4 / 1-3-4 / 2-3-4 なら推定Hに加算。
+    """
+    total_n = sum(int(v) for v in pair12_counts.values())
+    ksum = int(total_n) * len(TRIO_1231234_KEYS)
+    invest = ksum * 100
+
+    c3_by_rank = {r: int(rank_counts.get(r, {}).get("C3", 0)) for r in range(1, FIELD_SIZE + 1)}
+    est_h = 0.0
+    detail_rows = []
+
+    for (wr, sr), cnt in sorted(pair12_counts.items()):
+        cnt = int(cnt)
+        if cnt <= 0 or wr == sr:
+            continue
+
+        remaining = [r for r in range(1, FIELD_SIZE + 1) if r not in (int(wr), int(sr))]
+        denom = sum(c3_by_rank.get(r, 0) for r in remaining)
+        if denom <= 0:
+            continue
+
+        pair_est_h = 0.0
+        hit_third_parts = []
+        for tr in remaining:
+            if not _trio_1231234_is_hit_ranks([wr, sr, tr]):
+                continue
+            add = cnt * (c3_by_rank.get(tr, 0) / denom)
+            pair_est_h += add
+            hit_third_parts.append(f"{tr}:{add:.1f}")
+
+        if pair_est_h > 0:
+            est_h += pair_est_h
+            detail_rows.append({
+                "1着評価": int(wr),
+                "2着評価": int(sr),
+                "回数": cnt,
+                "推定的中H": round(pair_est_h, 1),
+                "的中3着按分": " / ".join(hit_third_parts),
+            })
+
+    hit_rate = round(100.0 * est_h / total_n, 1) if total_n > 0 else None
+    need_avg_pay = round(invest / est_h, 1) if est_h > 0 else None
+
+    return {
+        "型": TRIO_1231234_LABEL,
+        "対象N": int(total_n),
+        "総点数KSUM": int(ksum),
+        "投資額換算": int(invest),
+        "推定H": round(est_h, 1),
+        "推定的中率%": hit_rate,
+        "100%必要平均配当": need_avg_pay,
+        "構成": " / ".join(TRIO_1231234_KEYS),
+        "detail_rows": detail_rows,
+    }
+
+
+def trio_1231234_daily_row(rec: Dict[str, int]) -> Dict:
+    """日次入力だけは実着順から的中Hを出す。配当入力なしなのでSUM/回収率は出さない。"""
+    N = int(rec.get("N", 0))
+    KSUM = int(rec.get("KSUM", 0))
+    H = int(rec.get("H", 0))
+    invest = KSUM * 100
+    hit_rate = round(100.0 * H / N, 1) if N > 0 else None
+    need_avg_pay = round(invest / H, 1) if H > 0 else None
+    return {
+        "型": "123-123-4｜今日入力・実着順",
+        "対象N": N,
+        "総点数KSUM": KSUM,
+        "投資額換算": invest,
+        "的中H": H,
+        "的中率%": hit_rate,
+        "100%必要平均配当": need_avg_pay,
+        "構成": " / ".join(TRIO_1231234_KEYS),
+    }
+
+
 def ksum_nishafuku_pair(a: int, b: int, field_n: int) -> int:
     """2車複：評価a-b の点数。存在する評価だけ1点として扱う。"""
     if field_n < 2:
@@ -2860,6 +2975,31 @@ for row in byrace_rows:
             rec["SUM"] += pay_2f
 
 
+# --- 123-123-4 三連複3点（日次・配当なし） ---
+payout_trio_1231234_daily: Dict[str, Dict[str, int]] = {
+    TRIO_1231234_LABEL: new_payout_rec(),
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+
+    if not vorder or field_n <= 0 or len(finish) < 3:
+        continue
+
+    if field_n < 4:
+        continue
+
+    rec = payout_trio_1231234_daily[TRIO_1231234_LABEL]
+    rec["N"] += 1
+    rec["KSUM"] += len(TRIO_1231234_KEYS)
+
+    if hit_trio_1231234(vorder, finish, field_n):
+        rec["H"] += 1
+
+
+
 # --- 3連複 1-2-全（日次） ---
 payout_sanrenpuku12_all_daily: Dict[str, Dict[str, int]] = {
     "仮想全体": new_payout_rec(),
@@ -3646,6 +3786,39 @@ with tabs[2]:
     if sample_rows_3412:
         with st.expander("今日入力分の34-12買い目確認", expanded=False):
             render_sortable_table(pd.DataFrame(sample_rows_3412))
+
+    st.divider()
+
+    st.markdown("### 123-123-4 三連複3点｜推定集計ゾーン")
+    st.caption(
+        "実三連複配当は入力しません。既存の1→2着評価分布と評価別3着回数から、"
+        "1-2-4 / 1-3-4 / 2-3-4 の3点的中数を条件付き按分で推定します。"
+        "日次入力分だけは実着順から的中Hを出します。"
+    )
+
+    trio_1231234_est = estimate_trio_1231234_from_pair12_and_rank(pair12_total, rank_total)
+    rec_trio_1231234_daily = payout_trio_1231234_daily.get(TRIO_1231234_LABEL, new_payout_rec())
+    df_trio_1231234 = pd.DataFrame([
+        trio_1231234_daily_row(rec_trio_1231234_daily),
+        {k: v for k, v in trio_1231234_est.items() if k != "detail_rows"},
+    ])
+    cols_trio_1231234 = [
+        "型",
+        "構成",
+        "対象N",
+        "総点数KSUM",
+        "投資額換算",
+        "的中H",
+        "的中率%",
+        "推定H",
+        "推定的中率%",
+        "100%必要平均配当",
+    ]
+    render_sortable_table(df_trio_1231234[[c for c in cols_trio_1231234 if c in df_trio_1231234.columns]])
+
+    if trio_1231234_est.get("detail_rows"):
+        with st.expander("123-123-4 推定内訳（1→2着ペア別）", expanded=False):
+            render_sortable_table(pd.DataFrame(trio_1231234_est["detail_rows"]))
 
     st.divider()
 
