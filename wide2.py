@@ -750,6 +750,14 @@ agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
 #     2車複 7=3 / 7=5 / 1=3 / 1=5
 NISHAFUKU_3412_LABEL = "34-12 2車複フォメ"
 NISHAFUKU_3412_RANK_PAIRS = [(3, 1), (3, 2), (4, 1), (4, 2)]
+# 引継ぎ分は、既存の「個別2車複 引継ぎ入力（累積）」から自動合算する。
+# 34-12 = 推奨流れの3・4番手 × 1・2番手 = 1-3 / 2-3 / 1-4 / 2-4
+NISHAFUKU_3412_SOURCE_LABELS = [
+    nishafuku_label(1, 3),
+    nishafuku_label(2, 3),
+    nishafuku_label(1, 4),
+    nishafuku_label(2, 4),
+]
 
 
 def ksum_nishafuku_3412(field_n: int) -> int:
@@ -2319,6 +2327,7 @@ for a, b in NISHAFUKU_EXTRA_PAIRS:
     agg_payout_nishafuku_manual[nishafuku_label(a, b)] = new_payout_rec()
 
 # 前日まで：34-12 2車複フォメ専用集計
+# ここは手入力しない。個別2車複の累積（1-3/2-3/1-4/2-4）から自動合算する。
 agg_payout_nishafuku_3412_manual: Dict[str, Dict[str, int]] = {
     NISHAFUKU_3412_LABEL: new_payout_rec(),
 }
@@ -2522,22 +2531,10 @@ with tabs[1]:
 
         st.divider()
 
-        st.markdown("## 34-12 2車複フォメ 引継ぎ入力（累積）")
         st.caption(
-            "推奨流れの3・4番手 × 1・2番手だけを集計する専用ゾーンです。"
-            "N・SUM・Hだけ入力。KSUMはN×4点で自動計算します。"
+            "34-12 2車複フォメの前日まで分は、上の『個別2車複 引継ぎ入力（累積）』にある "
+            "1-3 / 2-3 / 1-4 / 2-4 から自動合算します。34-12専用の別入力は不要です。"
         )
-        h_3412 = st.columns([1.35, 0.85, 1.05, 0.75])
-        h_3412[0].markdown("**型**")
-        h_3412[1].markdown("**N**")
-        h_3412[2].markdown("**SUM**")
-        h_3412[3].markdown("**H**")
-        c0, c1, c2, c3 = st.columns([1.35, 0.85, 1.05, 0.75])
-        c0.write("34-12")
-        n3412_prev = c1.number_input("", key="prev_3412_N", min_value=0, value=0, label_visibility="collapsed")
-        sum3412_prev = c2.number_input("", key="prev_3412_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
-        h3412_prev = c3.number_input("", key="prev_3412_H", min_value=0, value=0, label_visibility="collapsed")
-        nishafuku_3412_inputs = [(NISHAFUKU_3412_LABEL, int(n3412_prev), int(sum3412_prev), int(h3412_prev))]
 
         st.divider()
 
@@ -2585,13 +2582,12 @@ with tabs[1]:
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
 
-    for label, N, SUM, H in nishafuku_3412_inputs:
-        if any([N, SUM, H]) and label in agg_payout_nishafuku_3412_manual:
-            rec = agg_payout_nishafuku_3412_manual[label]
-            rec["N"] += int(N)
-            rec["KSUM"] += int(N) * len(NISHAFUKU_3412_RANK_PAIRS)
-            rec["SUM"] += int(SUM)
-            rec["H"] += int(H)
+    # 34-12前日まで分は専用入力を持たせず、既存の個別2車複引継ぎから自動合算する。
+    # Nは4点の最大N、KSUM/SUM/Hは4点合計。
+    agg_payout_nishafuku_3412_manual[NISHAFUKU_3412_LABEL] = rec_for_labels(
+        agg_payout_nishafuku_manual,
+        NISHAFUKU_3412_SOURCE_LABELS,
+    )
 
     for label, N, SUM, H in sanrenpuku12_inputs:
         if any([N, SUM, H]) and label in agg_payout_sanrenpuku12_all_manual:
@@ -3597,6 +3593,7 @@ with tabs[2]:
     st.markdown("### 34-12 2車複フォメ集計ゾーン")
     st.caption(
         "推奨流れ順の3・4番手 × 1・2番手だけを2車複4点で集計します。"
+        "前日まで分は個別2車複の 1-3 / 2-3 / 1-4 / 2-4 から自動合算します。"
         "日次入力のV評価欄には、KOスコア順ではなく、検証したい推奨流れ順を入れてください。"
     )
 
@@ -4469,8 +4466,8 @@ with tabs[2]:
 
     st.divider()
 
-    st.markdown("### 34-12 2車複フォメ 引継ぎ用累積表")
-    st.caption("次回の『34-12 2車複フォメ 引継ぎ入力』へ転記する表です。N・SUM・Hだけ入力すれば、KSUMはN×4点で自動計算します。")
+    st.markdown("### 34-12 2車複フォメ 自動合算確認表")
+    st.caption("個別2車複 引継ぎ入力の 1-3 / 2-3 / 1-4 / 2-4 から自動合算した確認表です。34-12専用の引継ぎ入力は不要です。")
     rec_3412_carry = payout_nishafuku_3412_total.get(NISHAFUKU_3412_LABEL, new_payout_rec())
     row_3412_carry = payout_row(NISHAFUKU_3412_LABEL, rec_3412_carry)
     df_3412_carry = pd.DataFrame([
