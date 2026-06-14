@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="ヴェロビ復習（全体累積）", layout="wide")
-st.title("ヴェロビ 復習（全体累積）｜v11.8q｜役割フォメ・3連単オッズゾーン｜7車固定・欠車対応")
+st.title("ヴェロビ 復習（全体累積）｜v11.8r｜34-12集計ゾーン追加・役割フォメ・3連単オッズゾーン｜7車固定・欠車対応")
 
 # =========================
 # 基本設定（7車ベース）
@@ -743,6 +743,50 @@ NISHAFUKU_SET_DEFS = {
 agg_payout_nishafuku_set_manual: Dict[str, Dict[str, int]] = {
     set_label: new_payout_rec() for set_label in NISHAFUKU_SET_DEFS
 }
+
+# 34-12 2車複フォメ専用集計。
+# 推奨流れ（V評価入力順）の「3番手・4番手」×「1番手・2番手」を2車複4点で買う形。
+# 例：推奨流れ 3→5→7→1→2→4→6
+#     2車複 7=3 / 7=5 / 1=3 / 1=5
+NISHAFUKU_3412_LABEL = "34-12 2車複フォメ"
+NISHAFUKU_3412_RANK_PAIRS = [(3, 1), (3, 2), (4, 1), (4, 2)]
+
+
+def ksum_nishafuku_3412(field_n: int) -> int:
+    """34-12 2車複フォメの点数。推奨流れの1～4番手が存在する時だけ4点。"""
+    try:
+        field_n = int(field_n)
+    except Exception:
+        return 0
+    if field_n < 4:
+        return 0
+    return len(NISHAFUKU_3412_RANK_PAIRS)
+
+
+def hit_nishafuku_3412(win_rank: int, sec_rank: int, field_n: int) -> bool:
+    """34-12 2車複フォメの的中判定。1→2着評価順位が3/4番手×1/2番手なら的中。"""
+    if ksum_nishafuku_3412(field_n) <= 0:
+        return False
+    actual = {int(win_rank), int(sec_rank)}
+    for a, b in NISHAFUKU_3412_RANK_PAIRS:
+        if actual == {a, b}:
+            return True
+    return False
+
+
+def nishafuku_3412_bets_from_order(vorder: List[str]) -> List[str]:
+    """入力された推奨流れ順から、34-12の実車番買い目を表示用に作る。"""
+    if not vorder or len(vorder) < 4:
+        return []
+    rank_to_car = {i + 1: str(car) for i, car in enumerate(vorder)}
+    bets = []
+    for a, b in NISHAFUKU_3412_RANK_PAIRS:
+        ca = rank_to_car.get(a)
+        cb = rank_to_car.get(b)
+        if ca is None or cb is None:
+            continue
+        bets.append(f"{ca}={cb}")
+    return bets
 
 
 def ksum_nishafuku_pair(a: int, b: int, field_n: int) -> int:
@@ -2274,6 +2318,11 @@ agg_payout_nishafuku_manual: Dict[str, Dict[str, int]] = {
 for a, b in NISHAFUKU_EXTRA_PAIRS:
     agg_payout_nishafuku_manual[nishafuku_label(a, b)] = new_payout_rec()
 
+# 前日まで：34-12 2車複フォメ専用集計
+agg_payout_nishafuku_3412_manual: Dict[str, Dict[str, int]] = {
+    NISHAFUKU_3412_LABEL: new_payout_rec(),
+}
+
 # 前日まで：3連複 1-2-全（仮想全体）
 agg_payout_sanrenpuku12_all_manual: Dict[str, Dict[str, int]] = {
     "仮想全体": new_payout_rec(),
@@ -2473,6 +2522,25 @@ with tabs[1]:
 
         st.divider()
 
+        st.markdown("## 34-12 2車複フォメ 引継ぎ入力（累積）")
+        st.caption(
+            "推奨流れの3・4番手 × 1・2番手だけを集計する専用ゾーンです。"
+            "N・SUM・Hだけ入力。KSUMはN×4点で自動計算します。"
+        )
+        h_3412 = st.columns([1.35, 0.85, 1.05, 0.75])
+        h_3412[0].markdown("**型**")
+        h_3412[1].markdown("**N**")
+        h_3412[2].markdown("**SUM**")
+        h_3412[3].markdown("**H**")
+        c0, c1, c2, c3 = st.columns([1.35, 0.85, 1.05, 0.75])
+        c0.write("34-12")
+        n3412_prev = c1.number_input("", key="prev_3412_N", min_value=0, value=0, label_visibility="collapsed")
+        sum3412_prev = c2.number_input("", key="prev_3412_SUM", min_value=0, value=0, step=10, label_visibility="collapsed")
+        h3412_prev = c3.number_input("", key="prev_3412_H", min_value=0, value=0, label_visibility="collapsed")
+        nishafuku_3412_inputs = [(NISHAFUKU_3412_LABEL, int(n3412_prev), int(sum3412_prev), int(h3412_prev))]
+
+        st.divider()
+
         st.markdown("## 個別3連複 引継ぎ入力（累積）")
         st.info(
             "個別3連複の配当入力は廃止しました。"
@@ -2514,6 +2582,14 @@ with tabs[1]:
             rec = agg_payout_nishafuku_manual[label]
             rec["N"] += int(N)
             rec["KSUM"] += int(N)
+            rec["SUM"] += int(SUM)
+            rec["H"] += int(H)
+
+    for label, N, SUM, H in nishafuku_3412_inputs:
+        if any([N, SUM, H]) and label in agg_payout_nishafuku_3412_manual:
+            rec = agg_payout_nishafuku_3412_manual[label]
+            rec["N"] += int(N)
+            rec["KSUM"] += int(N) * len(NISHAFUKU_3412_RANK_PAIRS)
             rec["SUM"] += int(SUM)
             rec["H"] += int(H)
 
@@ -2753,6 +2829,40 @@ for row in byrace_rows:
 
 
 
+# --- 34-12 2車複フォメ（日次） ---
+payout_nishafuku_3412_daily: Dict[str, Dict[str, int]] = {
+    NISHAFUKU_3412_LABEL: new_payout_rec(),
+}
+
+for row in byrace_rows:
+    vorder = row.get("vorder", [])
+    finish = row.get("finish", [])
+    field_n = int(row.get("field_n", len(vorder) or 0))
+
+    if not vorder or field_n <= 0 or len(finish) < 2:
+        continue
+
+    car_to_rank = {car: i + 1 for i, car in enumerate(vorder)}
+    win_rank = car_to_rank.get(finish[0])
+    sec_rank = car_to_rank.get(finish[1])
+
+    if win_rank is None or sec_rank is None:
+        continue
+
+    ksum = ksum_nishafuku_3412(field_n)
+    if ksum <= 0:
+        continue
+
+    rec = payout_nishafuku_3412_daily[NISHAFUKU_3412_LABEL]
+    rec["N"] += 1
+    rec["KSUM"] += ksum
+
+    if hit_nishafuku_3412(int(win_rank), int(sec_rank), field_n):
+        pay_2f = int(row.get("pay_2f", 0))
+        if pay_2f > 0:
+            rec["H"] += 1
+            rec["SUM"] += pay_2f
+
 
 # --- 3連複 1-2-全（日次） ---
 payout_sanrenpuku12_all_daily: Dict[str, Dict[str, int]] = {
@@ -2824,6 +2934,14 @@ for a, b in NISHAFUKU_EXTRA_PAIRS:
 for label in payout_nishafuku_total.keys():
     add_rec(payout_nishafuku_total[label], payout_nishafuku_daily[label])
     add_rec(payout_nishafuku_total[label], agg_payout_nishafuku_manual[label])
+
+
+payout_nishafuku_3412_total: Dict[str, Dict[str, int]] = {
+    NISHAFUKU_3412_LABEL: new_payout_rec(),
+}
+for label in payout_nishafuku_3412_total.keys():
+    add_rec(payout_nishafuku_3412_total[label], payout_nishafuku_3412_daily[label])
+    add_rec(payout_nishafuku_3412_total[label], agg_payout_nishafuku_3412_manual[label])
 
 
 payout_sanrenpuku12_all_total: Dict[str, Dict[str, int]] = {
@@ -3473,6 +3591,66 @@ with tabs[2]:
             st.caption(f"1-2基礎：全体{n_all}R中、2車複1-2は{h_2f}Rです。")
     except Exception:
         pass
+
+    st.divider()
+
+    st.markdown("### 34-12 2車複フォメ集計ゾーン")
+    st.caption(
+        "推奨流れ順の3・4番手 × 1・2番手だけを2車複4点で集計します。"
+        "日次入力のV評価欄には、KOスコア順ではなく、検証したい推奨流れ順を入れてください。"
+    )
+
+    rec_3412_daily = payout_nishafuku_3412_daily.get(NISHAFUKU_3412_LABEL, new_payout_rec())
+    rec_3412_prev = agg_payout_nishafuku_3412_manual.get(NISHAFUKU_3412_LABEL, new_payout_rec())
+    rec_3412_total = payout_nishafuku_3412_total.get(NISHAFUKU_3412_LABEL, new_payout_rec())
+
+    df_3412 = pd.DataFrame(
+        [
+            payout_row("34-12｜今日入力", rec_3412_daily),
+            payout_row("34-12｜前日まで", rec_3412_prev),
+            payout_row("34-12｜累積", rec_3412_total),
+        ]
+    )
+    if not df_3412.empty:
+        df_3412["差引"] = df_3412["払戻合計SUM"].fillna(0).astype(int) - df_3412["投資額換算"].fillna(0).astype(int)
+        df_3412["状態"] = df_3412["回収率%"].apply(
+            lambda x: "プラス" if pd.notna(x) and float(x) >= 100.0 else ("マイナス" if pd.notna(x) else "")
+        )
+        cols_3412 = [
+            "型",
+            "対象N",
+            "総点数KSUM",
+            "投資額換算",
+            "払戻合計SUM",
+            "差引",
+            "的中H",
+            "的中率%",
+            "平均配当",
+            "回収率%",
+            "状態",
+        ]
+        render_sortable_table(df_3412[[c for c in cols_3412 if c in df_3412.columns]])
+
+    sample_rows_3412 = []
+    for row in byrace_rows:
+        vorder = row.get("vorder", [])
+        if not vorder:
+            continue
+        bets = nishafuku_3412_bets_from_order(vorder)
+        if not bets:
+            continue
+        sample_rows_3412.append(
+            {
+                "R": row.get("race", ""),
+                "推奨流れ順": "→".join(vorder),
+                "34-12買い目": " / ".join(bets),
+            }
+        )
+    if sample_rows_3412:
+        with st.expander("今日入力分の34-12買い目確認", expanded=False):
+            render_sortable_table(pd.DataFrame(sample_rows_3412))
+
+    st.divider()
 
     # 3連複検証・推奨表示は、この画面では「三連複フォメ」に一本化する。
     # 評価別テーブル直下に、最終的な三連複フォメ候補を表示する。
@@ -4287,6 +4465,33 @@ with tabs[2]:
         use_container_width=True,
         hide_index=True,
         height=max(120, 38 * (len(df_carry) + 1)),
+    )
+
+    st.divider()
+
+    st.markdown("### 34-12 2車複フォメ 引継ぎ用累積表")
+    st.caption("次回の『34-12 2車複フォメ 引継ぎ入力』へ転記する表です。N・SUM・Hだけ入力すれば、KSUMはN×4点で自動計算します。")
+    rec_3412_carry = payout_nishafuku_3412_total.get(NISHAFUKU_3412_LABEL, new_payout_rec())
+    row_3412_carry = payout_row(NISHAFUKU_3412_LABEL, rec_3412_carry)
+    df_3412_carry = pd.DataFrame([
+        {
+            "型": NISHAFUKU_3412_LABEL,
+            "対象N": row_3412_carry.get("対象N"),
+            "払戻合計SUM": row_3412_carry.get("払戻合計SUM"),
+            "的中H": row_3412_carry.get("的中H"),
+            "総点数KSUM": row_3412_carry.get("総点数KSUM"),
+            "投資額換算": row_3412_carry.get("投資額換算"),
+            "差引": int(row_3412_carry.get("払戻合計SUM") or 0) - int(row_3412_carry.get("投資額換算") or 0),
+            "的中率%": row_3412_carry.get("的中率%"),
+            "平均配当": row_3412_carry.get("平均配当"),
+            "回収率%": row_3412_carry.get("回収率%"),
+        }
+    ])
+    st.dataframe(
+        df_3412_carry,
+        use_container_width=True,
+        hide_index=True,
+        height=max(120, 38 * (len(df_3412_carry) + 1)),
     )
 
     st.divider()
